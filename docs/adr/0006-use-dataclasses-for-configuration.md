@@ -1,8 +1,9 @@
 # Represent configuration structures with dataclasses
 
 ## Status
+
 | date       | state    |
-|------------|----------|
+| ---------- | -------- |
 | 2026-11-05 | accepted |
 
 ## Context
@@ -16,7 +17,7 @@ code that consumes it.
 ## Decision
 
 Each configuration structure is represented by exactly one `dataclass`. Parsed TOML is
-deserialized into instances of these dataclasses, and the dataclass definitions *are* the
+deserialized into instances of these dataclasses, and the dataclass definitions _are_ the
 validation layer (required fields, field types, nested structures) — there is no separate
 schema (e.g. JSON Schema) kept in sync by hand.
 

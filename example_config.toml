@@ -6,6 +6,12 @@ shell = "zsh"
 # name = "raniz"
 # uid = 1000
 
+# Except groups, which defaults to just a group with the same name as the user
+# extra_groups = []
+# [user.group]
+# name = "raniz"
+# gid = 1000
+
 [layers.base]
 packages.arch = [
   "zsh",
@@ -28,13 +34,13 @@ packages.common = [
   "uv",
 ]
 packages.arch = [
-  "ipython"
+  "ipython",
 ]
 packages.debian = [
-  "ipython3"
+  "ipython3",
 ]
 ide = "jetbrains-idea"
 
 bind_mounts = [
-  "~/.cache/uv"
+  "~/.cache/uv",
 ]

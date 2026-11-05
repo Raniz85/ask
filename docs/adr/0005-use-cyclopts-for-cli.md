@@ -1,8 +1,9 @@
 # Build the CLI command structure with cyclopts
 
 ## Status
+
 | date       | state    |
-|------------|----------|
+| ---------- | -------- |
 | 2026-11-05 | accepted |
 
 ## Context

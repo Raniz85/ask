@@ -17,7 +17,9 @@ def load(path: Path) -> Manifest:
         data = tomllib.load(f)
     bind_mounts = [Path(p).expanduser() for p in data.get("bind_mounts", [])]
     layers = list(data.get("layers", []))
-    return Manifest(distribution=data["distribution"], bind_mounts=bind_mounts, layers=layers)
+    return Manifest(
+        distribution=data["distribution"], bind_mounts=bind_mounts, layers=layers
+    )
 
 
 def resolve_bind_mounts(manifest: Manifest, config: Config) -> list[Path]:

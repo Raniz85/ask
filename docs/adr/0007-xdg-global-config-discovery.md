@@ -1,8 +1,9 @@
 # Discover the global config file via XDG_CONFIG_PATH, defaulting to no layers if absent
 
 ## Status
+
 | date       | state    |
-|------------|----------|
+| ---------- | -------- |
 | 2026-11-05 | accepted |
 
 ## Context

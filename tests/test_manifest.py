@@ -42,11 +42,15 @@ def test_load_defaults_bind_mounts_to_empty_list(tmp_path: Path) -> None:
     assert manifest.bind_mounts == []
 
 
-def test_load_reads_bind_mounts_from_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_reads_bind_mounts_from_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # given a manifest file declaring bind_mounts, one using a home-relative path
     monkeypatch.setenv("HOME", str(tmp_path))
     manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('distribution = "arch"\nbind_mounts = ["~/foo", "/abs/path"]\n')
+    manifest_path.write_text(
+        'distribution = "arch"\nbind_mounts = ["~/foo", "/abs/path"]\n'
+    )
 
     # when loading the manifest
     manifest = load(manifest_path)
@@ -82,7 +86,9 @@ def test_load_reads_layers_from_toml(tmp_path: Path) -> None:
 def test_resolve_bind_mounts_combines_project_and_layer_mounts() -> None:
     # given a manifest with its own bind mount and one declared layer, and a config
     # defining that layer's bind mount
-    manifest = Manifest(distribution="arch", bind_mounts=[Path("/project/mount")], layers=["python"])
+    manifest = Manifest(
+        distribution="arch", bind_mounts=[Path("/project/mount")], layers=["python"]
+    )
     config = Config(layers={"python": Layer(bind_mounts=[Path("/layer/mount")])})
 
     # when resolving the full set of bind mounts

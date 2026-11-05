@@ -16,7 +16,9 @@ def image_for(distribution: str) -> str:
     try:
         return _IMAGE_ALIASES[distribution]
     except KeyError:
-        raise ValueError(f"no known Incus image for distribution {distribution!r}") from None
+        raise ValueError(
+            f"no known Incus image for distribution {distribution!r}"
+        ) from None
 
 
 def create_container(name: str, distribution: str) -> None:
@@ -33,7 +35,10 @@ def device_name_for(path: Path) -> str:
 
 def _bind_devices(name: str) -> set[str]:
     result = subprocess.run(
-        ["incus", "config", "device", "list", name], check=True, capture_output=True, text=True
+        ["incus", "config", "device", "list", name],
+        check=True,
+        capture_output=True,
+        text=True,
     )
     return {d for d in result.stdout.splitlines() if d.startswith("bind-")}
 
@@ -43,7 +48,9 @@ def converge(name: str, bind_mounts: list[Path]) -> None:
     existing = _bind_devices(name)
 
     for device_name in existing - desired.keys():
-        subprocess.run(["incus", "config", "device", "remove", name, device_name], check=True)
+        subprocess.run(
+            ["incus", "config", "device", "remove", name, device_name], check=True
+        )
 
     for device_name, path in desired.items():
         if device_name not in existing:

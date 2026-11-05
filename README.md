@@ -1,11 +1,9 @@
 # Ask
 
-> *ask* \[as:k\] liten låda
--- [SAOL](https://lexin.nada.kth.se/lexin/#searchinfo=both,swe_swe,ask;)
+> _ask_ \[as:k\] liten låda -- [SAOL](https://lexin.nada.kth.se/lexin/#searchinfo=both,swe_swe,ask;)
 
-> *ask* _noun_
-> a case for holding something
--- [Cambridge Swedish/English dictionary](https://dictionary.cambridge.org/dictionary/swedish-english/ask_1)
+> _ask_ _noun_
+> a case for holding something -- [Cambridge Swedish/English dictionary](https://dictionary.cambridge.org/dictionary/swedish-english/ask_1)
 
 _Ask_ is a utility for creating persistent, isolated declarative development environments for your projects.
 It is built on [Incus](https://linuxcontainers.org/incus) for managing persistent containers,

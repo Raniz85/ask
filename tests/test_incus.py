@@ -51,11 +51,15 @@ def test_device_name_for_produces_a_stable_slug_from_the_path() -> None:
     # given a mount path
     # when deriving its device name
     # then the same path always produces the same, filesystem-path-free name
-    assert device_name_for(Path("/home/raniz/.cache/uv")) == "bind--home-raniz--cache-uv"
+    assert (
+        device_name_for(Path("/home/raniz/.cache/uv")) == "bind--home-raniz--cache-uv"
+    )
 
 
 def _list_devices_result(*names: str) -> subprocess.CompletedProcess:
-    return subprocess.CompletedProcess(args=[], returncode=0, stdout="".join(f"{n}\n" for n in names))
+    return subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="".join(f"{n}\n" for n in names)
+    )
 
 
 def test_converge_adds_devices_for_mounts_not_yet_present() -> None:

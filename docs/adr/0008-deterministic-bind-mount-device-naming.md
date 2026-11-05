@@ -1,8 +1,9 @@
 # Name managed bind-mount devices deterministically from their path, and fully reconcile them
 
 ## Status
+
 | date       | state    |
-|------------|----------|
+| ---------- | -------- |
 | 2026-11-05 | accepted |
 
 ## Context

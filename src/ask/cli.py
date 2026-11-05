@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ask import config, incus, manifest
+from ask import config, incus, manifest, provision
 
 
 def create() -> None:
@@ -16,3 +16,4 @@ def converge() -> None:
     cfg = config.load(config.default_path())
     bind_mounts = [project_dir] + manifest.resolve_bind_mounts(m, cfg)
     incus.converge(project_dir.name, bind_mounts)
+    provision.provision_user(project_dir.name, config.resolve_user(cfg))

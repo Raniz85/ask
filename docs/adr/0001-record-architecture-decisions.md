@@ -1,8 +1,9 @@
 # Record architecturally significant decisions as ADRs
 
 ## Status
+
 | date       | state    |
-|------------|----------|
+| ---------- | -------- |
 | 2026-11-05 | accepted |
 
 ## Context
@@ -10,7 +11,7 @@
 As Ask grows, decisions about core architecture, external tool integration, and data formats
 need to be discoverable without digging through chat history or commit messages. We want a
 lightweight, append-only record that future contributors — human or agent — can read to
-understand *why* something is built the way it is, not just *what* it does.
+understand _why_ something is built the way it is, not just _what_ it does.
 
 ## Decision
 
@@ -27,6 +28,6 @@ the template in `docs/adr/0000-template.md`.
 
 - Decisions are easy to find and reference by number (e.g. "see ADR-0002").
 - Adds a small amount of process overhead when making significant design choices.
-- The ADR log only tells the truth about *decisions made*; it can drift from the code if an
+- The ADR log only tells the truth about _decisions made_; it can drift from the code if an
   implementation changes without a corresponding new/superseding ADR, so it's not a substitute
   for reading the code.

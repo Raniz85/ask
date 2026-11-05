@@ -1,8 +1,9 @@
 # Invoke Incus through subprocess calls to the incus CLI
 
 ## Status
+
 | date       | state    |
-|------------|----------|
+| ---------- | -------- |
 | 2026-11-05 | accepted |
 
 ## Context

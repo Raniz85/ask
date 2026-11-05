@@ -1,8 +1,9 @@
 # Use TOML for configuration files
 
 ## Status
+
 | date       | state    |
-|------------|----------|
+| ---------- | -------- |
 | 2026-11-05 | accepted |
 
 ## Context

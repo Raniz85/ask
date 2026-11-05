@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cyclopts>=5.3.3",
+  "cyclopts>=5.3.3",
+  "pyinfra>=3.10.0",
+  "pyinfrincus>=0.8.1",
 ]
 
 [project.scripts]
@@ -17,5 +19,5 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.2.0",
+  "pytest>=9.2.0",
 ]
