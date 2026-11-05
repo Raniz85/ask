@@ -10,9 +10,16 @@ from pyinfra.operations import files, server
 from ask.config import ResolvedUser
 
 
-def provision_user(container_name: str, user: ResolvedUser) -> None:
+def _build_state(container_name: str) -> State:
     inventory = Inventory(([f"@incus/{container_name}"], {}))
     state = State(inventory, PyinfraConfig())
+    state.print_output = True
+    state.print_input = True
+    return state
+
+
+def provision_user(container_name: str, user: ResolvedUser) -> None:
+    state = _build_state(container_name)
     connect_all(state)
 
     add_op(state, server.group, group=user.group_name, gid=user.gid)
@@ -52,8 +59,7 @@ def fix_bind_mount_ownership(
     if not ancestors:
         return
 
-    inventory = Inventory(([f"@incus/{container_name}"], {}))
-    state = State(inventory, PyinfraConfig())
+    state = _build_state(container_name)
     connect_all(state)
 
     for ancestor in sorted(ancestors):

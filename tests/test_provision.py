@@ -60,6 +60,28 @@ def test_provision_user_connects_before_running_operations() -> None:
     run_ops.assert_called_once_with(state_cls.return_value)
 
 
+def test_provision_user_enables_output_printing() -> None:
+    # given a resolved user to provision
+    user = ResolvedUser(
+        name="raniz", uid=1000, shell="zsh", group_name="raniz", gid=1000, extra_groups=[]
+    )
+
+    # when provisioning that user
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+    ):
+        provision_user("my-project", user)
+
+    # then the state is configured to print command output and input as it runs
+    state = state_cls.return_value
+    assert state.print_output is True
+    assert state.print_input is True
+
+
 def test_provision_user_ensures_the_users_group() -> None:
     # given a resolved user with its own group
     user = ResolvedUser(
@@ -195,6 +217,29 @@ def test_fix_bind_mount_ownership_chowns_ancestors_under_home() -> None:
         group="raniz",
     )
     run_ops.assert_called_once_with(state_cls.return_value)
+
+
+def test_fix_bind_mount_ownership_enables_output_printing() -> None:
+    # given a resolved user and a bind mount under their home
+    user = ResolvedUser(
+        name="raniz", uid=1000, shell="zsh", group_name="raniz", gid=1000, extra_groups=[]
+    )
+    bind_mounts = [Path("/home/raniz/src/ask")]
+
+    # when fixing bind mount ownership
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+    ):
+        fix_bind_mount_ownership("my-project", bind_mounts, user)
+
+    # then the state is configured to print command output and input as it runs
+    state = state_cls.return_value
+    assert state.print_output is True
+    assert state.print_input is True
 
 
 def test_fix_bind_mount_ownership_does_nothing_when_no_mounts_under_home() -> None:
