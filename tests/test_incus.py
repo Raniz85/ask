@@ -1,9 +1,10 @@
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from ask.incus import create_container, image_for
+from ask.incus import converge, create_container, device_name_for, image_for
 
 
 def test_image_for_known_distribution_returns_image_alias() -> None:
@@ -24,15 +25,14 @@ def test_image_for_unknown_distribution_raises() -> None:
 
 
 def test_create_container_launches_image_with_given_name() -> None:
-    # given a mocked subprocess.run and a project directory to bind mount
-    project_dir = Path("/home/raniz/src/my-project")
+    # given a mocked subprocess.run
     with patch("ask.incus.subprocess.run") as run:
         # when creating a container for the "arch" distribution named "my-project"
-        create_container("my-project", "arch", project_dir)
+        create_container("my-project", "arch")
 
     # then incus is invoked to launch the matching image under that name, with the
     # common container configuration applied
-    run.assert_any_call(
+    run.assert_called_once_with(
         [
             "incus",
             "launch",
@@ -47,15 +47,26 @@ def test_create_container_launches_image_with_given_name() -> None:
     )
 
 
-def test_create_container_adds_shifted_bind_mount_of_project_dir() -> None:
-    # given a mocked subprocess.run and a project directory to bind mount
-    project_dir = Path("/home/raniz/src/my-project")
+def test_device_name_for_produces_a_stable_slug_from_the_path() -> None:
+    # given a mount path
+    # when deriving its device name
+    # then the same path always produces the same, filesystem-path-free name
+    assert device_name_for(Path("/home/raniz/.cache/uv")) == "bind--home-raniz--cache-uv"
+
+
+def _list_devices_result(*names: str) -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(args=[], returncode=0, stdout="".join(f"{n}\n" for n in names))
+
+
+def test_converge_adds_devices_for_mounts_not_yet_present() -> None:
+    # given a container with no existing bind-mount devices, and two desired mounts
     with patch("ask.incus.subprocess.run") as run:
-        # when creating a container for the "arch" distribution named "my-project"
-        create_container("my-project", "arch", project_dir)
+        run.return_value = _list_devices_result()
 
-    # then a shifted disk device bind-mounting the project directory at the same
-    # path is added to the container
+        # when converging
+        converge("my-project", [Path("/project"), Path("/extra")])
+
+    # then a shifted disk device is added for each desired mount
     run.assert_any_call(
         [
             "incus",
@@ -63,53 +74,67 @@ def test_create_container_adds_shifted_bind_mount_of_project_dir() -> None:
             "device",
             "add",
             "my-project",
-            "project",
+            "bind--project",
             "disk",
-            "source=/home/raniz/src/my-project",
-            "path=/home/raniz/src/my-project",
+            "source=/project",
+            "path=/project",
+            "shift=true",
+        ],
+        check=True,
+    )
+    run.assert_any_call(
+        [
+            "incus",
+            "config",
+            "device",
+            "add",
+            "my-project",
+            "bind--extra",
+            "disk",
+            "source=/extra",
+            "path=/extra",
             "shift=true",
         ],
         check=True,
     )
 
 
-def test_create_container_adds_shifted_bind_mount_for_each_configured_mount() -> None:
-    # given a mocked subprocess.run and two configured bind mounts
-    project_dir = Path("/home/raniz/src/my-project")
-    bind_mounts = [Path("/home/raniz/.config/foo"), Path("/home/raniz/.cache/bar")]
+def test_converge_does_not_re_add_an_already_present_device() -> None:
+    # given a container that already has the device for the desired mount
     with patch("ask.incus.subprocess.run") as run:
-        # when creating a container with those bind mounts configured
-        create_container("my-project", "arch", project_dir, bind_mounts=bind_mounts)
+        run.return_value = _list_devices_result("bind--project")
 
-    # then a shifted disk device is added for each configured mount, at the same
-    # path inside the container
+        # when converging on that same mount
+        converge("my-project", [Path("/project")])
+
+    # then no "config device add" call is made
+    add_calls = [c for c in run.call_args_list if "add" in c.args[0]]
+    assert add_calls == []
+
+
+def test_converge_removes_bind_devices_no_longer_desired() -> None:
+    # given a container with a bind-mount device for a mount that is no longer configured
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result("bind--stale")
+
+        # when converging with no desired mounts
+        converge("my-project", [])
+
+    # then the stale device is removed
     run.assert_any_call(
-        [
-            "incus",
-            "config",
-            "device",
-            "add",
-            "my-project",
-            "bind-0",
-            "disk",
-            "source=/home/raniz/.config/foo",
-            "path=/home/raniz/.config/foo",
-            "shift=true",
-        ],
-        check=True,
+        ["incus", "config", "device", "remove", "my-project", "bind--stale"], check=True
     )
-    run.assert_any_call(
-        [
-            "incus",
-            "config",
-            "device",
-            "add",
-            "my-project",
-            "bind-1",
-            "disk",
-            "source=/home/raniz/.cache/bar",
-            "path=/home/raniz/.cache/bar",
-            "shift=true",
-        ],
-        check=True,
-    )
+
+
+def test_converge_leaves_unrelated_devices_alone() -> None:
+    # given a container with devices unrelated to bind-mount management (e.g. from the
+    # profile, such as "root" or "eth0")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result("root", "eth0")
+
+        # when converging with no desired mounts
+        converge("my-project", [])
+
+    # then no "config device remove" call is made for them
+    remove_calls = [c for c in run.call_args_list if "remove" in c.args[0]]
+    assert remove_calls == []

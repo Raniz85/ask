@@ -2,53 +2,81 @@ from pathlib import Path
 
 import pytest
 
-from ask.config import Config, load
+from ask.config import Config, Layer, default_path, load
 
 
-def test_load_reads_distribution_from_toml(tmp_path: Path) -> None:
-    # given a config file declaring a distribution
-    config_path = tmp_path / "ask.toml"
-    config_path.write_text('distribution = "arch"\n')
+def test_default_path_uses_xdg_config_path_env_var(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given XDG_CONFIG_PATH pointing at a custom location
+    monkeypatch.setenv("XDG_CONFIG_PATH", str(tmp_path))
 
-    # when loading the config
-    config = load(config_path)
+    # when resolving the default global config path
+    path = default_path()
 
-    # then the distribution is available on the result
-    assert config == Config(distribution="arch")
-
-
-def test_load_ignores_unknown_fields(tmp_path: Path) -> None:
-    # given a config file with an unknown field alongside the distribution
-    config_path = tmp_path / "ask.toml"
-    config_path.write_text('distribution = "arch"\nlayers = ["base"]\n')
-
-    # when loading the config
-    config = load(config_path)
-
-    # then the unknown field is ignored and distribution is still read
-    assert config == Config(distribution="arch")
+    # then it is ask/config.toml under that location
+    assert path == tmp_path / "ask" / "config.toml"
 
 
-def test_load_defaults_bind_mounts_to_empty_list(tmp_path: Path) -> None:
-    # given a config file with no bind_mounts declared
-    config_path = tmp_path / "ask.toml"
-    config_path.write_text('distribution = "arch"\n')
-
-    # when loading the config
-    config = load(config_path)
-
-    # then bind_mounts defaults to an empty list
-    assert config.bind_mounts == []
-
-
-def test_load_reads_bind_mounts_from_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # given a config file declaring bind_mounts, one using a home-relative path
+def test_default_path_falls_back_to_dot_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given no XDG_CONFIG_PATH set
+    monkeypatch.delenv("XDG_CONFIG_PATH", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    config_path = tmp_path / "ask.toml"
-    config_path.write_text('distribution = "arch"\nbind_mounts = ["~/foo", "/abs/path"]\n')
+
+    # when resolving the default global config path
+    path = default_path()
+
+    # then it falls back to ~/.config/ask/config.toml
+    assert path == tmp_path / ".config" / "ask" / "config.toml"
+
+
+def test_load_treats_a_missing_file_as_no_layers(tmp_path: Path) -> None:
+    # given a global config path that doesn't exist
+    config_path = tmp_path / "config.toml"
 
     # when loading the config
     config = load(config_path)
 
-    # then each path is read, with "~" expanded against the home directory
-    assert config.bind_mounts == [tmp_path / "foo", Path("/abs/path")]
+    # then there are no layers, rather than an error
+    assert config == Config(layers={})
+
+
+def test_load_defaults_to_no_layers(tmp_path: Path) -> None:
+    # given a global config file with no layers declared
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when loading the config
+    config = load(config_path)
+
+    # then there are no layers
+    assert config == Config(layers={})
+
+
+def test_load_reads_layer_bind_mounts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # given a global config file declaring a layer with a home-relative bind mount
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[layers.python]\nbind_mounts = ["~/.cache/uv"]\n')
+
+    # when loading the config
+    config = load(config_path)
+
+    # then the layer's bind mounts are read, with "~" expanded
+    assert config == Config(
+        layers={"python": Layer(bind_mounts=[tmp_path / ".cache" / "uv"])}
+    )
+
+
+def test_load_ignores_unknown_fields_in_layers(tmp_path: Path) -> None:
+    # given a layer declaring fields other than bind_mounts
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[layers.base]\npackages.arch = ["zsh"]\n')
+
+    # when loading the config
+    config = load(config_path)
+
+    # then the unknown fields are ignored and the layer defaults to no bind mounts
+    assert config == Config(layers={"base": Layer(bind_mounts=[])})
