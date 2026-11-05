@@ -1,0 +1,6 @@
+distribution = "arch"
+
+layers = [
+  "base",
+  "python",
+]

@@ -1,0 +1,35 @@
+#user = "raniz"
+shell = "zsh"
+
+[layers.base]
+packages.arch = [
+  "zsh",
+  "neovim",
+  "starship",
+  "dprint",
+]
+
+[layers.base.agents.claude]
+# Install Claude code into the container
+enabled = true
+
+# Bind mount Cloude state directories needed to share skills, auth and configuration
+# keeps project-local things like sessions inside the container
+shared_state = true
+
+[layers.python]
+packages.common = [
+  "python",
+  "uv",
+]
+packages.arch = [
+  "ipython"
+]
+packages.debian = [
+  "ipython3"
+]
+ide = "jetbrains-idea"
+
+bind_mounts = [
+  "~/.cache/uv"
+]
