@@ -1,5 +1,10 @@
-#user = "raniz"
+# The shell to use, defaults to bash if unset
 shell = "zsh"
+
+# Optional user definition, mirrors the calling user if unset
+# [user]
+# name = "raniz"
+# uid = 1000
 
 [layers.base]
 packages.arch = [
