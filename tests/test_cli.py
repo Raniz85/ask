@@ -17,5 +17,6 @@ def test_create_launches_container_named_after_project_directory(tmp_path: Path)
     ):
         create()
 
-    # then a container named after the project directory is created for that distribution
-    create_container.assert_called_once_with("my-project", "arch")
+    # then a container named after the project directory is created for that distribution,
+    # bind-mounting the project directory itself
+    create_container.assert_called_once_with("my-project", "arch", project_dir)
