@@ -8,6 +8,7 @@ from pathlib import Path
 @dataclass
 class Layer:
     bind_mounts: list[Path] = field(default_factory=list)
+    packages: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -71,7 +72,11 @@ def load(path: Path) -> Config:
         name: Layer(
             bind_mounts=[
                 Path(p).expanduser() for p in layer_data.get("bind_mounts", [])
-            ]
+            ],
+            packages={
+                distro: list(pkgs)
+                for distro, pkgs in layer_data.get("packages", {}).items()
+            },
         )
         for name, layer_data in data.get("layers", {}).items()
     }

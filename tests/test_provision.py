@@ -1,10 +1,16 @@
 from pathlib import Path
 from unittest.mock import ANY, patch
 
-from pyinfra.operations import files, server
+import pytest
+from pyinfra.operations import files, pacman, server
 
 from ask.config import ResolvedUser
-from ask.provision import ancestors_under_home, fix_bind_mount_ownership, provision_user
+from ask.provision import (
+    ancestors_under_home,
+    fix_bind_mount_ownership,
+    provision_packages,
+    provision_user,
+)
 
 
 def test_provision_user_targets_the_container_via_the_incus_connector() -> None:
@@ -63,7 +69,12 @@ def test_provision_user_connects_before_running_operations() -> None:
 def test_provision_user_enables_output_printing() -> None:
     # given a resolved user to provision
     user = ResolvedUser(
-        name="raniz", uid=1000, shell="zsh", group_name="raniz", gid=1000, extra_groups=[]
+        name="raniz",
+        uid=1000,
+        shell="zsh",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
     )
 
     # when provisioning that user
@@ -144,6 +155,71 @@ def test_provision_user_ensures_the_user() -> None:
     )
 
 
+def test_provision_packages_installs_packages_via_the_distribution_operation() -> None:
+    # given a list of packages to install on arch
+    # when provisioning packages into a named container
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provision_packages("my-project", "arch", ["zsh", "python"])
+
+    # then the arch package operation is used to ensure the packages are
+    # present, syncing the package database first
+    add_op.assert_any_call(
+        state_cls.return_value,
+        pacman.packages,
+        packages=["zsh", "python"],
+        update=True,
+    )
+
+
+def test_provision_packages_connects_before_running_operations() -> None:
+    # given a list of packages to install on arch
+    # when provisioning packages
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all") as connect_all,
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops") as run_ops,
+    ):
+        provision_packages("my-project", "arch", ["zsh"])
+
+    # then the state is connected before operations are run
+    connect_all.assert_called_once_with(state_cls.return_value)
+    run_ops.assert_called_once_with(state_cls.return_value)
+
+
+def test_provision_packages_enables_output_printing() -> None:
+    # given a list of packages to install on arch
+    # when provisioning packages
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+    ):
+        provision_packages("my-project", "arch", ["zsh"])
+
+    # then the state is configured to print command output and input as it runs
+    state = state_cls.return_value
+    assert state.print_output is True
+    assert state.print_input is True
+
+
+def test_provision_packages_raises_for_an_unsupported_distribution() -> None:
+    # given a distribution with no known package operation
+    # when provisioning packages
+    # then a clear error is raised
+    with pytest.raises(ValueError, match="debian"):
+        provision_packages("my-project", "debian", ["zsh"])
+
+
 def test_ancestors_under_home_returns_the_immediate_parent() -> None:
     # given a bind-mounted path one level under home
     # when finding its ancestors under home
@@ -186,9 +262,18 @@ def test_ancestors_under_home_returns_none_when_path_is_outside_home() -> None:
 def test_fix_bind_mount_ownership_chowns_ancestors_under_home() -> None:
     # given a resolved user and bind mounts both under and outside their home
     user = ResolvedUser(
-        name="raniz", uid=1000, shell="zsh", group_name="raniz", gid=1000, extra_groups=[]
+        name="raniz",
+        uid=1000,
+        shell="zsh",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
     )
-    bind_mounts = [Path("/home/raniz/src/ask"), Path("/home/raniz/.cache/uv"), Path("/opt/foo")]
+    bind_mounts = [
+        Path("/home/raniz/src/ask"),
+        Path("/home/raniz/.cache/uv"),
+        Path("/opt/foo"),
+    ]
 
     # when fixing bind mount ownership
     with (
@@ -222,7 +307,12 @@ def test_fix_bind_mount_ownership_chowns_ancestors_under_home() -> None:
 def test_fix_bind_mount_ownership_enables_output_printing() -> None:
     # given a resolved user and a bind mount under their home
     user = ResolvedUser(
-        name="raniz", uid=1000, shell="zsh", group_name="raniz", gid=1000, extra_groups=[]
+        name="raniz",
+        uid=1000,
+        shell="zsh",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
     )
     bind_mounts = [Path("/home/raniz/src/ask")]
 
@@ -245,7 +335,12 @@ def test_fix_bind_mount_ownership_enables_output_printing() -> None:
 def test_fix_bind_mount_ownership_does_nothing_when_no_mounts_under_home() -> None:
     # given a resolved user and bind mounts entirely outside their home
     user = ResolvedUser(
-        name="raniz", uid=1000, shell="zsh", group_name="raniz", gid=1000, extra_groups=[]
+        name="raniz",
+        uid=1000,
+        shell="zsh",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
     )
     bind_mounts = [Path("/opt/foo")]
 

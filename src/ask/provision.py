@@ -1,13 +1,28 @@
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from pyinfra.api import Config as PyinfraConfig
 from pyinfra.api import Inventory, State
 from pyinfra.api.connect import connect_all
 from pyinfra.api.operation import add_op
 from pyinfra.api.operations import run_ops
-from pyinfra.operations import files, server
+from pyinfra.operations import files, pacman, server
 
 from ask.config import ResolvedUser
+
+_PACKAGE_OPERATIONS = {
+    "arch": pacman.packages,
+}
+
+
+def _package_operation_for(distribution: str) -> Callable[..., Any]:
+    try:
+        return _PACKAGE_OPERATIONS[distribution]
+    except KeyError:
+        raise ValueError(
+            f"no known package operation for distribution {distribution!r}"
+        ) from None
 
 
 def _build_state(container_name: str) -> State:
@@ -33,6 +48,18 @@ def provision_user(container_name: str, user: ResolvedUser) -> None:
         shell=f"/bin/{user.shell}",
         create_home=True,
     )
+
+    run_ops(state)
+
+
+def provision_packages(
+    container_name: str, distribution: str, packages: list[str]
+) -> None:
+    operation = _package_operation_for(distribution)
+    state = _build_state(container_name)
+    connect_all(state)
+
+    add_op(state, operation, packages=packages, update=True)
 
     run_ops(state)
 
@@ -63,6 +90,12 @@ def fix_bind_mount_ownership(
     connect_all(state)
 
     for ancestor in sorted(ancestors):
-        add_op(state, files.directory, path=str(ancestor), user=user.name, group=user.group_name)
+        add_op(
+            state,
+            files.directory,
+            path=str(ancestor),
+            user=user.name,
+            group=user.group_name,
+        )
 
     run_ops(state)

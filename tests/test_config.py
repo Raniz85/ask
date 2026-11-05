@@ -83,15 +83,36 @@ def test_load_reads_layer_bind_mounts(
 
 
 def test_load_ignores_unknown_fields_in_layers(tmp_path: Path) -> None:
-    # given a layer declaring fields other than bind_mounts
+    # given a layer declaring a field other than bind_mounts and packages
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[layers.base]\npackages.arch = ["zsh"]\n')
+    config_path.write_text('[layers.base]\nide = "jetbrains-idea"\n')
 
     # when loading the config
     config = load(config_path)
 
-    # then the unknown fields are ignored and the layer defaults to no bind mounts
-    assert config == Config(layers={"base": Layer(bind_mounts=[])})
+    # then the unknown field is ignored and the layer defaults to no bind mounts
+    # or packages
+    assert config == Config(layers={"base": Layer(bind_mounts=[], packages={})})
+
+
+def test_load_reads_layer_packages(tmp_path: Path) -> None:
+    # given a layer declaring packages for multiple distributions
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[layers.base]\npackages.common = ["python"]\npackages.arch = ["zsh"]\n'
+    )
+
+    # when loading the config
+    config = load(config_path)
+
+    # then the layer's packages are read, keyed by distribution
+    assert config == Config(
+        layers={
+            "base": Layer(
+                bind_mounts=[], packages={"common": ["python"], "arch": ["zsh"]}
+            )
+        }
+    )
 
 
 def test_load_defaults_shell_to_bash(tmp_path: Path) -> None:
