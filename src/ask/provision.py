@@ -68,7 +68,7 @@ def provision_packages(
     state = _build_state(container_name)
     connect_all(state)
 
-    add_op(state, operation, packages=packages, update=True)
+    add_op(state, operation, packages=packages, update=True, upgrade=True)
 
     run_ops(state)
 

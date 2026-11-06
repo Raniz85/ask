@@ -172,12 +172,13 @@ def test_provision_packages_installs_packages_via_the_distribution_operation() -
         provision_packages("my-project", "arch", ["zsh", "python"])
 
     # then the arch package operation is used to ensure the packages are
-    # present, syncing the package database first
+    # present, syncing the package database and upgrading all packages first
     add_op.assert_any_call(
         state_cls.return_value,
         pacman.packages,
         packages=["zsh", "python"],
         update=True,
+        upgrade=True,
     )
 
 
