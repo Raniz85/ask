@@ -9,7 +9,9 @@ from ask.incus import (
     converge_shell_rc,
     create_container,
     device_name_for,
+    get_managed_packages,
     image_for,
+    set_managed_packages,
 )
 
 
@@ -192,6 +194,66 @@ def test_converge_shell_rc_replaces_an_existing_device() -> None:
             "path=/home/raniz/.zshrc",
             "readonly=true",
         ],
+        check=True,
+    )
+
+
+def test_get_managed_packages_returns_empty_list_when_unset() -> None:
+    # given a container with no previously tracked packages
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="\n"
+        )
+
+        # when reading the previously managed packages
+        packages = get_managed_packages("my-project")
+
+    # then there are none
+    assert packages == []
+
+
+def test_get_managed_packages_returns_the_tracked_packages() -> None:
+    # given a container with previously tracked packages
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="zsh,python\n"
+        )
+
+        # when reading the previously managed packages
+        packages = get_managed_packages("my-project")
+
+    # then the tracked packages are returned
+    assert packages == ["zsh", "python"]
+    run.assert_called_once_with(
+        ["incus", "config", "get", "my-project", "user.ask.packages"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_set_managed_packages_stores_the_given_packages() -> None:
+    # given a list of packages to track
+    with patch("ask.incus.subprocess.run") as run:
+        # when storing them as managed
+        set_managed_packages("my-project", ["zsh", "python"])
+
+    # then they are stored, comma-separated, under the custom config key
+    run.assert_called_once_with(
+        ["incus", "config", "set", "my-project", "user.ask.packages", "zsh,python"],
+        check=True,
+    )
+
+
+def test_set_managed_packages_stores_an_empty_value_for_no_packages() -> None:
+    # given no packages to track
+    with patch("ask.incus.subprocess.run") as run:
+        # when storing them as managed
+        set_managed_packages("my-project", [])
+
+    # then the custom config key is cleared
+    run.assert_called_once_with(
+        ["incus", "config", "set", "my-project", "user.ask.packages", ""],
         check=True,
     )
 

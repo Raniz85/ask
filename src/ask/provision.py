@@ -73,6 +73,18 @@ def provision_packages(
     run_ops(state)
 
 
+def remove_packages(
+    container_name: str, distribution: str, packages: list[str]
+) -> None:
+    operation = _package_operation_for(distribution)
+    state = _build_state(container_name)
+    connect_all(state)
+
+    add_op(state, operation, packages=packages, present=False)
+
+    run_ops(state)
+
+
 def ancestors_under_home(path: Path, home: Path) -> list[Path]:
     if path == home or home not in path.parents:
         return []

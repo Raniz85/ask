@@ -26,4 +26,12 @@ def converge() -> None:
     )
     provision.provision_user(project_dir.name, user)
     provision.provision_packages(project_dir.name, m.distribution, packages)
+
+    stale_packages = set(incus.get_managed_packages(project_dir.name)) - set(packages)
+    if stale_packages:
+        provision.remove_packages(
+            project_dir.name, m.distribution, sorted(stale_packages)
+        )
+    incus.set_managed_packages(project_dir.name, packages)
+
     provision.fix_bind_mount_ownership(project_dir.name, bind_mounts, user)

@@ -44,8 +44,11 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.converge") as incus_converge,
         patch("ask.cli.incus.converge_shell_rc"),
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages"),
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
         converge()
@@ -72,8 +75,11 @@ def test_converge_provisions_the_resolved_user(tmp_path: Path) -> None:
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages"),
         patch("ask.cli.provision.provision_user") as provision_user,
         patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
         converge()
@@ -109,8 +115,11 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages"),
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages") as provision_packages,
+        patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
         converge()
@@ -138,8 +147,11 @@ def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> 
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages"),
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages") as provision_packages,
+        patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
         converge()
@@ -166,8 +178,11 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc") as converge_shell_rc,
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages"),
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
         converge()
@@ -178,6 +193,76 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
     converge_shell_rc.assert_called_once_with(
         "my-project", home_dir / ".zshrc", Path("/home/raniz/.zshrc")
     )
+
+
+def test_converge_removes_packages_no_longer_declared(tmp_path: Path) -> None:
+    # given a project directory declaring one package, and a container that
+    # was previously managing that package plus one no longer declared
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(
+        'distribution = "arch"\npackages.arch = ["project-pkg"]\n'
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.converge"),
+        patch("ask.cli.incus.converge_shell_rc"),
+        patch(
+            "ask.cli.incus.get_managed_packages",
+            return_value=["project-pkg", "bash", "stale-pkg"],
+        ),
+        patch("ask.cli.incus.set_managed_packages") as set_managed_packages,
+        patch("ask.cli.provision.provision_user"),
+        patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.remove_packages") as remove_packages,
+        patch("ask.cli.provision.fix_bind_mount_ownership"),
+    ):
+        converge()
+
+    # then the package no longer declared is removed, and the newly resolved
+    # set of packages becomes the tracked set for next time
+    remove_packages.assert_called_once_with("my-project", "arch", ["stale-pkg"])
+    set_managed_packages.assert_called_once_with("my-project", ["project-pkg", "bash"])
+
+
+def test_converge_does_not_remove_packages_when_nothing_is_stale(
+    tmp_path: Path,
+) -> None:
+    # given a project directory declaring the same package the container
+    # already tracks as managed
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(
+        'distribution = "arch"\npackages.arch = ["project-pkg"]\n'
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.converge"),
+        patch("ask.cli.incus.converge_shell_rc"),
+        patch(
+            "ask.cli.incus.get_managed_packages",
+            return_value=["project-pkg", "bash"],
+        ),
+        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.provision.provision_user"),
+        patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.remove_packages") as remove_packages,
+        patch("ask.cli.provision.fix_bind_mount_ownership"),
+    ):
+        converge()
+
+    # then nothing is removed
+    remove_packages.assert_not_called()
 
 
 def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
@@ -199,8 +284,11 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages"),
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership") as fix_ownership,
     ):
         converge()

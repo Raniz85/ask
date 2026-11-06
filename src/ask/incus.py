@@ -74,6 +74,34 @@ def converge_shell_rc(name: str, host_path: Path, container_path: Path) -> None:
     )
 
 
+_MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
+
+
+def get_managed_packages(name: str) -> list[str]:
+    result = subprocess.run(
+        ["incus", "config", "get", name, _MANAGED_PACKAGES_CONFIG_KEY],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    value = result.stdout.strip()
+    return value.split(",") if value else []
+
+
+def set_managed_packages(name: str, packages: list[str]) -> None:
+    subprocess.run(
+        [
+            "incus",
+            "config",
+            "set",
+            name,
+            _MANAGED_PACKAGES_CONFIG_KEY,
+            ",".join(packages),
+        ],
+        check=True,
+    )
+
+
 def converge(name: str, bind_mounts: list[Path]) -> None:
     desired = {device_name_for(path): path for path in bind_mounts}
     existing = _bind_devices(name)

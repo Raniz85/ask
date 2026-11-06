@@ -14,6 +14,7 @@ from ask.provision import (
     fix_bind_mount_ownership,
     provision_packages,
     provision_user,
+    remove_packages,
 )
 
 
@@ -223,6 +224,70 @@ def test_provision_packages_raises_for_an_unsupported_distribution() -> None:
     # then a clear error is raised
     with pytest.raises(ValueError, match="debian"):
         provision_packages("my-project", "debian", ["zsh"])
+
+
+def test_remove_packages_removes_packages_via_the_distribution_operation() -> None:
+    # given a list of packages no longer declared, to remove on arch
+    # when removing packages from a named container
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        remove_packages("my-project", "arch", ["old-pkg"])
+
+    # then the arch package operation is used to ensure the packages are absent
+    add_op.assert_any_call(
+        state_cls.return_value,
+        pacman.packages,
+        packages=["old-pkg"],
+        present=False,
+    )
+
+
+def test_remove_packages_connects_before_running_operations() -> None:
+    # given a list of packages to remove on arch
+    # when removing packages
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all") as connect_all,
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops") as run_ops,
+    ):
+        remove_packages("my-project", "arch", ["old-pkg"])
+
+    # then the state is connected before operations are run
+    connect_all.assert_called_once_with(state_cls.return_value)
+    run_ops.assert_called_once_with(state_cls.return_value)
+
+
+def test_remove_packages_enables_output_printing() -> None:
+    # given a list of packages to remove on arch
+    # when removing packages
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+    ):
+        remove_packages("my-project", "arch", ["old-pkg"])
+
+    # then the state is configured to print command output and input as it runs
+    state = state_cls.return_value
+    assert state.print_output is True
+    assert state.print_input is True
+
+
+def test_remove_packages_raises_for_an_unsupported_distribution() -> None:
+    # given a distribution with no known package operation
+    # when removing packages
+    # then a clear error is raised
+    with pytest.raises(ValueError, match="debian"):
+        remove_packages("my-project", "debian", ["old-pkg"])
 
 
 def test_pyinfra_echo_actually_prints_to_stdout() -> None:
