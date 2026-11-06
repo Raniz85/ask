@@ -28,6 +28,25 @@ def create_container(name: str, distribution: str) -> None:
     subprocess.run(command, check=True)
 
 
+def exec_command(name: str, uid: int, gid: int, cwd: Path, command: list[str]) -> int:
+    result = subprocess.run(
+        [
+            "incus",
+            "exec",
+            name,
+            "--user",
+            str(uid),
+            "--group",
+            str(gid),
+            "--cwd",
+            str(cwd),
+            "--",
+            *command,
+        ]
+    )
+    return result.returncode
+
+
 def device_name_for(path: Path) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_-]", "-", str(path))
     return f"bind-{slug}"

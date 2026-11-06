@@ -9,6 +9,7 @@ from ask.incus import (
     converge_shell_rc,
     create_container,
     device_name_for,
+    exec_command,
     get_managed_packages,
     image_for,
     set_managed_packages,
@@ -256,6 +257,67 @@ def test_set_managed_packages_stores_an_empty_value_for_no_packages() -> None:
         ["incus", "config", "set", "my-project", "user.ask.packages", ""],
         check=True,
     )
+
+
+def test_exec_command_runs_the_command_as_the_given_user_and_cwd() -> None:
+    # given a command to run inside the container, as a specific uid/gid and
+    # working directory
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+
+        # when executing it
+        exec_command(
+            "my-project", 1000, 1000, Path("/home/raniz/src/ask"), ["ls", "-la"]
+        )
+
+    # then incus exec is invoked targeting that user, group and working
+    # directory, with the command passed through after "--"
+    run.assert_called_once_with(
+        [
+            "incus",
+            "exec",
+            "my-project",
+            "--user",
+            "1000",
+            "--group",
+            "1000",
+            "--cwd",
+            "/home/raniz/src/ask",
+            "--",
+            "ls",
+            "-la",
+        ]
+    )
+
+
+def test_exec_command_does_not_capture_or_check_the_result() -> None:
+    # given a command to run inside the container
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+
+        # when executing it
+        exec_command("my-project", 1000, 1000, Path("/project"), ["true"])
+
+    # then stdio is left to inherit the caller's (no output capturing), and
+    # a non-zero exit is not treated as an error (no check=True)
+    _, kwargs = run.call_args
+    assert "check" not in kwargs
+    assert "capture_output" not in kwargs
+    assert "stdout" not in kwargs
+    assert "stderr" not in kwargs
+    assert "stdin" not in kwargs
+
+
+def test_exec_command_returns_the_commands_exit_code() -> None:
+    # given a command that exits non-zero inside the container
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=7)
+
+        # when executing it
+        returncode = exec_command("my-project", 1000, 1000, Path("/project"), ["false"])
+
+    # then the command's exit code is returned, without raising
+    assert returncode == 7
 
 
 def test_converge_leaves_unrelated_devices_alone() -> None:

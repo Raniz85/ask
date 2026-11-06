@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from ask import config, incus, manifest, provision, shell
@@ -35,3 +36,13 @@ def converge() -> None:
     incus.set_managed_packages(project_dir.name, packages)
 
     provision.fix_bind_mount_ownership(project_dir.name, bind_mounts, user)
+
+
+def exec(*command: str) -> None:
+    project_dir = Path.cwd()
+    cfg = config.load(config.default_path())
+    user = config.resolve_user(cfg)
+    returncode = incus.exec_command(
+        project_dir.name, user.uid, user.gid, project_dir, list(command)
+    )
+    sys.exit(returncode)
