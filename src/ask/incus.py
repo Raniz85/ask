@@ -33,14 +33,45 @@ def device_name_for(path: Path) -> str:
     return f"bind-{slug}"
 
 
-def _bind_devices(name: str) -> set[str]:
+def _device_names(name: str) -> set[str]:
     result = subprocess.run(
         ["incus", "config", "device", "list", name],
         check=True,
         capture_output=True,
         text=True,
     )
-    return {d for d in result.stdout.splitlines() if d.startswith("bind-")}
+    return set(result.stdout.splitlines())
+
+
+def _bind_devices(name: str) -> set[str]:
+    return {d for d in _device_names(name) if d.startswith("bind-")}
+
+
+_SHELL_RC_DEVICE = "shellrc"
+
+
+def converge_shell_rc(name: str, host_path: Path, container_path: Path) -> None:
+    if _SHELL_RC_DEVICE in _device_names(name):
+        subprocess.run(
+            ["incus", "config", "device", "remove", name, _SHELL_RC_DEVICE],
+            check=True,
+        )
+
+    subprocess.run(
+        [
+            "incus",
+            "config",
+            "device",
+            "add",
+            name,
+            _SHELL_RC_DEVICE,
+            "disk",
+            f"source={host_path}",
+            f"path={container_path}",
+            "readonly=true",
+        ],
+        check=True,
+    )
 
 
 def converge(name: str, bind_mounts: list[Path]) -> None:
