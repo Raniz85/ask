@@ -36,6 +36,16 @@ def converge() -> None:
     provision.fix_bind_mount_ownership(project_dir.name, bind_mounts, user)
 
 
+def enter() -> None:
+    project_dir = Path.cwd()
+    cfg = config.load(config.default_path())
+    user = config.resolve_user(cfg)
+    returncode = incus.exec_command(
+        project_dir.name, user.uid, user.gid, project_dir, [user.shell]
+    )
+    sys.exit(returncode)
+
+
 def exec(*command: str) -> None:
     project_dir = Path.cwd()
     cfg = config.load(config.default_path())

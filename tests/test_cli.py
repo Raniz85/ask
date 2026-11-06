@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ask.cli import converge, create, exec
+from ask.cli import converge, create, enter, exec
 from ask.config import ResolvedUser
 
 
@@ -309,6 +309,50 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
             extra_groups=[],
         ),
     )
+
+
+def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
+    # given a project directory, and a config declaring a user and shell
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.exec_command", return_value=0) as exec_command,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        enter()
+
+    # then the resolved shell is executed in the container as the resolved
+    # user, in the project directory, and ask exits with its exit code
+    exec_command.assert_called_once_with(
+        "my-project", 1000, 1000, project_dir, ["zsh"]
+    )
+    assert exc_info.value.code == 0
+
+
+def test_enter_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
+    # given a project directory, and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when the entered shell exits non-zero
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.exec_command", return_value=3),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        enter()
+
+    # then ask exits with that same code, rather than raising
+    assert exc_info.value.code == 3
 
 
 def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
