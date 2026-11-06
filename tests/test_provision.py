@@ -1,7 +1,11 @@
 from pathlib import Path
 from unittest.mock import ANY, patch
 
+import io
+from contextlib import redirect_stderr, redirect_stdout
+
 import pytest
+from pyinfra.api.output import echo
 from pyinfra.operations import files, pacman, server
 
 from ask.config import ResolvedUser
@@ -218,6 +222,31 @@ def test_provision_packages_raises_for_an_unsupported_distribution() -> None:
     # then a clear error is raised
     with pytest.raises(ValueError, match="debian"):
         provision_packages("my-project", "debian", ["zsh"])
+
+
+def test_pyinfra_echo_actually_prints_to_stdout() -> None:
+    # given pyinfra's echo defaults to a no-op until something installs a real
+    # one, which importing ask.provision (already done for this test module)
+    # is responsible for doing
+
+    # when echoing a message through pyinfra's own output API
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        echo("hello from pyinfra")
+
+    # then the message is actually printed, rather than swallowed
+    assert "hello from pyinfra" in buffer.getvalue()
+
+
+def test_pyinfra_echo_prints_to_stderr_when_requested() -> None:
+    # given a message pyinfra's command-output reader marks for stderr
+    # when echoing it with err=True
+    buffer = io.StringIO()
+    with redirect_stderr(buffer):
+        echo("stderr line", err=True)
+
+    # then it is printed to stderr rather than stdout
+    assert "stderr line" in buffer.getvalue()
 
 
 def test_ancestors_under_home_returns_the_immediate_parent() -> None:

@@ -1,3 +1,4 @@
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -7,9 +8,17 @@ from pyinfra.api import Inventory, State
 from pyinfra.api.connect import connect_all
 from pyinfra.api.operation import add_op
 from pyinfra.api.operations import run_ops
+from pyinfra.api.output import set_echo
 from pyinfra.operations import files, pacman, server
 
 from ask.config import ResolvedUser
+
+
+def _echo(message: object = "", *, err: bool = False, **_kwargs: Any) -> None:
+    print(message, file=sys.stderr if err else sys.stdout)
+
+
+set_echo(_echo)
 
 _PACKAGE_OPERATIONS = {
     "arch": pacman.packages,
