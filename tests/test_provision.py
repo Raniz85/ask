@@ -10,7 +10,6 @@ from pyinfra.operations import files, pacman, server
 
 from ask.config import ResolvedUser
 from ask.provision import (
-    ancestors_under_home,
     fix_bind_mount_ownership,
     provision_packages,
     provision_user,
@@ -313,45 +312,6 @@ def test_pyinfra_echo_prints_to_stderr_when_requested() -> None:
 
     # then it is printed to stderr rather than stdout
     assert "stderr line" in buffer.getvalue()
-
-
-def test_ancestors_under_home_returns_the_immediate_parent() -> None:
-    # given a bind-mounted path one level under home
-    # when finding its ancestors under home
-    ancestors = ancestors_under_home(Path("/home/raniz/src/ask"), Path("/home/raniz"))
-
-    # then only its immediate parent is returned
-    assert ancestors == [Path("/home/raniz/src")]
-
-
-def test_ancestors_under_home_returns_every_level_innermost_first() -> None:
-    # given a bind-mounted path nested several levels under home
-    # when finding its ancestors under home
-    ancestors = ancestors_under_home(
-        Path("/home/raniz/.local/share/foo"), Path("/home/raniz")
-    )
-
-    # then every intermediate directory is returned, innermost first, excluding
-    # home itself
-    assert ancestors == [Path("/home/raniz/.local/share"), Path("/home/raniz/.local")]
-
-
-def test_ancestors_under_home_returns_none_when_path_is_home() -> None:
-    # given a path that is the home directory itself
-    # when finding its ancestors under home
-    ancestors = ancestors_under_home(Path("/home/raniz"), Path("/home/raniz"))
-
-    # then there are no ancestors to fix
-    assert ancestors == []
-
-
-def test_ancestors_under_home_returns_none_when_path_is_outside_home() -> None:
-    # given a path that doesn't live under home at all
-    # when finding its ancestors under home
-    ancestors = ancestors_under_home(Path("/opt/foo"), Path("/home/raniz"))
-
-    # then nothing is returned, since ownership outside home isn't ours to fix
-    assert ancestors == []
 
 
 def test_fix_bind_mount_ownership_chowns_ancestors_under_home() -> None:

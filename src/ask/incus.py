@@ -121,29 +121,45 @@ def set_managed_packages(name: str, packages: list[str]) -> None:
     )
 
 
+def stale_packages(managed: list[str], desired: list[str]) -> list[str]:
+    return sorted(set(managed) - set(desired))
+
+
+def _diff_devices(
+    existing: set[str], desired: dict[str, Path]
+) -> tuple[set[str], dict[str, Path]]:
+    to_remove = existing - desired.keys()
+    to_add = {
+        device_name: path
+        for device_name, path in desired.items()
+        if device_name not in existing
+    }
+    return to_remove, to_add
+
+
 def converge(name: str, bind_mounts: list[Path]) -> None:
     desired = {device_name_for(path): path for path in bind_mounts}
     existing = _bind_devices(name)
+    to_remove, to_add = _diff_devices(existing, desired)
 
-    for device_name in existing - desired.keys():
+    for device_name in to_remove:
         subprocess.run(
             ["incus", "config", "device", "remove", name, device_name], check=True
         )
 
-    for device_name, path in desired.items():
-        if device_name not in existing:
-            subprocess.run(
-                [
-                    "incus",
-                    "config",
-                    "device",
-                    "add",
-                    name,
-                    device_name,
-                    "disk",
-                    f"source={path}",
-                    f"path={path}",
-                    "shift=true",
-                ],
-                check=True,
-            )
+    for device_name, path in to_add.items():
+        subprocess.run(
+            [
+                "incus",
+                "config",
+                "device",
+                "add",
+                name,
+                device_name,
+                "disk",
+                f"source={path}",
+                f"path={path}",
+                "shift=true",
+            ],
+            check=True,
+        )

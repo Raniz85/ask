@@ -2,7 +2,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ask.config import Config
+from ask.config import Layer
 
 
 @dataclass
@@ -27,11 +27,11 @@ def load(path: Path) -> Manifest:
     )
 
 
-def resolve_bind_mounts(manifest: Manifest, config: Config) -> list[Path]:
+def resolve_bind_mounts(manifest: Manifest, layers: dict[str, Layer]) -> list[Path]:
     mounts = list(manifest.bind_mounts)
     for layer_name in manifest.layers:
         try:
-            layer = config.layers[layer_name]
+            layer = layers[layer_name]
         except KeyError:
             raise ValueError(f"no known layer named {layer_name!r}") from None
         mounts += layer.bind_mounts
@@ -44,11 +44,11 @@ def _packages_for_distribution(
     return packages.get("common", []) + packages.get(distribution, [])
 
 
-def resolve_packages(manifest: Manifest, config: Config) -> list[str]:
+def resolve_packages(manifest: Manifest, layers: dict[str, Layer]) -> list[str]:
     packages = _packages_for_distribution(manifest.packages, manifest.distribution)
     for layer_name in manifest.layers:
         try:
-            layer = config.layers[layer_name]
+            layer = layers[layer_name]
         except KeyError:
             raise ValueError(f"no known layer named {layer_name!r}") from None
         packages += _packages_for_distribution(layer.packages, manifest.distribution)

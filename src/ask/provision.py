@@ -11,7 +11,7 @@ from pyinfra.api.operations import run_ops
 from pyinfra.api.output import set_echo
 from pyinfra.operations import files, pacman, server
 
-from ask.config import ResolvedUser
+from ask.config import ResolvedUser, ancestors_under_home
 
 
 def _echo(message: object = "", *, err: bool = False, **_kwargs: Any) -> None:
@@ -83,17 +83,6 @@ def remove_packages(
     add_op(state, operation, packages=packages, present=False)
 
     run_ops(state)
-
-
-def ancestors_under_home(path: Path, home: Path) -> list[Path]:
-    if path == home or home not in path.parents:
-        return []
-    ancestors = []
-    current = path.parent
-    while current != home:
-        ancestors.append(current)
-        current = current.parent
-    return ancestors
 
 
 def fix_bind_mount_ownership(

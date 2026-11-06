@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from ask.incus import (
+    _diff_devices,
     converge,
     converge_shell_rc,
     create_container,
@@ -13,6 +14,7 @@ from ask.incus import (
     get_managed_packages,
     image_for,
     set_managed_packages,
+    stale_packages,
 )
 
 
@@ -69,6 +71,40 @@ def _list_devices_result(*names: str) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(
         args=[], returncode=0, stdout="".join(f"{n}\n" for n in names)
     )
+
+
+def test_diff_devices_adds_mounts_not_yet_present() -> None:
+    # given no existing devices, and two desired mounts
+    to_remove, to_add = _diff_devices(
+        set(), {"bind--project": Path("/project"), "bind--extra": Path("/extra")}
+    )
+
+    # then both desired devices are reported for addition, and nothing for removal
+    assert to_remove == set()
+    assert to_add == {
+        "bind--project": Path("/project"),
+        "bind--extra": Path("/extra"),
+    }
+
+
+def test_diff_devices_does_not_re_add_an_already_present_device() -> None:
+    # given a device that already exists, matching the one desired mount
+    to_remove, to_add = _diff_devices(
+        {"bind--project"}, {"bind--project": Path("/project")}
+    )
+
+    # then nothing is reported for addition or removal
+    assert to_remove == set()
+    assert to_add == {}
+
+
+def test_diff_devices_removes_devices_no_longer_desired() -> None:
+    # given an existing device that is no longer desired
+    to_remove, to_add = _diff_devices({"bind--stale"}, {})
+
+    # then it is reported for removal, and nothing for addition
+    assert to_remove == {"bind--stale"}
+    assert to_add == {}
 
 
 def test_converge_adds_devices_for_mounts_not_yet_present() -> None:
@@ -318,6 +354,43 @@ def test_exec_command_returns_the_commands_exit_code() -> None:
 
     # then the command's exit code is returned, without raising
     assert returncode == 7
+
+
+def test_stale_packages_returns_managed_packages_no_longer_desired() -> None:
+    # given a set of previously managed packages, some no longer desired
+    # when computing which are stale
+    stale = stale_packages(["project-pkg", "bash", "old-pkg"], ["project-pkg", "bash"])
+
+    # then the undesired ones are returned
+    assert stale == ["old-pkg"]
+
+
+def test_stale_packages_returns_nothing_when_all_are_still_desired() -> None:
+    # given a set of previously managed packages that are all still desired
+    # when computing which are stale
+    stale = stale_packages(["project-pkg", "bash"], ["project-pkg", "bash"])
+
+    # then nothing is stale
+    assert stale == []
+
+
+def test_stale_packages_returns_everything_when_none_are_still_desired() -> None:
+    # given a set of previously managed packages, none of which are desired
+    # anymore
+    # when computing which are stale
+    stale = stale_packages(["old-pkg", "other-old-pkg"], [])
+
+    # then all of them are stale, sorted
+    assert stale == ["old-pkg", "other-old-pkg"]
+
+
+def test_stale_packages_returns_nothing_for_empty_inputs() -> None:
+    # given no previously managed packages and nothing desired
+    # when computing which are stale
+    stale = stale_packages([], [])
+
+    # then nothing is stale
+    assert stale == []
 
 
 def test_converge_leaves_unrelated_devices_alone() -> None:

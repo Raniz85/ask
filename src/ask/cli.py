@@ -15,10 +15,10 @@ def converge() -> None:
     project_dir = Path.cwd()
     m = manifest.load(project_dir / "ask.toml")
     cfg = config.load(config.default_path())
-    bind_mounts = [project_dir] + manifest.resolve_bind_mounts(m, cfg)
+    bind_mounts = [project_dir] + manifest.resolve_bind_mounts(m, cfg.layers)
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
-    packages = manifest.resolve_packages(m, cfg) + user_shell.packages
+    packages = manifest.resolve_packages(m, cfg.layers) + user_shell.packages
     incus.converge(project_dir.name, bind_mounts)
     incus.converge_shell_rc(
         project_dir.name,
@@ -28,11 +28,9 @@ def converge() -> None:
     provision.provision_user(project_dir.name, user)
     provision.provision_packages(project_dir.name, m.distribution, packages)
 
-    stale_packages = set(incus.get_managed_packages(project_dir.name)) - set(packages)
-    if stale_packages:
-        provision.remove_packages(
-            project_dir.name, m.distribution, sorted(stale_packages)
-        )
+    stale = incus.stale_packages(incus.get_managed_packages(project_dir.name), packages)
+    if stale:
+        provision.remove_packages(project_dir.name, m.distribution, stale)
     incus.set_managed_packages(project_dir.name, packages)
 
     provision.fix_bind_mount_ownership(project_dir.name, bind_mounts, user)
