@@ -1,5 +1,6 @@
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 _IMAGE_ALIASES = {
@@ -99,33 +100,6 @@ def _bind_devices(name: str) -> set[str]:
     return {d for d in _device_names(name) if d.startswith("bind-")}
 
 
-_SHELL_RC_DEVICE = "shellrc"
-
-
-def converge_shell_rc(name: str, host_path: Path, container_path: Path) -> None:
-    if _SHELL_RC_DEVICE in _device_names(name):
-        subprocess.run(
-            ["incus", "config", "device", "remove", name, _SHELL_RC_DEVICE],
-            check=True,
-        )
-
-    subprocess.run(
-        [
-            "incus",
-            "config",
-            "device",
-            "add",
-            name,
-            _SHELL_RC_DEVICE,
-            "disk",
-            f"source={host_path}",
-            f"path={container_path}",
-            "readonly=true",
-        ],
-        check=True,
-    )
-
-
 _MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
 
 
@@ -158,20 +132,27 @@ def stale_packages(managed: list[str], desired: list[str]) -> list[str]:
     return sorted(set(managed) - set(desired))
 
 
+@dataclass(frozen=True)
+class Mount:
+    host_path: Path
+    container_path: Path
+    readonly: bool = False
+
+
 def _diff_devices(
-    existing: set[str], desired: dict[str, Path]
-) -> tuple[set[str], dict[str, Path]]:
+    existing: set[str], desired: dict[str, Mount]
+) -> tuple[set[str], dict[str, Mount]]:
     to_remove = existing - desired.keys()
     to_add = {
-        device_name: path
-        for device_name, path in desired.items()
+        device_name: mount
+        for device_name, mount in desired.items()
         if device_name not in existing
     }
     return to_remove, to_add
 
 
-def converge(name: str, bind_mounts: list[Path]) -> None:
-    desired = {device_name_for(path): path for path in bind_mounts}
+def converge(name: str, mounts: list[Mount]) -> None:
+    desired = {device_name_for(mount.container_path): mount for mount in mounts}
     existing = _bind_devices(name)
     to_remove, to_add = _diff_devices(existing, desired)
 
@@ -180,19 +161,19 @@ def converge(name: str, bind_mounts: list[Path]) -> None:
             ["incus", "config", "device", "remove", name, device_name], check=True
         )
 
-    for device_name, path in to_add.items():
-        subprocess.run(
-            [
-                "incus",
-                "config",
-                "device",
-                "add",
-                name,
-                device_name,
-                "disk",
-                f"source={path}",
-                f"path={path}",
-                "shift=true",
-            ],
-            check=True,
-        )
+    for device_name, mount in to_add.items():
+        command = [
+            "incus",
+            "config",
+            "device",
+            "add",
+            name,
+            device_name,
+            "disk",
+            f"source={mount.host_path}",
+            f"path={mount.container_path}",
+            "shift=true",
+        ]
+        if mount.readonly:
+            command.append("readonly=true")
+        subprocess.run(command, check=True)

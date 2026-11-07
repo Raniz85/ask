@@ -2,6 +2,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ask.agent import Agent
 from ask.config import Layer
 
 
@@ -52,4 +53,36 @@ def resolve_packages(manifest: Manifest, layers: dict[str, Layer]) -> list[str]:
         except KeyError:
             raise ValueError(f"no known layer named {layer_name!r}") from None
         packages += _packages_for_distribution(layer.packages, manifest.distribution)
+    return packages
+
+
+def resolve_agents(manifest: Manifest, layers: dict[str, Layer]) -> list[str]:
+    agents: list[str] = []
+    for layer_name in manifest.layers:
+        try:
+            layer = layers[layer_name]
+        except KeyError:
+            raise ValueError(f"no known layer named {layer_name!r}") from None
+        agents += layer.agents
+    return agents
+
+
+def resolve_shared_state_agents(
+    manifest: Manifest, layers: dict[str, Layer]
+) -> list[str]:
+    agents: list[str] = []
+    for layer_name in manifest.layers:
+        try:
+            layer = layers[layer_name]
+        except KeyError:
+            raise ValueError(f"no known layer named {layer_name!r}") from None
+        if layer.shared_state:
+            agents += layer.agents
+    return agents
+
+
+def resolve_agent_packages(agents: list[Agent], distribution: str) -> list[str]:
+    packages: list[str] = []
+    for a in agents:
+        packages += _packages_for_distribution(a.packages, distribution)
     return packages

@@ -2,8 +2,17 @@ from pathlib import Path
 
 import pytest
 
+from ask.agent import Agent
 from ask.config import Layer
-from ask.manifest import Manifest, load, resolve_bind_mounts, resolve_packages
+from ask.manifest import (
+    Manifest,
+    load,
+    resolve_agent_packages,
+    resolve_agents,
+    resolve_bind_mounts,
+    resolve_packages,
+    resolve_shared_state_agents,
+)
 
 
 def test_load_reads_distribution_from_toml(tmp_path: Path) -> None:
@@ -173,3 +182,71 @@ def test_resolve_packages_raises_on_unknown_layer() -> None:
     # then a clear error is raised
     with pytest.raises(ValueError, match="nonexistent"):
         resolve_packages(manifest, {})
+
+
+def test_resolve_agents_combines_agents_from_every_declared_layer() -> None:
+    # given a manifest declaring two layers, each enabling an agent
+    manifest = Manifest(distribution="arch", layers=["base", "python"])
+    layers = {
+        "base": Layer(agents=["claude"]),
+        "python": Layer(agents=["other"]),
+    }
+
+    # when resolving the full set of agents
+    agents = resolve_agents(manifest, layers)
+
+    # then the agents from both layers are included
+    assert agents == ["claude", "other"]
+
+
+def test_resolve_agents_raises_on_unknown_layer() -> None:
+    # given a manifest declaring a layer that isn't defined in the layers mapping
+    manifest = Manifest(distribution="arch", layers=["nonexistent"])
+
+    # when resolving the full set of agents
+    # then a clear error is raised
+    with pytest.raises(ValueError, match="nonexistent"):
+        resolve_agents(manifest, {})
+
+
+def test_resolve_shared_state_agents_includes_only_agents_from_shared_state_layers() -> (
+    None
+):
+    # given a manifest declaring one layer with shared state enabled, and
+    # another without
+    manifest = Manifest(distribution="arch", layers=["base", "python"])
+    layers = {
+        "base": Layer(agents=["claude"], shared_state=True),
+        "python": Layer(agents=["other"], shared_state=False),
+    }
+
+    # when resolving the agents whose state should be shared
+    agents = resolve_shared_state_agents(manifest, layers)
+
+    # then only the agent from the shared-state layer is included
+    assert agents == ["claude"]
+
+
+def test_resolve_shared_state_agents_raises_on_unknown_layer() -> None:
+    # given a manifest declaring a layer that isn't defined in the layers mapping
+    manifest = Manifest(distribution="arch", layers=["nonexistent"])
+
+    # when resolving the agents whose state should be shared
+    # then a clear error is raised
+    with pytest.raises(ValueError, match="nonexistent"):
+        resolve_shared_state_agents(manifest, {})
+
+
+def test_resolve_agent_packages_combines_common_and_distribution_packages() -> None:
+    # given an agent declaring common and per-distribution packages
+    test_agent = Agent(
+        name="test",
+        packages={"common": ["shared-pkg"], "arch": ["arch-pkg"], "debian": ["other"]},
+    )
+
+    # when resolving its packages for arch
+    packages = resolve_agent_packages([test_agent], "arch")
+
+    # then the common packages and the packages for the given distribution are
+    # included, and other distributions' packages are not
+    assert packages == ["shared-pkg", "arch-pkg"]

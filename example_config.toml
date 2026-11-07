@@ -21,9 +21,9 @@ packages.arch = [
   "aur:antigen",
 ]
 
-[layers.base.agents.claude]
-# Install Claude code into the container
-enabled = true
+agents = [
+    "claude"
+]
 
 # Bind mount Cloude state directories needed to share skills, auth and configuration
 # keeps project-local things like sessions inside the container

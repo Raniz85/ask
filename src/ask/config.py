@@ -9,6 +9,8 @@ from pathlib import Path
 class Layer:
     bind_mounts: list[Path] = field(default_factory=list)
     packages: dict[str, list[str]] = field(default_factory=dict)
+    agents: list[str] = field(default_factory=list)
+    shared_state: bool = False
 
 
 @dataclass
@@ -88,6 +90,8 @@ def load(path: Path) -> Config:
                 distro: list(pkgs)
                 for distro, pkgs in layer_data.get("packages", {}).items()
             },
+            agents=list(layer_data.get("agents", [])),
+            shared_state=layer_data.get("shared_state", False),
         )
         for name, layer_data in data.get("layers", {}).items()
     }

@@ -116,6 +116,44 @@ def test_load_reads_layer_packages(tmp_path: Path) -> None:
     )
 
 
+def test_load_reads_layer_agents(tmp_path: Path) -> None:
+    # given a layer declaring agents to install, with shared state enabled
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[layers.base]\nagents = ["claude"]\nshared_state = true\n'
+    )
+
+    # when loading the config
+    config = load(config_path)
+
+    # then the layer's agents and shared_state flag are read
+    assert config == Config(
+        layers={
+            "base": Layer(
+                bind_mounts=[], packages={}, agents=["claude"], shared_state=True
+            )
+        }
+    )
+
+
+def test_load_defaults_layer_agents_and_shared_state(tmp_path: Path) -> None:
+    # given a layer declaring neither agents nor shared_state
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[layers.base]\npackages.arch = ["zsh"]\n')
+
+    # when loading the config
+    config = load(config_path)
+
+    # then the layer has no agents, and shared state defaults to off
+    assert config == Config(
+        layers={
+            "base": Layer(
+                bind_mounts=[], packages={"arch": ["zsh"]}, agents=[], shared_state=False
+            )
+        }
+    )
+
+
 def test_load_defaults_shell_to_bash(tmp_path: Path) -> None:
     # given a config file with no shell declared
     config_path = tmp_path / "config.toml"

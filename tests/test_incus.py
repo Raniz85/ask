@@ -5,9 +5,9 @@ from unittest.mock import patch
 import pytest
 
 from ask.incus import (
+    Mount,
     _diff_devices,
     converge,
-    converge_shell_rc,
     create_container,
     device_name_for,
     exec_command,
@@ -111,12 +111,19 @@ def test_diff_devices_removes_devices_no_longer_desired() -> None:
 
 
 def test_converge_adds_devices_for_mounts_not_yet_present() -> None:
-    # given a container with no existing bind-mount devices, and two desired mounts
+    # given a container with no existing bind-mount devices, and two desired
+    # mounts whose host and container paths are the same
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = _list_devices_result()
 
         # when converging
-        converge("my-project", [Path("/project"), Path("/extra")])
+        converge(
+            "my-project",
+            [
+                Mount(host_path=Path("/project"), container_path=Path("/project")),
+                Mount(host_path=Path("/extra"), container_path=Path("/extra")),
+            ],
+        )
 
     # then a shifted disk device is added for each desired mount
     run.assert_any_call(
@@ -151,13 +158,92 @@ def test_converge_adds_devices_for_mounts_not_yet_present() -> None:
     )
 
 
+def test_converge_adds_a_writable_device_with_differing_host_and_container_paths() -> (
+    None
+):
+    # given a container with no existing devices, and a desired mount whose
+    # host and container paths differ (e.g. agent state shared from a
+    # differently-named host user)
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result()
+
+        # when converging
+        converge(
+            "my-project",
+            [
+                Mount(
+                    host_path=Path("/home/raniz/.claude.json"),
+                    container_path=Path("/home/other/.claude.json"),
+                )
+            ],
+        )
+
+    # then a shifted, writable disk device is added, named after the
+    # container path
+    run.assert_any_call(
+        [
+            "incus",
+            "config",
+            "device",
+            "add",
+            "my-project",
+            "bind--home-other--claude-json",
+            "disk",
+            "source=/home/raniz/.claude.json",
+            "path=/home/other/.claude.json",
+            "shift=true",
+        ],
+        check=True,
+    )
+
+
+def test_converge_adds_a_readonly_device_when_requested() -> None:
+    # given a container with no existing devices, and a desired read-only
+    # mount (e.g. a shell rc file)
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result()
+
+        # when converging
+        converge(
+            "my-project",
+            [
+                Mount(
+                    host_path=Path("/home/raniz/.zshrc"),
+                    container_path=Path("/home/other/.zshrc"),
+                    readonly=True,
+                )
+            ],
+        )
+
+    # then a shifted, read-only disk device is added
+    run.assert_any_call(
+        [
+            "incus",
+            "config",
+            "device",
+            "add",
+            "my-project",
+            "bind--home-other--zshrc",
+            "disk",
+            "source=/home/raniz/.zshrc",
+            "path=/home/other/.zshrc",
+            "shift=true",
+            "readonly=true",
+        ],
+        check=True,
+    )
+
+
 def test_converge_does_not_re_add_an_already_present_device() -> None:
     # given a container that already has the device for the desired mount
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = _list_devices_result("bind--project")
 
         # when converging on that same mount
-        converge("my-project", [Path("/project")])
+        converge(
+            "my-project",
+            [Mount(host_path=Path("/project"), container_path=Path("/project"))],
+        )
 
     # then no "config device add" call is made
     add_calls = [c for c in run.call_args_list if "add" in c.args[0]]
@@ -175,66 +261,6 @@ def test_converge_removes_bind_devices_no_longer_desired() -> None:
     # then the stale device is removed
     run.assert_any_call(
         ["incus", "config", "device", "remove", "my-project", "bind--stale"], check=True
-    )
-
-
-def test_converge_shell_rc_adds_a_readonly_device_when_none_exists() -> None:
-    # given a container with no existing "shellrc" device
-    with patch("ask.incus.subprocess.run") as run:
-        run.return_value = _list_devices_result()
-
-        # when converging the shell rc mount
-        converge_shell_rc(
-            "my-project", Path("/home/raniz/.bashrc"), Path("/home/raniz/.bashrc")
-        )
-
-    # then a read-only disk device is added for the rc file, under a fixed name
-    run.assert_any_call(
-        [
-            "incus",
-            "config",
-            "device",
-            "add",
-            "my-project",
-            "shellrc",
-            "disk",
-            "source=/home/raniz/.bashrc",
-            "path=/home/raniz/.bashrc",
-            "readonly=true",
-        ],
-        check=True,
-    )
-
-
-def test_converge_shell_rc_replaces_an_existing_device() -> None:
-    # given a container that already has a "shellrc" device, e.g. from a
-    # previously configured shell
-    with patch("ask.incus.subprocess.run") as run:
-        run.return_value = _list_devices_result("shellrc")
-
-        # when converging the shell rc mount again
-        converge_shell_rc(
-            "my-project", Path("/home/raniz/.zshrc"), Path("/home/raniz/.zshrc")
-        )
-
-    # then the existing device is removed before the new one is added
-    run.assert_any_call(
-        ["incus", "config", "device", "remove", "my-project", "shellrc"], check=True
-    )
-    run.assert_any_call(
-        [
-            "incus",
-            "config",
-            "device",
-            "add",
-            "my-project",
-            "shellrc",
-            "disk",
-            "source=/home/raniz/.zshrc",
-            "path=/home/raniz/.zshrc",
-            "readonly=true",
-        ],
-        check=True,
     )
 
 
@@ -514,8 +540,8 @@ def test_run_command_does_not_raise_on_a_non_zero_exit() -> None:
 
 
 def test_converge_leaves_unrelated_devices_alone() -> None:
-    # given a container with devices unrelated to bind-mount management (e.g. from the
-    # profile, such as "root" or "eth0"), and the dedicated "shellrc" device
+    # given a container with devices unrelated to bind-mount management (e.g.
+    # from the profile, such as "root" or "eth0")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = _list_devices_result("root", "eth0", "shellrc")
 

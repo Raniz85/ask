@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from ask import config, incus, manifest, provision, shell
+from ask import agent as agents, config, incus, manifest, provision, shell
 
 FAKE_SSH_ENV = {
     "SSH_CLIENT": "127.0.0.1 1 22",
@@ -26,15 +26,41 @@ def converge() -> None:
     bind_mounts = [project_dir] + manifest.resolve_bind_mounts(m, cfg.layers)
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
-    packages = manifest.resolve_packages(m, cfg.layers) + user_shell.packages
-    official_packages, aur_packages = provision.split_aur_packages(packages)
-    incus.converge(project_dir.name, bind_mounts)
-    incus.converge_shell_rc(
-        project_dir.name,
-        Path.home() / user_shell.rc_filename,
-        Path(f"/home/{user.name}") / user_shell.rc_filename,
+    resolved_agents = [
+        agents.resolve(name) for name in manifest.resolve_agents(m, cfg.layers)
+    ]
+    agent_packages = manifest.resolve_agent_packages(resolved_agents, m.distribution)
+    packages = (
+        manifest.resolve_packages(m, cfg.layers) + user_shell.packages + agent_packages
     )
+    official_packages, aur_packages = provision.split_aur_packages(packages)
+
+    shared_state_agents = [
+        agents.resolve(name)
+        for name in manifest.resolve_shared_state_agents(m, cfg.layers)
+    ]
+    mounts = (
+        [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
+        + [
+            incus.Mount(
+                host_path=Path.home() / user_shell.rc_filename,
+                container_path=Path(f"/home/{user.name}") / user_shell.rc_filename,
+                readonly=True,
+            )
+        ]
+        + [
+            incus.Mount(
+                host_path=Path.home() / state_path,
+                container_path=Path(f"/home/{user.name}") / state_path,
+            )
+            for a in shared_state_agents
+            for state_path in a.state_paths
+        ]
+    )
+
     provision.provision_user(project_dir.name, user)
+    incus.converge(project_dir.name, mounts)
+
     provision.provision_packages(project_dir.name, m.distribution, official_packages)
     provision.provision_aur_packages(project_dir.name, m.distribution, aur_packages)
 
@@ -46,7 +72,9 @@ def converge() -> None:
         provision.remove_packages(project_dir.name, m.distribution, stale)
     incus.set_managed_packages(project_dir.name, resolved_packages)
 
-    provision.fix_bind_mount_ownership(project_dir.name, bind_mounts, user)
+    provision.fix_bind_mount_ownership(
+        project_dir.name, [mount.container_path for mount in mounts], user
+    )
 
 
 def enter() -> None:
@@ -56,7 +84,31 @@ def enter() -> None:
     if not incus.is_running(project_dir.name):
         incus.start_container(project_dir.name)
     returncode = incus.exec_command(
-        project_dir.name, user.uid, user.gid, project_dir, [user.shell], env=FAKE_SSH_ENV
+        project_dir.name,
+        user.uid,
+        user.gid,
+        project_dir,
+        [user.shell],
+        env=FAKE_SSH_ENV,
+    )
+    sys.exit(returncode)
+
+
+def agent(name: str | None = None) -> None:
+    project_dir = Path.cwd()
+    m = manifest.load(project_dir / "ask.toml")
+    cfg = config.load(config.default_path())
+    user = config.resolve_user(cfg)
+    if name is None:
+        agent_names = manifest.resolve_agents(m, cfg.layers)
+        if not agent_names:
+            raise ValueError("no agents configured")
+        name = agent_names[0]
+    resolved_agent = agents.resolve(name)
+    if not incus.is_running(project_dir.name):
+        incus.start_container(project_dir.name)
+    returncode = incus.exec_command(
+        project_dir.name, user.uid, user.gid, project_dir, [resolved_agent.name]
     )
     sys.exit(returncode)
 
