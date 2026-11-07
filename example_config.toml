@@ -18,6 +18,7 @@ packages.arch = [
   "neovim",
   "starship",
   "dprint",
+  "aur:antigen",
 ]
 
 [layers.base.agents.claude]

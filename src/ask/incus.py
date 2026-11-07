@@ -28,6 +28,14 @@ def create_container(name: str, distribution: str) -> None:
     subprocess.run(command, check=True)
 
 
+def run_command(name: str, command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["incus", "exec", name, "--", *command],
+        capture_output=True,
+        text=True,
+    )
+
+
 def exec_command(name: str, uid: int, gid: int, cwd: Path, command: list[str]) -> int:
     result = subprocess.run(
         [

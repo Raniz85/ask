@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from unittest.mock import ANY, patch
 
@@ -10,10 +11,14 @@ from pyinfra.operations import files, pacman, server
 
 from ask.config import ResolvedUser
 from ask.provision import (
+    ensure_paru,
     fix_bind_mount_ownership,
+    provision_aur_builder,
+    provision_aur_packages,
     provision_packages,
     provision_user,
     remove_packages,
+    split_aur_packages,
 )
 
 
@@ -287,6 +292,260 @@ def test_remove_packages_raises_for_an_unsupported_distribution() -> None:
     # then a clear error is raised
     with pytest.raises(ValueError, match="debian"):
         remove_packages("my-project", "debian", ["old-pkg"])
+
+
+def test_split_aur_packages_separates_aur_prefixed_packages() -> None:
+    # given a mix of official and aur-prefixed packages
+    # when splitting them
+    official, aur = split_aur_packages(["git", "aur:yay-bin", "python"])
+
+    # then the official packages are returned as-is, and the aur packages
+    # have their prefix stripped
+    assert official == ["git", "python"]
+    assert aur == ["yay-bin"]
+
+
+def test_split_aur_packages_returns_empty_aur_list_when_none_declared() -> None:
+    # given only official packages
+    # when splitting them
+    official, aur = split_aur_packages(["git", "python"])
+
+    # then all of them are official, and none are aur
+    assert official == ["git", "python"]
+    assert aur == []
+
+
+def test_split_aur_packages_returns_empty_official_list_when_all_are_aur() -> None:
+    # given only aur-prefixed packages
+    # when splitting them
+    official, aur = split_aur_packages(["aur:yay-bin", "aur:paru"])
+
+    # then none of them are official, and both are aur, prefix stripped
+    assert official == []
+    assert aur == ["yay-bin", "paru"]
+
+
+def test_split_aur_packages_returns_empty_lists_for_no_packages() -> None:
+    # given no packages at all
+    # when splitting them
+    official, aur = split_aur_packages([])
+
+    # then both lists are empty
+    assert official == []
+    assert aur == []
+
+
+def test_provision_aur_builder_ensures_a_system_group_and_user() -> None:
+    # given no existing aur builder provisioning
+    # when provisioning the aur builder into a named container
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provision_aur_builder("my-project")
+
+    # then a system group and user named "aur" are ensured, with a home
+    # directory to build in and no login shell
+    add_op.assert_any_call(state_cls.return_value, server.group, group="aur", system=True)
+    add_op.assert_any_call(
+        state_cls.return_value,
+        server.user,
+        user="aur",
+        group="aur",
+        system=True,
+        shell="/usr/bin/nologin",
+        create_home=True,
+    )
+
+
+def test_provision_aur_builder_installs_build_dependencies() -> None:
+    # given no existing aur builder provisioning
+    # when provisioning the aur builder
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provision_aur_builder("my-project")
+
+    # then the packages needed to build from a PKGBUILD are ensured present
+    add_op.assert_any_call(
+        state_cls.return_value,
+        pacman.packages,
+        packages=["base-devel", "git"],
+        update=True,
+    )
+
+
+def test_provision_aur_builder_writes_a_pacman_scoped_sudoers_dropin() -> None:
+    # given no existing aur builder provisioning
+    # when provisioning the aur builder
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provision_aur_builder("my-project")
+
+    # then a sudoers.d drop-in is written, granting passwordless sudo scoped
+    # to pacman itself (needed for both dependency resolution and installing
+    # the locally built package, whatever flag order makepkg/paru use), but
+    # nothing broader than that
+    put_call = next(c for c in add_op.call_args_list if c.args[1] is files.put)
+    kwargs = put_call.kwargs
+    assert kwargs["src"].read() == "aur ALL=(root) NOPASSWD: /usr/bin/pacman *\n"
+    assert kwargs["dest"] == "/etc/sudoers.d/ask-aur"
+    assert kwargs["user"] == "root"
+    assert kwargs["group"] == "root"
+    assert kwargs["mode"] == "440"
+
+
+def test_provision_aur_builder_connects_before_running_operations() -> None:
+    # given no existing aur builder provisioning
+    # when provisioning the aur builder
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all") as connect_all,
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops") as run_ops,
+    ):
+        provision_aur_builder("my-project")
+
+    # then the state is connected before operations are run
+    connect_all.assert_called_once_with(state_cls.return_value)
+    run_ops.assert_called_once_with(state_cls.return_value)
+
+
+def _completed(returncode: int, stdout: str = "") -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout)
+
+
+def test_ensure_paru_does_nothing_when_already_installed() -> None:
+    # given a container that already has paru installed
+    with (
+        patch("ask.provision.incus.run_command", return_value=_completed(0)) as run_command,
+        patch("ask.provision.incus.exec_command") as exec_command,
+    ):
+        # when ensuring paru is present
+        ensure_paru("my-project")
+
+    # then only the presence check is made, and nothing is built
+    run_command.assert_called_once_with("my-project", ["pacman", "-Qq", "paru"])
+    exec_command.assert_not_called()
+
+
+def test_ensure_paru_builds_it_when_missing_and_the_user_approves() -> None:
+    # given a container without paru, and a user who approves the build after
+    # reviewing the PKGBUILD
+    with (
+        patch(
+            "ask.provision.incus.run_command",
+            side_effect=[_completed(1), _completed(0, "1001\n"), _completed(0, "1001\n")],
+        ),
+        patch("ask.provision.incus.exec_command", return_value=0) as exec_command,
+        patch("builtins.input", return_value="y"),
+    ):
+        # when ensuring paru is present
+        ensure_paru("my-project")
+
+    # then paru-bin is cloned, its PKGBUILD is shown, and it is built as the
+    # aur builder user
+    exec_command.assert_any_call(
+        "my-project",
+        1001,
+        1001,
+        Path("/home/aur"),
+        ["git", "clone", "https://aur.archlinux.org/paru-bin.git", "paru-bin"],
+    )
+    exec_command.assert_any_call(
+        "my-project", 1001, 1001, Path("/home/aur/paru-bin"), ["cat", "PKGBUILD"]
+    )
+    exec_command.assert_any_call(
+        "my-project",
+        1001,
+        1001,
+        Path("/home/aur/paru-bin"),
+        ["makepkg", "-si", "--noconfirm"],
+    )
+
+
+def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
+    # given a container without paru, and a user who declines after
+    # reviewing the PKGBUILD
+    with (
+        patch(
+            "ask.provision.incus.run_command",
+            side_effect=[_completed(1), _completed(0, "1001\n"), _completed(0, "1001\n")],
+        ),
+        patch("ask.provision.incus.exec_command", return_value=0) as exec_command,
+        patch("builtins.input", return_value="n"),
+    ):
+        # when ensuring paru is present
+        # then a clear error is raised, and the package is never built
+        with pytest.raises(RuntimeError, match="declined"):
+            ensure_paru("my-project")
+
+    build_calls = [c for c in exec_command.call_args_list if "makepkg" in c.args[4]]
+    assert build_calls == []
+
+
+def test_provision_aur_packages_does_nothing_for_no_packages() -> None:
+    # given no aur packages to install
+    with (
+        patch("ask.provision.provision_aur_builder") as builder,
+        patch("ask.provision.ensure_paru") as paru,
+        patch("ask.provision.incus.exec_command") as exec_command,
+    ):
+        # when provisioning aur packages
+        provision_aur_packages("my-project", "arch", [])
+
+    # then nothing is provisioned at all
+    builder.assert_not_called()
+    paru.assert_not_called()
+    exec_command.assert_not_called()
+
+
+def test_provision_aur_packages_raises_for_an_unsupported_distribution() -> None:
+    # given a distribution AUR is not meaningful for
+    # when provisioning aur packages
+    # then a clear error is raised
+    with pytest.raises(ValueError, match="debian"):
+        provision_aur_packages("my-project", "debian", ["yay-bin"])
+
+
+def test_provision_aur_packages_builds_the_builder_and_paru_then_installs() -> None:
+    # given aur packages to install on arch
+    with (
+        patch("ask.provision.provision_aur_builder") as builder,
+        patch("ask.provision.ensure_paru") as paru,
+        patch(
+            "ask.provision.incus.run_command",
+            side_effect=[_completed(0, "1001\n"), _completed(0, "1001\n")],
+        ),
+        patch("ask.provision.incus.exec_command", return_value=0) as exec_command,
+    ):
+        # when provisioning aur packages
+        provision_aur_packages("my-project", "arch", ["yay-bin", "some-other-pkg"])
+
+    # then the builder user and paru are ensured, in that order, before
+    # installing the declared packages as the aur builder user, interactively
+    builder.assert_called_once_with("my-project")
+    paru.assert_called_once_with("my-project")
+    exec_command.assert_called_once_with(
+        "my-project",
+        1001,
+        1001,
+        Path("/home/aur"),
+        ["paru", "-S", "yay-bin", "some-other-pkg"],
+    )
 
 
 def test_pyinfra_echo_actually_prints_to_stdout() -> None:

@@ -13,6 +13,7 @@ from ask.incus import (
     exec_command,
     get_managed_packages,
     image_for,
+    run_command,
     set_managed_packages,
     stale_packages,
 )
@@ -391,6 +392,40 @@ def test_stale_packages_returns_nothing_for_empty_inputs() -> None:
 
     # then nothing is stale
     assert stale == []
+
+
+def test_run_command_runs_the_given_command_capturing_output() -> None:
+    # given a command to run inside the container
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="hello\n", stderr=""
+        )
+
+        # when running it
+        result = run_command("my-project", ["pacman", "-Qq", "paru"])
+
+    # then incus exec is invoked with the command, capturing output rather
+    # than inheriting the caller's stdio
+    run.assert_called_once_with(
+        ["incus", "exec", "my-project", "--", "pacman", "-Qq", "paru"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout == "hello\n"
+
+
+def test_run_command_does_not_raise_on_a_non_zero_exit() -> None:
+    # given a command that exits non-zero inside the container
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr=""
+        )
+
+        # when running it
+        result = run_command("my-project", ["pacman", "-Qq", "missing"])
+
+    # then the non-zero exit is returned rather than raised
+    assert result.returncode == 1
 
 
 def test_converge_leaves_unrelated_devices_alone() -> None:

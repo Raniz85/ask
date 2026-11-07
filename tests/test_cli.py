@@ -162,6 +162,76 @@ def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> 
     provision_packages.assert_called_once_with("my-project", "arch", ["zsh"])
 
 
+def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> None:
+    # given a project directory declaring an aur-prefixed package alongside an
+    # official one
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(
+        'distribution = "arch"\npackages.arch = ["aur:yay-bin", "git"]\n'
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.converge"),
+        patch("ask.cli.incus.converge_shell_rc"),
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages") as set_managed_packages,
+        patch("ask.cli.provision.provision_user"),
+        patch("ask.cli.provision.provision_packages") as provision_packages,
+        patch("ask.cli.provision.provision_aur_packages") as provision_aur_packages,
+        patch("ask.cli.provision.remove_packages"),
+        patch("ask.cli.provision.fix_bind_mount_ownership"),
+    ):
+        converge()
+
+    # then the official packages go through the regular pacman path, the aur
+    # package goes through the aur path with its prefix stripped, and the
+    # tracked managed set records both by their plain names
+    provision_packages.assert_called_once_with("my-project", "arch", ["git", "bash"])
+    provision_aur_packages.assert_called_once_with("my-project", "arch", ["yay-bin"])
+    set_managed_packages.assert_called_once_with("my-project", ["git", "bash", "yay-bin"])
+
+
+def test_converge_removes_a_package_that_is_no_longer_declared_as_aur(
+    tmp_path: Path,
+) -> None:
+    # given a project directory that no longer declares a package the
+    # container previously tracked as aur-installed
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.converge"),
+        patch("ask.cli.incus.converge_shell_rc"),
+        patch(
+            "ask.cli.incus.get_managed_packages",
+            return_value=["bash", "yay-bin"],
+        ),
+        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.provision.provision_user"),
+        patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.provision_aur_packages"),
+        patch("ask.cli.provision.remove_packages") as remove_packages,
+        patch("ask.cli.provision.fix_bind_mount_ownership"),
+    ):
+        converge()
+
+    # then it is removed the same way as any other stale package, regardless
+    # of how it was originally installed
+    remove_packages.assert_called_once_with("my-project", "arch", ["yay-bin"])
+
+
 def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) -> None:
     # given a project directory, a config declaring zsh as the shell and a
     # user, and a host home directory
