@@ -28,6 +28,20 @@ def create_container(name: str, distribution: str) -> None:
     subprocess.run(command, check=True)
 
 
+def is_running(name: str) -> bool:
+    result = subprocess.run(
+        ["incus", "list", name, "--format", "csv", "-c", "s"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() == "RUNNING"
+
+
+def start_container(name: str) -> None:
+    subprocess.run(["incus", "start", name], check=True)
+
+
 def run_command(name: str, command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["incus", "exec", name, "--", *command],

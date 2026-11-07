@@ -15,6 +15,8 @@ def converge() -> None:
     project_dir = Path.cwd()
     m = manifest.load(project_dir / "ask.toml")
     cfg = config.load(config.default_path())
+    if not incus.is_running(project_dir.name):
+        incus.start_container(project_dir.name)
     bind_mounts = [project_dir] + manifest.resolve_bind_mounts(m, cfg.layers)
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
@@ -45,6 +47,8 @@ def enter() -> None:
     project_dir = Path.cwd()
     cfg = config.load(config.default_path())
     user = config.resolve_user(cfg)
+    if not incus.is_running(project_dir.name):
+        incus.start_container(project_dir.name)
     returncode = incus.exec_command(
         project_dir.name, user.uid, user.gid, project_dir, [user.shell]
     )
@@ -55,6 +59,8 @@ def exec(*command: str) -> None:
     project_dir = Path.cwd()
     cfg = config.load(config.default_path())
     user = config.resolve_user(cfg)
+    if not incus.is_running(project_dir.name):
+        incus.start_container(project_dir.name)
     returncode = incus.exec_command(
         project_dir.name, user.uid, user.gid, project_dir, list(command)
     )

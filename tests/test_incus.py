@@ -13,9 +13,11 @@ from ask.incus import (
     exec_command,
     get_managed_packages,
     image_for,
+    is_running,
     run_command,
     set_managed_packages,
     stale_packages,
+    start_container,
 )
 
 
@@ -355,6 +357,50 @@ def test_exec_command_returns_the_commands_exit_code() -> None:
 
     # then the command's exit code is returned, without raising
     assert returncode == 7
+
+
+def test_is_running_returns_true_for_a_running_container() -> None:
+    # given a container currently in the running state
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="RUNNING\n"
+        )
+
+        # when checking whether it is running
+        result = is_running("my-project")
+
+    # then it is reported as running
+    assert result is True
+    run.assert_called_once_with(
+        ["incus", "list", "my-project", "--format", "csv", "-c", "s"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_is_running_returns_false_for_a_stopped_container() -> None:
+    # given a container currently in the stopped state
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="STOPPED\n"
+        )
+
+        # when checking whether it is running
+        result = is_running("my-project")
+
+    # then it is reported as not running
+    assert result is False
+
+
+def test_start_container_starts_the_named_container() -> None:
+    # given a container to start
+    with patch("ask.incus.subprocess.run") as run:
+        # when starting it
+        start_container("my-project")
+
+    # then incus is invoked to start the named container
+    run.assert_called_once_with(["incus", "start", "my-project"], check=True)
 
 
 def test_stale_packages_returns_managed_packages_no_longer_desired() -> None:

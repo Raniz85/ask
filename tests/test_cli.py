@@ -27,6 +27,68 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
     converge_mock.assert_called_once_with()
 
 
+def test_converge_starts_the_container_when_not_already_running(
+    tmp_path: Path,
+) -> None:
+    # given a project directory, and a container that is not currently running
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=False),
+        patch("ask.cli.incus.start_container") as start_container,
+        patch("ask.cli.incus.converge"),
+        patch("ask.cli.incus.converge_shell_rc"),
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.provision.provision_user"),
+        patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.remove_packages"),
+        patch("ask.cli.provision.fix_bind_mount_ownership"),
+    ):
+        converge()
+
+    # then the container is started before the rest of convergence runs
+    start_container.assert_called_once_with("my-project")
+
+
+def test_converge_does_not_start_an_already_running_container(
+    tmp_path: Path,
+) -> None:
+    # given a project directory, and a container that is already running
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
+        patch("ask.cli.incus.start_container") as start_container,
+        patch("ask.cli.incus.converge"),
+        patch("ask.cli.incus.converge_shell_rc"),
+        patch("ask.cli.incus.get_managed_packages", return_value=[]),
+        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.provision.provision_user"),
+        patch("ask.cli.provision.provision_packages"),
+        patch("ask.cli.provision.remove_packages"),
+        patch("ask.cli.provision.fix_bind_mount_ownership"),
+    ):
+        converge()
+
+    # then it is not started again
+    start_container.assert_not_called()
+
+
 def test_converge_applies_resolved_bind_mounts_including_project_dir(
     tmp_path: Path,
 ) -> None:
@@ -44,6 +106,7 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge") as incus_converge,
         patch("ask.cli.incus.converge_shell_rc"),
         patch("ask.cli.incus.get_managed_packages", return_value=[]),
@@ -75,6 +138,7 @@ def test_converge_provisions_the_resolved_user(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
         patch("ask.cli.incus.get_managed_packages", return_value=[]),
@@ -115,6 +179,7 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
         patch("ask.cli.incus.get_managed_packages", return_value=[]),
@@ -147,6 +212,7 @@ def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> 
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
         patch("ask.cli.incus.get_managed_packages", return_value=[]),
@@ -177,6 +243,7 @@ def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> N
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
         patch("ask.cli.incus.get_managed_packages", return_value=[]),
@@ -212,6 +279,7 @@ def test_converge_removes_a_package_that_is_no_longer_declared_as_aur(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
         patch(
@@ -248,6 +316,7 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc") as converge_shell_rc,
         patch("ask.cli.incus.get_managed_packages", return_value=[]),
@@ -282,6 +351,7 @@ def test_converge_removes_packages_no_longer_declared(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
         patch(
@@ -319,6 +389,7 @@ def test_converge_does_not_remove_packages_when_nothing_is_stale(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
         patch(
@@ -354,6 +425,7 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
         patch("ask.cli.incus.converge"),
         patch("ask.cli.incus.converge_shell_rc"),
         patch("ask.cli.incus.get_managed_packages", return_value=[]),
@@ -381,6 +453,50 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
     )
 
 
+def test_enter_starts_the_container_when_not_already_running(tmp_path: Path) -> None:
+    # given a project directory, and a container that is not currently running
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=False),
+        patch("ask.cli.incus.start_container") as start_container,
+        patch("ask.cli.incus.exec_command", return_value=0),
+        pytest.raises(SystemExit),
+    ):
+        enter()
+
+    # then the container is started before entering
+    start_container.assert_called_once_with("my-project")
+
+
+def test_enter_does_not_start_an_already_running_container(tmp_path: Path) -> None:
+    # given a project directory, and a container that is already running
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
+        patch("ask.cli.incus.start_container") as start_container,
+        patch("ask.cli.incus.exec_command", return_value=0),
+        pytest.raises(SystemExit),
+    ):
+        enter()
+
+    # then it is not started again
+    start_container.assert_not_called()
+
+
 def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user and shell
     project_dir = tmp_path / "my-project"
@@ -392,6 +508,8 @@ def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
+        patch("ask.cli.incus.start_container"),
         patch("ask.cli.incus.exec_command", return_value=0) as exec_command,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -416,6 +534,8 @@ def test_enter_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
+        patch("ask.cli.incus.start_container"),
         patch("ask.cli.incus.exec_command", return_value=3),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -423,6 +543,50 @@ def test_enter_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
 
     # then ask exits with that same code, rather than raising
     assert exc_info.value.code == 3
+
+
+def test_exec_starts_the_container_when_not_already_running(tmp_path: Path) -> None:
+    # given a project directory, and a container that is not currently running
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when executing a command from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=False),
+        patch("ask.cli.incus.start_container") as start_container,
+        patch("ask.cli.incus.exec_command", return_value=0),
+        pytest.raises(SystemExit),
+    ):
+        exec("ls", "-la")
+
+    # then the container is started before the command is executed
+    start_container.assert_called_once_with("my-project")
+
+
+def test_exec_does_not_start_an_already_running_container(tmp_path: Path) -> None:
+    # given a project directory, and a container that is already running
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when executing a command from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
+        patch("ask.cli.incus.start_container") as start_container,
+        patch("ask.cli.incus.exec_command", return_value=0),
+        pytest.raises(SystemExit),
+    ):
+        exec("ls", "-la")
+
+    # then it is not started again
+    start_container.assert_not_called()
 
 
 def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
@@ -436,6 +600,8 @@ def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
+        patch("ask.cli.incus.start_container"),
         patch("ask.cli.incus.exec_command", return_value=0) as exec_command,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -460,6 +626,8 @@ def test_exec_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.is_running", return_value=True),
+        patch("ask.cli.incus.start_container"),
         patch("ask.cli.incus.exec_command", return_value=3),
         pytest.raises(SystemExit) as exc_info,
     ):
