@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ask.cli import converge, create, enter, exec
+from ask.cli import FAKE_SSH_ENV, converge, create, enter, exec
 from ask.config import ResolvedUser
 
 
@@ -516,9 +516,10 @@ def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
         enter()
 
     # then the resolved shell is executed in the container as the resolved
-    # user, in the project directory, and ask exits with its exit code
+    # user, in the project directory, with environment variables that make
+    # it look like an SSH session, and ask exits with its exit code
     exec_command.assert_called_once_with(
-        "my-project", 1000, 1000, project_dir, ["zsh"]
+        "my-project", 1000, 1000, project_dir, ["zsh"], env=FAKE_SSH_ENV
     )
     assert exc_info.value.code == 0
 

@@ -50,7 +50,17 @@ def run_command(name: str, command: list[str]) -> subprocess.CompletedProcess[st
     )
 
 
-def exec_command(name: str, uid: int, gid: int, cwd: Path, command: list[str]) -> int:
+def exec_command(
+    name: str,
+    uid: int,
+    gid: int,
+    cwd: Path,
+    command: list[str],
+    env: dict[str, str] | None = None,
+) -> int:
+    env_args = [
+        arg for key, value in (env or {}).items() for arg in ("--env", f"{key}={value}")
+    ]
     result = subprocess.run(
         [
             "incus",
@@ -62,6 +72,7 @@ def exec_command(name: str, uid: int, gid: int, cwd: Path, command: list[str]) -
             str(gid),
             "--cwd",
             str(cwd),
+            *env_args,
             "--",
             *command,
         ]

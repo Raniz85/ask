@@ -3,6 +3,12 @@ from pathlib import Path
 
 from ask import config, incus, manifest, provision, shell
 
+FAKE_SSH_ENV = {
+    "SSH_CLIENT": "127.0.0.1 1 22",
+    "SSH_CONNECTION": "127.0.0.1 1 127.0.0.1 22",
+    "SSH_TTY": "/dev/pts/0",
+}
+
 
 def create() -> None:
     project_dir = Path.cwd()
@@ -50,7 +56,7 @@ def enter() -> None:
     if not incus.is_running(project_dir.name):
         incus.start_container(project_dir.name)
     returncode = incus.exec_command(
-        project_dir.name, user.uid, user.gid, project_dir, [user.shell]
+        project_dir.name, user.uid, user.gid, project_dir, [user.shell], env=FAKE_SSH_ENV
     )
     sys.exit(returncode)
 

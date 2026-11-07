@@ -329,6 +329,45 @@ def test_exec_command_runs_the_command_as_the_given_user_and_cwd() -> None:
     )
 
 
+def test_exec_command_passes_extra_environment_variables() -> None:
+    # given a command to run inside the container, with extra environment
+    # variables to set for it
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+
+        # when executing it
+        exec_command(
+            "my-project",
+            1000,
+            1000,
+            Path("/project"),
+            ["ls"],
+            env={"SSH_TTY": "/dev/pts/0", "SSH_CLIENT": "127.0.0.1 1 22"},
+        )
+
+    # then each variable is passed to incus exec as a "--env" flag, before
+    # the "--" separating the command
+    run.assert_called_once_with(
+        [
+            "incus",
+            "exec",
+            "my-project",
+            "--user",
+            "1000",
+            "--group",
+            "1000",
+            "--cwd",
+            "/project",
+            "--env",
+            "SSH_TTY=/dev/pts/0",
+            "--env",
+            "SSH_CLIENT=127.0.0.1 1 22",
+            "--",
+            "ls",
+        ]
+    )
+
+
 def test_exec_command_does_not_capture_or_check_the_result() -> None:
     # given a command to run inside the container
     with patch("ask.incus.subprocess.run") as run:
