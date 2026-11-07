@@ -180,7 +180,7 @@ def provision_aur_packages(
 
     uid, gid = _aur_builder_ids(container_name)
     incus.exec_command(
-        container_name, uid, gid, _AUR_BUILD_HOME, ["paru", "-S", *packages]
+        container_name, uid, gid, _AUR_BUILD_HOME, ["paru", "-S", "--needed", *packages]
     )
 
 

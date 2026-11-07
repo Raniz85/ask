@@ -544,7 +544,7 @@ def test_provision_aur_packages_builds_the_builder_and_paru_then_installs() -> N
         1001,
         1001,
         Path("/home/aur"),
-        ["paru", "-S", "yay-bin", "some-other-pkg"],
+        ["paru", "-S", "--needed", "yay-bin", "some-other-pkg"],
     )
 
 
