@@ -43,10 +43,8 @@ def test_converge_ensures_the_targeted_container_is_running(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -57,6 +55,7 @@ def test_converge_ensures_the_targeted_container_is_running(
     # ensured to be running before the rest of convergence runs
     container_cls.assert_called_once_with("my-project")
     container.ensure_running.assert_called_once_with()
+    provisioner_cls.assert_called_once_with(container)
 
 
 def test_converge_applies_resolved_bind_mounts_including_project_dir(
@@ -83,10 +82,8 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -125,10 +122,8 @@ def test_converge_provisions_the_resolved_user(tmp_path: Path) -> None:
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user") as provision_user,
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -136,8 +131,7 @@ def test_converge_provisions_the_resolved_user(tmp_path: Path) -> None:
         converge()
 
     # then the resolved user is provisioned into the container
-    provision_user.assert_called_once_with(
-        "my-project",
+    provisioner_cls.return_value.provision_user.assert_called_once_with(
         ResolvedUser(
             name="raniz",
             uid=1000,
@@ -166,17 +160,15 @@ def test_converge_provisions_the_user_before_mounting_home_relative_paths(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch(
-            "ask.cli.provision.provision_user",
-            side_effect=lambda *a, **k: call_order.append("provision_user"),
-        ),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
         container.converge.side_effect = lambda *a, **k: call_order.append("converge")
+        provisioner_cls.return_value.provision_user.side_effect = lambda *a, **k: (
+            call_order.append("provision_user")
+        )
 
         converge()
 
@@ -203,10 +195,8 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages") as provision_packages,
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -216,8 +206,8 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
     # then the resolved packages (project-level and layer-level) are
     # provisioned for the manifest's distribution, along with the package
     # required by the (default) shell
-    provision_packages.assert_called_once_with(
-        "my-project", "arch", ["project-pkg", "layer-pkg", "bash"]
+    provisioner_cls.return_value.provision_packages.assert_called_once_with(
+        "arch", ["project-pkg", "layer-pkg", "bash"]
     )
 
 
@@ -235,10 +225,8 @@ def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> 
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages") as provision_packages,
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -246,7 +234,9 @@ def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> 
         converge()
 
     # then zsh's own package is included among the packages to provision
-    provision_packages.assert_called_once_with("my-project", "arch", ["zsh"])
+    provisioner_cls.return_value.provision_packages.assert_called_once_with(
+        "arch", ["zsh"]
+    )
 
 
 def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> None:
@@ -265,11 +255,8 @@ def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> N
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages") as provision_packages,
-        patch("ask.cli.provision.provision_aur_packages") as provision_aur_packages,
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder") as aur_builder_cls,
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -279,8 +266,12 @@ def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> N
     # then the official packages go through the regular pacman path, the aur
     # package goes through the aur path with its prefix stripped, and the
     # tracked managed set records both by their plain names
-    provision_packages.assert_called_once_with("my-project", "arch", ["git", "bash"])
-    provision_aur_packages.assert_called_once_with("my-project", "arch", ["yay-bin"])
+    provisioner_cls.return_value.provision_packages.assert_called_once_with(
+        "arch", ["git", "bash"]
+    )
+    aur_builder_cls.return_value.install_packages.assert_called_once_with(
+        "arch", ["yay-bin"]
+    )
     container.set_managed_packages.assert_called_once_with(["git", "bash", "yay-bin"])
 
 
@@ -300,11 +291,8 @@ def test_converge_removes_a_package_that_is_no_longer_declared_as_aur(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.provision_aur_packages"),
-        patch("ask.cli.provision.remove_packages") as remove_packages,
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = ["bash", "yay-bin"]
@@ -313,7 +301,9 @@ def test_converge_removes_a_package_that_is_no_longer_declared_as_aur(
 
     # then it is removed the same way as any other stale package, regardless
     # of how it was originally installed
-    remove_packages.assert_called_once_with("my-project", "arch", ["yay-bin"])
+    provisioner_cls.return_value.remove_packages.assert_called_once_with(
+        "arch", ["yay-bin"]
+    )
 
 
 def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) -> None:
@@ -333,10 +323,8 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -371,11 +359,8 @@ def test_converge_installs_declared_agent_packages(tmp_path: Path) -> None:
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages") as provision_packages,
-        patch("ask.cli.provision.provision_aur_packages") as provision_aur_packages,
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder") as aur_builder_cls,
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -384,9 +369,11 @@ def test_converge_installs_declared_agent_packages(tmp_path: Path) -> None:
 
     # then the agent's aur-prefixed package is installed through the aur
     # path, alongside the default shell's official package
-    provision_packages.assert_called_once_with("my-project", "arch", ["bash"])
-    provision_aur_packages.assert_called_once_with(
-        "my-project", "arch", ["claude-code"]
+    provisioner_cls.return_value.provision_packages.assert_called_once_with(
+        "arch", ["bash"]
+    )
+    aur_builder_cls.return_value.install_packages.assert_called_once_with(
+        "arch", ["claude-code"]
     )
     container.set_managed_packages.assert_called_once_with(["bash", "claude-code"])
 
@@ -413,11 +400,8 @@ def test_converge_mounts_agent_state_when_shared_state_is_enabled(
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.provision_aur_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -480,11 +464,8 @@ def test_converge_does_not_mount_agent_state_without_shared_state(
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.provision_aur_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -521,10 +502,8 @@ def test_converge_removes_packages_no_longer_declared(tmp_path: Path) -> None:
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages") as remove_packages,
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = [
@@ -537,7 +516,9 @@ def test_converge_removes_packages_no_longer_declared(tmp_path: Path) -> None:
 
     # then the package no longer declared is removed, and the newly resolved
     # set of packages becomes the tracked set for next time
-    remove_packages.assert_called_once_with("my-project", "arch", ["stale-pkg"])
+    provisioner_cls.return_value.remove_packages.assert_called_once_with(
+        "arch", ["stale-pkg"]
+    )
     container.set_managed_packages.assert_called_once_with(["project-pkg", "bash"])
 
 
@@ -559,10 +540,8 @@ def test_converge_does_not_remove_packages_when_nothing_is_stale(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages") as remove_packages,
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = ["project-pkg", "bash"]
@@ -570,7 +549,7 @@ def test_converge_does_not_remove_packages_when_nothing_is_stale(
         converge()
 
     # then nothing is removed
-    remove_packages.assert_not_called()
+    provisioner_cls.return_value.remove_packages.assert_not_called()
 
 
 def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
@@ -591,10 +570,8 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership") as fix_ownership,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -604,8 +581,7 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
     # then bind mount ownership is fixed for the resolved user, covering every
     # mount applied to the instance (including the shell rc file's container
     # path, so its ancestor directories end up owned by the user too)
-    fix_ownership.assert_called_once_with(
-        "my-project",
+    provisioner_cls.return_value.fix_bind_mount_ownership.assert_called_once_with(
         [
             project_dir,
             Path("/home/raniz/.cache/uv"),
@@ -641,11 +617,8 @@ def test_converge_fixes_agent_state_mount_ownership_when_shared_state_is_enabled
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.provision_aur_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership") as fix_ownership,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
@@ -655,8 +628,7 @@ def test_converge_fixes_agent_state_mount_ownership_when_shared_state_is_enabled
     # then ownership is fixed using every one of the agent's state paths too,
     # so e.g. the shared ~/.claude ancestor directory ends up owned by the
     # user, not just the project directory and shell rc mounts
-    fix_ownership.assert_called_once_with(
-        "my-project",
+    provisioner_cls.return_value.fix_bind_mount_ownership.assert_called_once_with(
         [
             project_dir,
             Path("/home/raniz/.bashrc"),

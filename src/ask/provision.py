@@ -1,8 +1,10 @@
 import io
 import sys
 from collections.abc import Callable
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from pyinfra.api import Config as PyinfraConfig
 from pyinfra.api import Inventory, State
@@ -36,57 +38,6 @@ def _package_operation_for(distribution: str) -> Callable[..., Any]:
         ) from None
 
 
-def _build_state(container_name: str) -> State:
-    inventory = Inventory(([f"@incus/{container_name}"], {}))
-    state = State(inventory, PyinfraConfig())
-    state.print_output = True
-    state.print_input = True
-    return state
-
-
-def provision_user(container_name: str, user: ResolvedUser) -> None:
-    state = _build_state(container_name)
-    connect_all(state)
-
-    add_op(state, server.group, group=user.group_name, gid=user.gid)
-    add_op(
-        state,
-        server.user,
-        user=user.name,
-        uid=user.uid,
-        group=user.group_name,
-        groups=user.extra_groups,
-        shell=f"/bin/{user.shell}",
-        create_home=True,
-    )
-
-    run_ops(state)
-
-
-def provision_packages(
-    container_name: str, distribution: str, packages: list[str]
-) -> None:
-    operation = _package_operation_for(distribution)
-    state = _build_state(container_name)
-    connect_all(state)
-
-    add_op(state, operation, packages=packages, update=True, upgrade=True)
-
-    run_ops(state)
-
-
-def remove_packages(
-    container_name: str, distribution: str, packages: list[str]
-) -> None:
-    operation = _package_operation_for(distribution)
-    state = _build_state(container_name)
-    connect_all(state)
-
-    add_op(state, operation, packages=packages, present=False)
-
-    run_ops(state)
-
-
 _AUR_PREFIX = "aur:"
 
 
@@ -96,112 +47,143 @@ def split_aur_packages(packages: list[str]) -> tuple[list[str], list[str]]:
     return official, aur
 
 
+@dataclass(frozen=True)
+class Provisioner:
+    container: incus.Container
+
+    @contextmanager
+    def session(self) -> Iterator[State]:
+        inventory = Inventory(([f"@incus/{self.container.name}"], {}))
+        state = State(inventory, PyinfraConfig())
+        state.print_output = True
+        state.print_input = True
+        connect_all(state)
+        yield state
+        run_ops(state)
+
+    def provision_user(self, user: ResolvedUser) -> None:
+        with self.session() as state:
+            add_op(state, server.group, group=user.group_name, gid=user.gid)
+            add_op(
+                state,
+                server.user,
+                user=user.name,
+                uid=user.uid,
+                group=user.group_name,
+                groups=user.extra_groups,
+                shell=f"/bin/{user.shell}",
+                create_home=True,
+            )
+
+    def provision_packages(self, distribution: str, packages: list[str]) -> None:
+        operation = _package_operation_for(distribution)
+        with self.session() as state:
+            add_op(state, operation, packages=packages, update=True, upgrade=True)
+
+    def remove_packages(self, distribution: str, packages: list[str]) -> None:
+        operation = _package_operation_for(distribution)
+        with self.session() as state:
+            add_op(state, operation, packages=packages, present=False)
+
+    def fix_bind_mount_ownership(
+        self, bind_mounts: list[Path], user: ResolvedUser
+    ) -> None:
+        home = Path(f"/home/{user.name}")
+        ancestors: set[Path] = set()
+        for mount in bind_mounts:
+            ancestors.update(ancestors_under_home(mount, home))
+
+        if not ancestors:
+            return
+
+        with self.session() as state:
+            for ancestor in sorted(ancestors):
+                add_op(
+                    state,
+                    files.directory,
+                    path=str(ancestor),
+                    user=user.name,
+                    group=user.group_name,
+                )
+
+
 _AUR_BUILD_USER = "aur"
 _AUR_SUDOERS_PATH = "/etc/sudoers.d/ask-aur"
-
-
-def provision_aur_builder(container_name: str) -> None:
-    state = _build_state(container_name)
-    connect_all(state)
-
-    add_op(state, server.group, group=_AUR_BUILD_USER, system=True)
-    add_op(
-        state,
-        server.user,
-        user=_AUR_BUILD_USER,
-        group=_AUR_BUILD_USER,
-        system=True,
-        shell="/usr/bin/nologin",
-        create_home=True,
-    )
-    add_op(state, pacman.packages, packages=["base-devel", "git"], update=True)
-    add_op(
-        state,
-        files.put,
-        src=io.StringIO(f"{_AUR_BUILD_USER} ALL=(root) NOPASSWD: /usr/bin/pacman *\n"),
-        dest=_AUR_SUDOERS_PATH,
-        user="root",
-        group="root",
-        mode="440",
-    )
-
-    run_ops(state)
-
-
 _AUR_BUILD_HOME = Path(f"/home/{_AUR_BUILD_USER}")
 _PARU_BIN_REPO = "https://aur.archlinux.org/paru-bin.git"
 _PARU_BIN_DIR = "paru-bin"
 
 
-def _aur_builder_ids(container: incus.Container) -> tuple[int, int]:
-    uid = int(container.run_command(["id", "-u", _AUR_BUILD_USER]).stdout)
-    gid = int(container.run_command(["id", "-g", _AUR_BUILD_USER]).stdout)
-    return uid, gid
+@dataclass(frozen=True)
+class AurBuilder:
+    container: incus.Container
 
+    def provision_builder(self) -> None:
+        with Provisioner(self.container).session() as state:
+            add_op(state, server.group, group=_AUR_BUILD_USER, system=True)
+            add_op(
+                state,
+                server.user,
+                user=_AUR_BUILD_USER,
+                group=_AUR_BUILD_USER,
+                system=True,
+                shell="/usr/bin/nologin",
+                create_home=True,
+            )
+            add_op(state, pacman.packages, packages=["base-devel", "git"], update=True)
+            add_op(
+                state,
+                files.put,
+                src=io.StringIO(
+                    f"{_AUR_BUILD_USER} ALL=(root) NOPASSWD: /usr/bin/pacman *\n"
+                ),
+                dest=_AUR_SUDOERS_PATH,
+                user="root",
+                group="root",
+                mode="440",
+            )
 
-def ensure_paru(container_name: str) -> None:
-    container = incus.Container(container_name)
-    already_installed = container.run_command(["pacman", "-Qq", "paru"]).returncode
-    if already_installed == 0:
-        return
+    def _builder_ids(self) -> tuple[int, int]:
+        uid = int(self.container.run_command(["id", "-u", _AUR_BUILD_USER]).stdout)
+        gid = int(self.container.run_command(["id", "-g", _AUR_BUILD_USER]).stdout)
+        return uid, gid
 
-    uid, gid = _aur_builder_ids(container)
-    build_dir = _AUR_BUILD_HOME / _PARU_BIN_DIR
+    def ensure_paru(self) -> None:
+        already_installed = self.container.run_command(
+            ["pacman", "-Qq", "paru"]
+        ).returncode
+        if already_installed == 0:
+            return
 
-    container.exec_command(
-        uid,
-        gid,
-        _AUR_BUILD_HOME,
-        ["git", "clone", _PARU_BIN_REPO, _PARU_BIN_DIR],
-    )
-    container.exec_command(uid, gid, build_dir, ["cat", "PKGBUILD"])
+        uid, gid = self._builder_ids()
+        build_dir = _AUR_BUILD_HOME / _PARU_BIN_DIR
 
-    answer = input("Proceed with building paru-bin from the PKGBUILD above? [y/N] ")
-    if answer.strip().lower() not in ("y", "yes"):
-        raise RuntimeError("paru build was declined; cannot install AUR packages")
+        self.container.exec_command(
+            uid,
+            gid,
+            _AUR_BUILD_HOME,
+            ["git", "clone", _PARU_BIN_REPO, _PARU_BIN_DIR],
+        )
+        self.container.exec_command(uid, gid, build_dir, ["cat", "PKGBUILD"])
 
-    container.exec_command(uid, gid, build_dir, ["makepkg", "-si", "--noconfirm"])
+        answer = input("Proceed with building paru-bin from the PKGBUILD above? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            raise RuntimeError("paru build was declined; cannot install AUR packages")
 
-
-def provision_aur_packages(
-    container_name: str, distribution: str, packages: list[str]
-) -> None:
-    if not packages:
-        return
-    if distribution != "arch":
-        raise ValueError(f"AUR packages are not supported on {distribution!r}")
-
-    provision_aur_builder(container_name)
-    ensure_paru(container_name)
-
-    container = incus.Container(container_name)
-    uid, gid = _aur_builder_ids(container)
-    container.exec_command(
-        uid, gid, _AUR_BUILD_HOME, ["paru", "-S", "--needed", *packages]
-    )
-
-
-def fix_bind_mount_ownership(
-    container_name: str, bind_mounts: list[Path], user: ResolvedUser
-) -> None:
-    home = Path(f"/home/{user.name}")
-    ancestors: set[Path] = set()
-    for mount in bind_mounts:
-        ancestors.update(ancestors_under_home(mount, home))
-
-    if not ancestors:
-        return
-
-    state = _build_state(container_name)
-    connect_all(state)
-
-    for ancestor in sorted(ancestors):
-        add_op(
-            state,
-            files.directory,
-            path=str(ancestor),
-            user=user.name,
-            group=user.group_name,
+        self.container.exec_command(
+            uid, gid, build_dir, ["makepkg", "-si", "--noconfirm"]
         )
 
-    run_ops(state)
+    def install_packages(self, distribution: str, packages: list[str]) -> None:
+        if not packages:
+            return
+        if distribution != "arch":
+            raise ValueError(f"AUR packages are not supported on {distribution!r}")
+
+        self.provision_builder()
+        self.ensure_paru()
+
+        uid, gid = self._builder_ids()
+        self.container.exec_command(
+            uid, gid, _AUR_BUILD_HOME, ["paru", "-S", "--needed", *packages]
+        )

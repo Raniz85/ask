@@ -54,20 +54,23 @@ def converge() -> None:
         ]
     )
 
-    provision.provision_user(project_dir.name, user)
+    provisioner = provision.Provisioner(container)
+    aur_builder = provision.AurBuilder(container)
+
+    provisioner.provision_user(user)
     container.converge(mounts)
 
-    provision.provision_packages(project_dir.name, m.distribution, official_packages)
-    provision.provision_aur_packages(project_dir.name, m.distribution, aur_packages)
+    provisioner.provision_packages(m.distribution, official_packages)
+    aur_builder.install_packages(m.distribution, aur_packages)
 
     resolved_packages = official_packages + aur_packages
     stale = incus.stale_packages(container.get_managed_packages(), resolved_packages)
     if stale:
-        provision.remove_packages(project_dir.name, m.distribution, stale)
+        provisioner.remove_packages(m.distribution, stale)
     container.set_managed_packages(resolved_packages)
 
-    provision.fix_bind_mount_ownership(
-        project_dir.name, [mount.container_path for mount in mounts], user
+    provisioner.fix_bind_mount_ownership(
+        [mount.container_path for mount in mounts], user
     )
 
 

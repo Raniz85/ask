@@ -10,20 +10,12 @@ from pyinfra.api.output import echo
 from pyinfra.operations import files, pacman, server
 
 from ask.config import ResolvedUser
-from ask.provision import (
-    ensure_paru,
-    fix_bind_mount_ownership,
-    provision_aur_builder,
-    provision_aur_packages,
-    provision_packages,
-    provision_user,
-    remove_packages,
-    split_aur_packages,
-)
+from ask.incus import Container
+from ask.provision import AurBuilder, Provisioner, split_aur_packages
 
 
 def test_provision_user_targets_the_container_via_the_incus_connector() -> None:
-    # given a resolved user to provision
+    # given a resolved user, and a provisioner targeting a named container
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -32,8 +24,9 @@ def test_provision_user_targets_the_container_via_the_incus_connector() -> None:
         gid=1000,
         extra_groups=[],
     )
+    provisioner = Provisioner(Container("my-project"))
 
-    # when provisioning that user into a named container
+    # when provisioning that user
     with (
         patch("ask.provision.Inventory") as inventory_cls,
         patch("ask.provision.State") as state_cls,
@@ -41,7 +34,7 @@ def test_provision_user_targets_the_container_via_the_incus_connector() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops"),
     ):
-        provision_user("my-project", user)
+        provisioner.provision_user(user)
 
     # then the inventory targets that container through the incus connector,
     # and a pyinfra state is built from it
@@ -50,7 +43,7 @@ def test_provision_user_targets_the_container_via_the_incus_connector() -> None:
 
 
 def test_provision_user_connects_before_running_operations() -> None:
-    # given a resolved user to provision
+    # given a resolved user, and a provisioner
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -59,6 +52,7 @@ def test_provision_user_connects_before_running_operations() -> None:
         gid=1000,
         extra_groups=[],
     )
+    provisioner = Provisioner(Container("my-project"))
 
     # when provisioning that user
     with (
@@ -68,7 +62,7 @@ def test_provision_user_connects_before_running_operations() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops") as run_ops,
     ):
-        provision_user("my-project", user)
+        provisioner.provision_user(user)
 
     # then the state is connected before operations are run
     connect_all.assert_called_once_with(state_cls.return_value)
@@ -76,7 +70,7 @@ def test_provision_user_connects_before_running_operations() -> None:
 
 
 def test_provision_user_enables_output_printing() -> None:
-    # given a resolved user to provision
+    # given a resolved user, and a provisioner
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -85,6 +79,7 @@ def test_provision_user_enables_output_printing() -> None:
         gid=1000,
         extra_groups=[],
     )
+    provisioner = Provisioner(Container("my-project"))
 
     # when provisioning that user
     with (
@@ -94,7 +89,7 @@ def test_provision_user_enables_output_printing() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops"),
     ):
-        provision_user("my-project", user)
+        provisioner.provision_user(user)
 
     # then the state is configured to print command output and input as it runs
     state = state_cls.return_value
@@ -103,7 +98,7 @@ def test_provision_user_enables_output_printing() -> None:
 
 
 def test_provision_user_ensures_the_users_group() -> None:
-    # given a resolved user with its own group
+    # given a resolved user with its own group, and a provisioner
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -112,6 +107,7 @@ def test_provision_user_ensures_the_users_group() -> None:
         gid=1000,
         extra_groups=[],
     )
+    provisioner = Provisioner(Container("my-project"))
 
     # when provisioning that user
     with (
@@ -121,7 +117,7 @@ def test_provision_user_ensures_the_users_group() -> None:
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
     ):
-        provision_user("my-project", user)
+        provisioner.provision_user(user)
 
     # then the group is ensured with the resolved name and gid
     add_op.assert_any_call(
@@ -130,7 +126,7 @@ def test_provision_user_ensures_the_users_group() -> None:
 
 
 def test_provision_user_ensures_the_user() -> None:
-    # given a fully resolved user, including extra groups
+    # given a fully resolved user, including extra groups, and a provisioner
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -139,6 +135,7 @@ def test_provision_user_ensures_the_user() -> None:
         gid=1000,
         extra_groups=["wheel"],
     )
+    provisioner = Provisioner(Container("my-project"))
 
     # when provisioning that user
     with (
@@ -148,7 +145,7 @@ def test_provision_user_ensures_the_user() -> None:
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
     ):
-        provision_user("my-project", user)
+        provisioner.provision_user(user)
 
     # then the user is ensured with the resolved name, uid, primary group,
     # extra groups and a home directory, with the shell resolved to a full path
@@ -165,8 +162,10 @@ def test_provision_user_ensures_the_user() -> None:
 
 
 def test_provision_packages_installs_packages_via_the_distribution_operation() -> None:
-    # given a list of packages to install on arch
-    # when provisioning packages into a named container
+    # given a provisioner, and a list of packages to install on arch
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning packages
     with (
         patch("ask.provision.Inventory"),
         patch("ask.provision.State") as state_cls,
@@ -174,7 +173,7 @@ def test_provision_packages_installs_packages_via_the_distribution_operation() -
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
     ):
-        provision_packages("my-project", "arch", ["zsh", "python"])
+        provisioner.provision_packages("arch", ["zsh", "python"])
 
     # then the arch package operation is used to ensure the packages are
     # present, syncing the package database and upgrading all packages first
@@ -188,7 +187,9 @@ def test_provision_packages_installs_packages_via_the_distribution_operation() -
 
 
 def test_provision_packages_connects_before_running_operations() -> None:
-    # given a list of packages to install on arch
+    # given a provisioner, and a list of packages to install on arch
+    provisioner = Provisioner(Container("my-project"))
+
     # when provisioning packages
     with (
         patch("ask.provision.Inventory"),
@@ -197,7 +198,7 @@ def test_provision_packages_connects_before_running_operations() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops") as run_ops,
     ):
-        provision_packages("my-project", "arch", ["zsh"])
+        provisioner.provision_packages("arch", ["zsh"])
 
     # then the state is connected before operations are run
     connect_all.assert_called_once_with(state_cls.return_value)
@@ -205,7 +206,9 @@ def test_provision_packages_connects_before_running_operations() -> None:
 
 
 def test_provision_packages_enables_output_printing() -> None:
-    # given a list of packages to install on arch
+    # given a provisioner, and a list of packages to install on arch
+    provisioner = Provisioner(Container("my-project"))
+
     # when provisioning packages
     with (
         patch("ask.provision.Inventory"),
@@ -214,7 +217,7 @@ def test_provision_packages_enables_output_printing() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops"),
     ):
-        provision_packages("my-project", "arch", ["zsh"])
+        provisioner.provision_packages("arch", ["zsh"])
 
     # then the state is configured to print command output and input as it runs
     state = state_cls.return_value
@@ -223,16 +226,21 @@ def test_provision_packages_enables_output_printing() -> None:
 
 
 def test_provision_packages_raises_for_an_unsupported_distribution() -> None:
-    # given a distribution with no known package operation
+    # given a provisioner, and a distribution with no known package operation
+    provisioner = Provisioner(Container("my-project"))
+
     # when provisioning packages
     # then a clear error is raised
     with pytest.raises(ValueError, match="debian"):
-        provision_packages("my-project", "debian", ["zsh"])
+        provisioner.provision_packages("debian", ["zsh"])
 
 
 def test_remove_packages_removes_packages_via_the_distribution_operation() -> None:
-    # given a list of packages no longer declared, to remove on arch
-    # when removing packages from a named container
+    # given a provisioner, and a list of packages no longer declared, to
+    # remove on arch
+    provisioner = Provisioner(Container("my-project"))
+
+    # when removing packages
     with (
         patch("ask.provision.Inventory"),
         patch("ask.provision.State") as state_cls,
@@ -240,7 +248,7 @@ def test_remove_packages_removes_packages_via_the_distribution_operation() -> No
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
     ):
-        remove_packages("my-project", "arch", ["old-pkg"])
+        provisioner.remove_packages("arch", ["old-pkg"])
 
     # then the arch package operation is used to ensure the packages are absent
     add_op.assert_any_call(
@@ -252,7 +260,9 @@ def test_remove_packages_removes_packages_via_the_distribution_operation() -> No
 
 
 def test_remove_packages_connects_before_running_operations() -> None:
-    # given a list of packages to remove on arch
+    # given a provisioner, and a list of packages to remove on arch
+    provisioner = Provisioner(Container("my-project"))
+
     # when removing packages
     with (
         patch("ask.provision.Inventory"),
@@ -261,7 +271,7 @@ def test_remove_packages_connects_before_running_operations() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops") as run_ops,
     ):
-        remove_packages("my-project", "arch", ["old-pkg"])
+        provisioner.remove_packages("arch", ["old-pkg"])
 
     # then the state is connected before operations are run
     connect_all.assert_called_once_with(state_cls.return_value)
@@ -269,7 +279,9 @@ def test_remove_packages_connects_before_running_operations() -> None:
 
 
 def test_remove_packages_enables_output_printing() -> None:
-    # given a list of packages to remove on arch
+    # given a provisioner, and a list of packages to remove on arch
+    provisioner = Provisioner(Container("my-project"))
+
     # when removing packages
     with (
         patch("ask.provision.Inventory"),
@@ -278,7 +290,7 @@ def test_remove_packages_enables_output_printing() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops"),
     ):
-        remove_packages("my-project", "arch", ["old-pkg"])
+        provisioner.remove_packages("arch", ["old-pkg"])
 
     # then the state is configured to print command output and input as it runs
     state = state_cls.return_value
@@ -287,11 +299,13 @@ def test_remove_packages_enables_output_printing() -> None:
 
 
 def test_remove_packages_raises_for_an_unsupported_distribution() -> None:
-    # given a distribution with no known package operation
+    # given a provisioner, and a distribution with no known package operation
+    provisioner = Provisioner(Container("my-project"))
+
     # when removing packages
     # then a clear error is raised
     with pytest.raises(ValueError, match="debian"):
-        remove_packages("my-project", "debian", ["old-pkg"])
+        provisioner.remove_packages("debian", ["old-pkg"])
 
 
 def test_split_aur_packages_separates_aur_prefixed_packages() -> None:
@@ -335,9 +349,11 @@ def test_split_aur_packages_returns_empty_lists_for_no_packages() -> None:
     assert aur == []
 
 
-def test_provision_aur_builder_ensures_a_system_group_and_user() -> None:
+def test_aur_builder_provision_builder_ensures_a_system_group_and_user() -> None:
     # given no existing aur builder provisioning
-    # when provisioning the aur builder into a named container
+    aur_builder = AurBuilder(Container("my-project"))
+
+    # when provisioning the aur builder
     with (
         patch("ask.provision.Inventory"),
         patch("ask.provision.State") as state_cls,
@@ -345,7 +361,7 @@ def test_provision_aur_builder_ensures_a_system_group_and_user() -> None:
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
     ):
-        provision_aur_builder("my-project")
+        aur_builder.provision_builder()
 
     # then a system group and user named "aur" are ensured, with a home
     # directory to build in and no login shell
@@ -363,8 +379,10 @@ def test_provision_aur_builder_ensures_a_system_group_and_user() -> None:
     )
 
 
-def test_provision_aur_builder_installs_build_dependencies() -> None:
+def test_aur_builder_provision_builder_installs_build_dependencies() -> None:
     # given no existing aur builder provisioning
+    aur_builder = AurBuilder(Container("my-project"))
+
     # when provisioning the aur builder
     with (
         patch("ask.provision.Inventory"),
@@ -373,7 +391,7 @@ def test_provision_aur_builder_installs_build_dependencies() -> None:
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
     ):
-        provision_aur_builder("my-project")
+        aur_builder.provision_builder()
 
     # then the packages needed to build from a PKGBUILD are ensured present
     add_op.assert_any_call(
@@ -384,8 +402,10 @@ def test_provision_aur_builder_installs_build_dependencies() -> None:
     )
 
 
-def test_provision_aur_builder_writes_a_pacman_scoped_sudoers_dropin() -> None:
+def test_aur_builder_provision_builder_writes_a_pacman_scoped_sudoers_dropin() -> None:
     # given no existing aur builder provisioning
+    aur_builder = AurBuilder(Container("my-project"))
+
     # when provisioning the aur builder
     with (
         patch("ask.provision.Inventory"),
@@ -394,7 +414,7 @@ def test_provision_aur_builder_writes_a_pacman_scoped_sudoers_dropin() -> None:
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
     ):
-        provision_aur_builder("my-project")
+        aur_builder.provision_builder()
 
     # then a sudoers.d drop-in is written, granting passwordless sudo scoped
     # to pacman itself (needed for both dependency resolution and installing
@@ -409,8 +429,10 @@ def test_provision_aur_builder_writes_a_pacman_scoped_sudoers_dropin() -> None:
     assert kwargs["mode"] == "440"
 
 
-def test_provision_aur_builder_connects_before_running_operations() -> None:
+def test_aur_builder_provision_builder_connects_before_running_operations() -> None:
     # given no existing aur builder provisioning
+    aur_builder = AurBuilder(Container("my-project"))
+
     # when provisioning the aur builder
     with (
         patch("ask.provision.Inventory"),
@@ -419,7 +441,7 @@ def test_provision_aur_builder_connects_before_running_operations() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops") as run_ops,
     ):
-        provision_aur_builder("my-project")
+        aur_builder.provision_builder()
 
     # then the state is connected before operations are run
     connect_all.assert_called_once_with(state_cls.return_value)
@@ -432,50 +454,53 @@ def _completed(returncode: int, stdout: str = "") -> subprocess.CompletedProcess
 
 def test_ensure_paru_does_nothing_when_already_installed() -> None:
     # given a container that already has paru installed
-    with patch("ask.provision.incus.Container") as container_cls:
-        container = container_cls.return_value
-        container.run_command.return_value = _completed(0)
-
+    aur_builder = AurBuilder(Container("my-project"))
+    with (
+        patch.object(
+            Container, "run_command", return_value=_completed(0)
+        ) as run_command,
+        patch.object(Container, "exec_command") as exec_command,
+    ):
         # when ensuring paru is present
-        ensure_paru("my-project")
+        aur_builder.ensure_paru()
 
-    # then the container is targeted by name, only the presence check is
-    # made, and nothing is built
-    container_cls.assert_called_once_with("my-project")
-    container.run_command.assert_called_once_with(["pacman", "-Qq", "paru"])
-    container.exec_command.assert_not_called()
+    # then only the presence check is made, and nothing is built
+    run_command.assert_called_once_with(["pacman", "-Qq", "paru"])
+    exec_command.assert_not_called()
 
 
 def test_ensure_paru_builds_it_when_missing_and_the_user_approves() -> None:
     # given a container without paru, and a user who approves the build after
     # reviewing the PKGBUILD
+    aur_builder = AurBuilder(Container("my-project"))
     with (
-        patch("ask.provision.incus.Container") as container_cls,
+        patch.object(
+            Container,
+            "run_command",
+            side_effect=[
+                _completed(1),
+                _completed(0, "1001\n"),
+                _completed(0, "1001\n"),
+            ],
+        ),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
         patch("builtins.input", return_value="y"),
     ):
-        container = container_cls.return_value
-        container.run_command.side_effect = [
-            _completed(1),
-            _completed(0, "1001\n"),
-            _completed(0, "1001\n"),
-        ]
-        container.exec_command.return_value = 0
-
         # when ensuring paru is present
-        ensure_paru("my-project")
+        aur_builder.ensure_paru()
 
     # then paru-bin is cloned, its PKGBUILD is shown, and it is built as the
     # aur builder user
-    container.exec_command.assert_any_call(
+    exec_command.assert_any_call(
         1001,
         1001,
         Path("/home/aur"),
         ["git", "clone", "https://aur.archlinux.org/paru-bin.git", "paru-bin"],
     )
-    container.exec_command.assert_any_call(
+    exec_command.assert_any_call(
         1001, 1001, Path("/home/aur/paru-bin"), ["cat", "PKGBUILD"]
     )
-    container.exec_command.assert_any_call(
+    exec_command.assert_any_call(
         1001,
         1001,
         Path("/home/aur/paru-bin"),
@@ -486,76 +511,77 @@ def test_ensure_paru_builds_it_when_missing_and_the_user_approves() -> None:
 def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
     # given a container without paru, and a user who declines after
     # reviewing the PKGBUILD
+    aur_builder = AurBuilder(Container("my-project"))
     with (
-        patch("ask.provision.incus.Container") as container_cls,
+        patch.object(
+            Container,
+            "run_command",
+            side_effect=[
+                _completed(1),
+                _completed(0, "1001\n"),
+                _completed(0, "1001\n"),
+            ],
+        ),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
         patch("builtins.input", return_value="n"),
     ):
-        container = container_cls.return_value
-        container.run_command.side_effect = [
-            _completed(1),
-            _completed(0, "1001\n"),
-            _completed(0, "1001\n"),
-        ]
-        container.exec_command.return_value = 0
-
         # when ensuring paru is present
         # then a clear error is raised, and the package is never built
         with pytest.raises(RuntimeError, match="declined"):
-            ensure_paru("my-project")
+            aur_builder.ensure_paru()
 
-    build_calls = [
-        c for c in container.exec_command.call_args_list if "makepkg" in c.args[3]
-    ]
+    build_calls = [c for c in exec_command.call_args_list if "makepkg" in c.args[3]]
     assert build_calls == []
 
 
-def test_provision_aur_packages_does_nothing_for_no_packages() -> None:
+def test_install_packages_does_nothing_for_no_packages() -> None:
     # given no aur packages to install
+    aur_builder = AurBuilder(Container("my-project"))
     with (
-        patch("ask.provision.provision_aur_builder") as builder,
-        patch("ask.provision.ensure_paru") as paru,
-        patch("ask.provision.incus.Container") as container_cls,
+        patch.object(AurBuilder, "provision_builder") as builder,
+        patch.object(AurBuilder, "ensure_paru") as paru,
+        patch.object(Container, "exec_command") as exec_command,
     ):
-        # when provisioning aur packages
-        provision_aur_packages("my-project", "arch", [])
+        # when installing aur packages
+        aur_builder.install_packages("arch", [])
 
     # then nothing is provisioned at all
     builder.assert_not_called()
     paru.assert_not_called()
-    container_cls.assert_not_called()
+    exec_command.assert_not_called()
 
 
-def test_provision_aur_packages_raises_for_an_unsupported_distribution() -> None:
+def test_install_packages_raises_for_an_unsupported_distribution() -> None:
     # given a distribution AUR is not meaningful for
-    # when provisioning aur packages
+    aur_builder = AurBuilder(Container("my-project"))
+
+    # when installing aur packages
     # then a clear error is raised
     with pytest.raises(ValueError, match="debian"):
-        provision_aur_packages("my-project", "debian", ["yay-bin"])
+        aur_builder.install_packages("debian", ["yay-bin"])
 
 
-def test_provision_aur_packages_builds_the_builder_and_paru_then_installs() -> None:
+def test_install_packages_builds_the_builder_and_paru_then_installs() -> None:
     # given aur packages to install on arch
+    aur_builder = AurBuilder(Container("my-project"))
     with (
-        patch("ask.provision.provision_aur_builder") as builder,
-        patch("ask.provision.ensure_paru") as paru,
-        patch("ask.provision.incus.Container") as container_cls,
+        patch.object(AurBuilder, "provision_builder") as builder,
+        patch.object(AurBuilder, "ensure_paru") as paru,
+        patch.object(
+            Container,
+            "run_command",
+            side_effect=[_completed(0, "1001\n"), _completed(0, "1001\n")],
+        ),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
     ):
-        container = container_cls.return_value
-        container.run_command.side_effect = [
-            _completed(0, "1001\n"),
-            _completed(0, "1001\n"),
-        ]
-        container.exec_command.return_value = 0
-
-        # when provisioning aur packages
-        provision_aur_packages("my-project", "arch", ["yay-bin", "some-other-pkg"])
+        # when installing aur packages
+        aur_builder.install_packages("arch", ["yay-bin", "some-other-pkg"])
 
     # then the builder user and paru are ensured, in that order, before
     # installing the declared packages as the aur builder user, interactively
-    builder.assert_called_once_with("my-project")
-    paru.assert_called_once_with("my-project")
-    container_cls.assert_called_once_with("my-project")
-    container.exec_command.assert_called_once_with(
+    builder.assert_called_once_with()
+    paru.assert_called_once_with()
+    exec_command.assert_called_once_with(
         1001,
         1001,
         Path("/home/aur"),
@@ -589,7 +615,9 @@ def test_pyinfra_echo_prints_to_stderr_when_requested() -> None:
 
 
 def test_fix_bind_mount_ownership_chowns_ancestors_under_home() -> None:
-    # given a resolved user and bind mounts both under and outside their home
+    # given a provisioner, a resolved user, and bind mounts both under and
+    # outside their home
+    provisioner = Provisioner(Container("my-project"))
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -612,7 +640,7 @@ def test_fix_bind_mount_ownership_chowns_ancestors_under_home() -> None:
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops") as run_ops,
     ):
-        fix_bind_mount_ownership("my-project", bind_mounts, user)
+        provisioner.fix_bind_mount_ownership(bind_mounts, user)
 
     # then each ancestor under home is chowned to the resolved user, and the
     # mount outside home is left untouched
@@ -634,7 +662,8 @@ def test_fix_bind_mount_ownership_chowns_ancestors_under_home() -> None:
 
 
 def test_fix_bind_mount_ownership_enables_output_printing() -> None:
-    # given a resolved user and a bind mount under their home
+    # given a provisioner, a resolved user, and a bind mount under their home
+    provisioner = Provisioner(Container("my-project"))
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -653,7 +682,7 @@ def test_fix_bind_mount_ownership_enables_output_printing() -> None:
         patch("ask.provision.add_op"),
         patch("ask.provision.run_ops"),
     ):
-        fix_bind_mount_ownership("my-project", bind_mounts, user)
+        provisioner.fix_bind_mount_ownership(bind_mounts, user)
 
     # then the state is configured to print command output and input as it runs
     state = state_cls.return_value
@@ -662,7 +691,9 @@ def test_fix_bind_mount_ownership_enables_output_printing() -> None:
 
 
 def test_fix_bind_mount_ownership_does_nothing_when_no_mounts_under_home() -> None:
-    # given a resolved user and bind mounts entirely outside their home
+    # given a provisioner, a resolved user, and bind mounts entirely outside
+    # their home
+    provisioner = Provisioner(Container("my-project"))
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -678,7 +709,7 @@ def test_fix_bind_mount_ownership_does_nothing_when_no_mounts_under_home() -> No
         patch("ask.provision.Inventory") as inventory_cls,
         patch("ask.provision.run_ops") as run_ops,
     ):
-        fix_bind_mount_ownership("my-project", bind_mounts, user)
+        provisioner.fix_bind_mount_ownership(bind_mounts, user)
 
     # then no inventory is even built, and no operations are run
     inventory_cls.assert_not_called()
