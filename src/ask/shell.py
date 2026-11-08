@@ -59,12 +59,20 @@ class Elvish(Shell):
     packages: list[str] = field(default_factory=lambda: ["elvish"])
 
 
+@dataclass(frozen=True)
+class Tcsh(Shell):
+    name: str = "tcsh"
+    rc_filename: str = ".tcshrc"
+    packages: list[str] = field(default_factory=lambda: ["tcsh"])
+
+
 _SHELLS: dict[str, Shell] = {
     "bash": Bash(),
     "zsh": Zsh(),
     "fish": Fish(),
     "ksh": Ksh(),
     "elvish": Elvish(),
+    "tcsh": Tcsh(),
 }
 
 

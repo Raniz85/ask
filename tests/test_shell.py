@@ -4,7 +4,7 @@ import pytest
 
 from ask.config import ResolvedUser
 from ask.incus import Mount
-from ask.shell import Bash, Elvish, Fish, Ksh, Zsh, resolve
+from ask.shell import Bash, Elvish, Fish, Ksh, Tcsh, Zsh, resolve
 
 
 def test_bash_has_its_rc_filename_and_package() -> None:
@@ -62,6 +62,17 @@ def test_elvish_has_its_rc_filename_and_package() -> None:
     assert elvish.packages == ["elvish"]
 
 
+def test_tcsh_has_its_rc_filename_and_package() -> None:
+    # given the tcsh shell
+    # when inspecting its properties
+    tcsh = Tcsh()
+
+    # then its name, rc filename and required package are as expected
+    assert tcsh.name == "tcsh"
+    assert tcsh.rc_filename == ".tcshrc"
+    assert tcsh.packages == ["tcsh"]
+
+
 def test_resolve_returns_bash_for_bash() -> None:
     # given the name "bash"
     # when resolving it to a shell
@@ -97,12 +108,19 @@ def test_resolve_returns_elvish_for_elvish() -> None:
     assert resolve("elvish") == Elvish()
 
 
+def test_resolve_returns_tcsh_for_tcsh() -> None:
+    # given the name "tcsh"
+    # when resolving it to a shell
+    # then the Tcsh shell is returned
+    assert resolve("tcsh") == Tcsh()
+
+
 def test_resolve_raises_for_unknown_shell() -> None:
     # given a name with no known shell
     # when resolving it to a shell
     # then a clear error is raised
-    with pytest.raises(ValueError, match="tcsh"):
-        resolve("tcsh")
+    with pytest.raises(ValueError, match="nu"):
+        resolve("nu")
 
 
 def test_packages_for_returns_its_packages_regardless_of_distribution() -> None:
