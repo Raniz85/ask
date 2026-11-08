@@ -4,7 +4,7 @@ import pytest
 
 from ask.config import ResolvedUser
 from ask.incus import Mount
-from ask.shell import Bash, Fish, Ksh, Zsh, resolve
+from ask.shell import Bash, Elvish, Fish, Ksh, Zsh, resolve
 
 
 def test_bash_has_its_rc_filename_and_package() -> None:
@@ -51,6 +51,17 @@ def test_ksh_has_its_rc_filename_and_package() -> None:
     assert ksh.packages == ["ksh"]
 
 
+def test_elvish_has_its_rc_filename_and_package() -> None:
+    # given the elvish shell
+    # when inspecting its properties
+    elvish = Elvish()
+
+    # then its name, rc filename and required package are as expected
+    assert elvish.name == "elvish"
+    assert elvish.rc_filename == ".config/elvish/rc.elv"
+    assert elvish.packages == ["elvish"]
+
+
 def test_resolve_returns_bash_for_bash() -> None:
     # given the name "bash"
     # when resolving it to a shell
@@ -77,6 +88,13 @@ def test_resolve_returns_ksh_for_ksh() -> None:
     # when resolving it to a shell
     # then the Ksh shell is returned
     assert resolve("ksh") == Ksh()
+
+
+def test_resolve_returns_elvish_for_elvish() -> None:
+    # given the name "elvish"
+    # when resolving it to a shell
+    # then the Elvish shell is returned
+    assert resolve("elvish") == Elvish()
 
 
 def test_resolve_raises_for_unknown_shell() -> None:

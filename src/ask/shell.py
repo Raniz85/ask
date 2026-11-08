@@ -52,11 +52,19 @@ class Ksh(Shell):
     packages: list[str] = field(default_factory=lambda: ["ksh"])
 
 
+@dataclass(frozen=True)
+class Elvish(Shell):
+    name: str = "elvish"
+    rc_filename: str = ".config/elvish/rc.elv"
+    packages: list[str] = field(default_factory=lambda: ["elvish"])
+
+
 _SHELLS: dict[str, Shell] = {
     "bash": Bash(),
     "zsh": Zsh(),
     "fish": Fish(),
     "ksh": Ksh(),
+    "elvish": Elvish(),
 }
 
 
