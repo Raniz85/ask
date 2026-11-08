@@ -59,9 +59,20 @@ def test_container_create_launches_image_with_given_name_and_returns_it() -> Non
 def test_device_name_for_produces_a_stable_slug_from_the_path() -> None:
     # given a mount path
     # when deriving its device name
-    # then the same path always produces the same, filesystem-path-free name
+    # then the same path always produces the same, filesystem-path-free name,
+    # prefixed "bind-" by default
     assert (
         device_name_for(Path("/home/raniz/.cache/uv")) == "bind--home-raniz--cache-uv"
+    )
+
+
+def test_device_name_for_uses_the_given_prefix() -> None:
+    # given a mount path and a custom device-name prefix
+    # when deriving its device name
+    # then the slug is prefixed with the given prefix instead of "bind"
+    assert (
+        device_name_for(Path("/home/raniz/.wayland-socket"), prefix="gui")
+        == "gui--home-raniz--wayland-socket"
     )
 
 
@@ -335,6 +346,129 @@ def test_set_managed_packages_stores_an_empty_value_for_no_packages() -> None:
     # then the custom config key is cleared
     run.assert_called_once_with(
         ["incus", "config", "set", "my-project", "user.ask.packages", ""],
+        check=True,
+    )
+
+
+def test_add_gui_device_adds_a_shifted_disk_device_with_the_gui_prefix() -> None:
+    # given a container and a gui mount
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when adding the gui device
+        container.add_gui_device(
+            Mount(
+                host_path=Path("/run/user/1000/wayland-0"),
+                container_path=Path("/home/raniz/.wayland-socket"),
+            )
+        )
+
+    # then a shifted disk device is added, named with the "gui-" prefix
+    # rather than "bind-"
+    run.assert_called_once_with(
+        [
+            "incus",
+            "config",
+            "device",
+            "add",
+            "my-project",
+            "gui--home-raniz--wayland-socket",
+            "disk",
+            "source=/run/user/1000/wayland-0",
+            "path=/home/raniz/.wayland-socket",
+            "shift=true",
+        ],
+        check=True,
+    )
+
+
+def test_remove_gui_device_removes_the_gui_prefixed_device() -> None:
+    # given a container and the gui mount it currently has attached
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when removing the gui device
+        container.remove_gui_device(
+            Mount(
+                host_path=Path("/run/user/1000/wayland-0"),
+                container_path=Path("/home/raniz/.wayland-socket"),
+            )
+        )
+
+    # then the "gui-" prefixed device is removed
+    run.assert_called_once_with(
+        [
+            "incus",
+            "config",
+            "device",
+            "remove",
+            "my-project",
+            "gui--home-raniz--wayland-socket",
+        ],
+        check=True,
+    )
+
+
+def test_converge_leaves_a_gui_device_alone() -> None:
+    # given a container with a gui-prefixed device attached (from an active
+    # --gui session), and no bind mounts desired
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result("gui--home-raniz--wayland-socket")
+
+        # when converging
+        container.converge([])
+
+    # then the gui device is left alone - converge's bind-mount
+    # reconciliation only ever sees "bind-" prefixed devices
+    remove_calls = [c for c in run.call_args_list if "remove" in c.args[0]]
+    assert remove_calls == []
+
+
+def test_get_gui_session_count_returns_zero_when_unset() -> None:
+    # given a container with no previously tracked gui session count
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="\n"
+        )
+
+        # when reading the gui session count
+        count = container.get_gui_session_count()
+
+    # then it is zero
+    assert count == 0
+
+
+def test_get_gui_session_count_returns_the_tracked_count() -> None:
+    # given a container with a previously tracked gui session count
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="2\n"
+        )
+
+        # when reading the gui session count
+        count = container.get_gui_session_count()
+
+    # then the tracked count is returned
+    assert count == 2
+    run.assert_called_once_with(
+        ["incus", "config", "get", "my-project", "user.ask.gui_sessions"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_set_gui_session_count_stores_the_given_count() -> None:
+    # given a gui session count to track
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when storing it
+        container.set_gui_session_count(1)
+
+    # then it is stored under the custom config key
+    run.assert_called_once_with(
+        ["incus", "config", "set", "my-project", "user.ask.gui_sessions=1"],
         check=True,
     )
 

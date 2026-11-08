@@ -22,7 +22,7 @@ packages.arch = [
 ]
 
 agents = [
-    "claude"
+  "claude",
 ]
 
 # Bind mount Cloude state directories needed to share skills, auth and configuration

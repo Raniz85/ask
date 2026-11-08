@@ -7,6 +7,12 @@ from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec
 from ask.config import ResolvedUser
 from ask.incus import Mount
 
+_WAYLAND_MOUNT = Mount(
+    host_path=Path("/run/user/1000/wayland-0"),
+    container_path=Path("/home/raniz/.wayland-socket"),
+)
+_WAYLAND_ENV = {"WAYLAND_DISPLAY": "/home/raniz/.wayland-socket"}
+
 
 def test_create_launches_container_and_converges(tmp_path: Path) -> None:
     # given a project directory with an ask.toml declaring a distribution
@@ -725,6 +731,74 @@ def test_enter_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     assert exc_info.value.code == 3
 
 
+def test_enter_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> None:
+    # given a project directory, a config declaring a user, and a live
+    # wayland session
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container with --gui
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
+        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.release") as release_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        enter(gui=True)
+
+    # then the gui session is acquired before, and released after, running
+    # the resolved shell with the wayland display environment variable
+    # merged into the fake ssh environment
+    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV | _WAYLAND_ENV
+    )
+    assert exc_info.value.code == 0
+
+
+def test_enter_does_not_forward_anything_when_gui_requested_without_a_session(
+    tmp_path: Path,
+) -> None:
+    # given a project directory, a config declaring a user, and no live
+    # wayland session on the host
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container with --gui
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.gui.wayland_mount", return_value=None),
+        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.release") as release_mock,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        enter(gui=True)
+
+    # then no gui session is acquired or released, and the shell runs with
+    # just the fake ssh environment, exactly as without --gui
+    acquire_mock.assert_not_called()
+    release_mock.assert_not_called()
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+    )
+
+
 def test_exec_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
     # given a project directory
     project_dir = tmp_path / "my-project"
@@ -799,6 +873,73 @@ def test_exec_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
 
     # then ask exits with that same code, rather than raising
     assert exc_info.value.code == 3
+
+
+def test_exec_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> None:
+    # given a project directory, a config declaring a user, and a live
+    # wayland session
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when executing a command with --gui
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
+        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.release") as release_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        exec("ls", "-la", gui=True)
+
+    # then the gui session is acquired before, and released after, running
+    # the command with the wayland display environment variable set
+    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["ls", "-la"], env=_WAYLAND_ENV
+    )
+    assert exc_info.value.code == 0
+
+
+def test_exec_passes_no_env_when_gui_requested_without_a_session(
+    tmp_path: Path,
+) -> None:
+    # given a project directory, a config declaring a user, and no live
+    # wayland session on the host
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when executing a command with --gui
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.gui.wayland_mount", return_value=None),
+        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.release") as release_mock,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        exec("ls", "-la", gui=True)
+
+    # then no gui session is acquired or released, and the command runs with
+    # no env argument at all, exactly as without --gui
+    acquire_mock.assert_not_called()
+    release_mock.assert_not_called()
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["ls", "-la"]
+    )
 
 
 def test_agent_launches_the_first_configured_agent_when_none_given(

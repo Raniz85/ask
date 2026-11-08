@@ -1,7 +1,15 @@
 import sys
 from pathlib import Path
 
-from ask import agent as agents, config, incus, manifest, provision, shell
+from ask import (
+    agent as agents,
+    config,
+    gui as gui_support,
+    incus,
+    manifest,
+    provision,
+    shell,
+)
 
 FAKE_SSH_ENV = {
     "SSH_CLIENT": "127.0.0.1 1 22",
@@ -74,19 +82,20 @@ def converge() -> None:
     )
 
 
-def enter() -> None:
+def enter(gui: bool = False) -> None:
     project_dir = Path.cwd()
     cfg = config.load(config.default_path())
     user = config.resolve_user(cfg)
     container = incus.Container(project_dir.name)
     container.ensure_running()
-    returncode = container.exec_command(
-        user.uid,
-        user.gid,
-        project_dir,
-        [user.shell],
-        env=FAKE_SSH_ENV,
-    )
+    with gui_support.session(container, user, enabled=gui) as gui_env:
+        returncode = container.exec_command(
+            user.uid,
+            user.gid,
+            project_dir,
+            [user.shell],
+            env=FAKE_SSH_ENV | gui_env,
+        )
     sys.exit(returncode)
 
 
@@ -109,11 +118,19 @@ def agent(name: str | None = None) -> None:
     sys.exit(returncode)
 
 
-def exec(*command: str) -> None:
+def exec(*command: str, gui: bool = False) -> None:
     project_dir = Path.cwd()
     cfg = config.load(config.default_path())
     user = config.resolve_user(cfg)
     container = incus.Container(project_dir.name)
     container.ensure_running()
-    returncode = container.exec_command(user.uid, user.gid, project_dir, list(command))
+    with gui_support.session(container, user, enabled=gui) as gui_env:
+        if gui_env:
+            returncode = container.exec_command(
+                user.uid, user.gid, project_dir, list(command), env=gui_env
+            )
+        else:
+            returncode = container.exec_command(
+                user.uid, user.gid, project_dir, list(command)
+            )
     sys.exit(returncode)

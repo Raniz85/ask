@@ -13,6 +13,7 @@ _COMMON_CONFIG = {
 }
 
 _MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
+_GUI_SESSIONS_CONFIG_KEY = "user.ask.gui_sessions"
 
 
 def image_for(distribution: str) -> str:
@@ -24,9 +25,9 @@ def image_for(distribution: str) -> str:
         ) from None
 
 
-def device_name_for(path: Path) -> str:
+def device_name_for(path: Path, prefix: str = "bind") -> str:
     slug = re.sub(r"[^a-zA-Z0-9_-]", "-", str(path))
-    return f"bind-{slug}"
+    return f"{prefix}-{slug}"
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,31 @@ def _diff_devices(
 
 def stale_packages(managed: list[str], desired: list[str]) -> list[str]:
     return sorted(set(managed) - set(desired))
+
+
+def _add_disk_device(container_name: str, device_name: str, mount: Mount) -> None:
+    command = [
+        "incus",
+        "config",
+        "device",
+        "add",
+        container_name,
+        device_name,
+        "disk",
+        f"source={mount.host_path}",
+        f"path={mount.container_path}",
+        "shift=true",
+    ]
+    if mount.readonly:
+        command.append("readonly=true")
+    subprocess.run(command, check=True)
+
+
+def _remove_device(container_name: str, device_name: str) -> None:
+    subprocess.run(
+        ["incus", "config", "device", "remove", container_name, device_name],
+        check=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -153,30 +179,43 @@ class Container:
             check=True,
         )
 
+    def get_gui_session_count(self) -> int:
+        result = subprocess.run(
+            ["incus", "config", "get", self.name, _GUI_SESSIONS_CONFIG_KEY],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        value = result.stdout.strip()
+        return int(value) if value else 0
+
+    def set_gui_session_count(self, count: int) -> None:
+        subprocess.run(
+            [
+                "incus",
+                "config",
+                "set",
+                self.name,
+                f"{_GUI_SESSIONS_CONFIG_KEY}={count}",
+            ],
+            check=True,
+        )
+
+    def add_gui_device(self, mount: Mount) -> None:
+        device_name = device_name_for(mount.container_path, prefix="gui")
+        _add_disk_device(self.name, device_name, mount)
+
+    def remove_gui_device(self, mount: Mount) -> None:
+        device_name = device_name_for(mount.container_path, prefix="gui")
+        _remove_device(self.name, device_name)
+
     def converge(self, mounts: list[Mount]) -> None:
         desired = {device_name_for(mount.container_path): mount for mount in mounts}
         existing = self._bind_devices()
         to_remove, to_add = _diff_devices(existing, desired)
 
         for device_name in to_remove:
-            subprocess.run(
-                ["incus", "config", "device", "remove", self.name, device_name],
-                check=True,
-            )
+            _remove_device(self.name, device_name)
 
         for device_name, mount in to_add.items():
-            command = [
-                "incus",
-                "config",
-                "device",
-                "add",
-                self.name,
-                device_name,
-                "disk",
-                f"source={mount.host_path}",
-                f"path={mount.container_path}",
-                "shift=true",
-            ]
-            if mount.readonly:
-                command.append("readonly=true")
-            subprocess.run(command, check=True)
+            _add_disk_device(self.name, device_name, mount)
