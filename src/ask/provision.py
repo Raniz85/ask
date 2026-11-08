@@ -133,38 +133,34 @@ _PARU_BIN_REPO = "https://aur.archlinux.org/paru-bin.git"
 _PARU_BIN_DIR = "paru-bin"
 
 
-def _aur_builder_ids(container_name: str) -> tuple[int, int]:
-    uid = int(incus.run_command(container_name, ["id", "-u", _AUR_BUILD_USER]).stdout)
-    gid = int(incus.run_command(container_name, ["id", "-g", _AUR_BUILD_USER]).stdout)
+def _aur_builder_ids(container: incus.Container) -> tuple[int, int]:
+    uid = int(container.run_command(["id", "-u", _AUR_BUILD_USER]).stdout)
+    gid = int(container.run_command(["id", "-g", _AUR_BUILD_USER]).stdout)
     return uid, gid
 
 
 def ensure_paru(container_name: str) -> None:
-    already_installed = incus.run_command(
-        container_name, ["pacman", "-Qq", "paru"]
-    ).returncode
+    container = incus.Container(container_name)
+    already_installed = container.run_command(["pacman", "-Qq", "paru"]).returncode
     if already_installed == 0:
         return
 
-    uid, gid = _aur_builder_ids(container_name)
+    uid, gid = _aur_builder_ids(container)
     build_dir = _AUR_BUILD_HOME / _PARU_BIN_DIR
 
-    incus.exec_command(
-        container_name,
+    container.exec_command(
         uid,
         gid,
         _AUR_BUILD_HOME,
         ["git", "clone", _PARU_BIN_REPO, _PARU_BIN_DIR],
     )
-    incus.exec_command(container_name, uid, gid, build_dir, ["cat", "PKGBUILD"])
+    container.exec_command(uid, gid, build_dir, ["cat", "PKGBUILD"])
 
     answer = input("Proceed with building paru-bin from the PKGBUILD above? [y/N] ")
     if answer.strip().lower() not in ("y", "yes"):
         raise RuntimeError("paru build was declined; cannot install AUR packages")
 
-    incus.exec_command(
-        container_name, uid, gid, build_dir, ["makepkg", "-si", "--noconfirm"]
-    )
+    container.exec_command(uid, gid, build_dir, ["makepkg", "-si", "--noconfirm"])
 
 
 def provision_aur_packages(
@@ -178,9 +174,10 @@ def provision_aur_packages(
     provision_aur_builder(container_name)
     ensure_paru(container_name)
 
-    uid, gid = _aur_builder_ids(container_name)
-    incus.exec_command(
-        container_name, uid, gid, _AUR_BUILD_HOME, ["paru", "-S", "--needed", *packages]
+    container = incus.Container(container_name)
+    uid, gid = _aur_builder_ids(container)
+    container.exec_command(
+        uid, gid, _AUR_BUILD_HOME, ["paru", "-S", "--needed", *packages]
     )
 
 

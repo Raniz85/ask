@@ -13,7 +13,7 @@ FAKE_SSH_ENV = {
 def create() -> None:
     project_dir = Path.cwd()
     m = manifest.load(project_dir / "ask.toml")
-    incus.create_container(project_dir.name, m.distribution)
+    incus.Container.create(project_dir.name, m.distribution)
     converge()
 
 
@@ -22,8 +22,8 @@ def converge() -> None:
     m = manifest.load(project_dir / "ask.toml")
     cfg = config.load(config.default_path())
     resolved_manifest = manifest.ResolvedManifest(m, cfg.layers)
-    if not incus.is_running(project_dir.name):
-        incus.start_container(project_dir.name)
+    container = incus.Container(project_dir.name)
+    container.ensure_running()
     bind_mounts = [project_dir] + resolved_manifest.bind_mounts
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
@@ -55,18 +55,16 @@ def converge() -> None:
     )
 
     provision.provision_user(project_dir.name, user)
-    incus.converge(project_dir.name, mounts)
+    container.converge(mounts)
 
     provision.provision_packages(project_dir.name, m.distribution, official_packages)
     provision.provision_aur_packages(project_dir.name, m.distribution, aur_packages)
 
     resolved_packages = official_packages + aur_packages
-    stale = incus.stale_packages(
-        incus.get_managed_packages(project_dir.name), resolved_packages
-    )
+    stale = incus.stale_packages(container.get_managed_packages(), resolved_packages)
     if stale:
         provision.remove_packages(project_dir.name, m.distribution, stale)
-    incus.set_managed_packages(project_dir.name, resolved_packages)
+    container.set_managed_packages(resolved_packages)
 
     provision.fix_bind_mount_ownership(
         project_dir.name, [mount.container_path for mount in mounts], user
@@ -77,10 +75,9 @@ def enter() -> None:
     project_dir = Path.cwd()
     cfg = config.load(config.default_path())
     user = config.resolve_user(cfg)
-    if not incus.is_running(project_dir.name):
-        incus.start_container(project_dir.name)
-    returncode = incus.exec_command(
-        project_dir.name,
+    container = incus.Container(project_dir.name)
+    container.ensure_running()
+    returncode = container.exec_command(
         user.uid,
         user.gid,
         project_dir,
@@ -101,10 +98,10 @@ def agent(name: str | None = None) -> None:
             raise ValueError("no agents configured")
         name = agent_names[0]
     resolved_agent = agents.resolve(name)
-    if not incus.is_running(project_dir.name):
-        incus.start_container(project_dir.name)
-    returncode = incus.exec_command(
-        project_dir.name, user.uid, user.gid, project_dir, [resolved_agent.name]
+    container = incus.Container(project_dir.name)
+    container.ensure_running()
+    returncode = container.exec_command(
+        user.uid, user.gid, project_dir, [resolved_agent.name]
     )
     sys.exit(returncode)
 
@@ -113,9 +110,7 @@ def exec(*command: str) -> None:
     project_dir = Path.cwd()
     cfg = config.load(config.default_path())
     user = config.resolve_user(cfg)
-    if not incus.is_running(project_dir.name):
-        incus.start_container(project_dir.name)
-    returncode = incus.exec_command(
-        project_dir.name, user.uid, user.gid, project_dir, list(command)
-    )
+    container = incus.Container(project_dir.name)
+    container.ensure_running()
+    returncode = container.exec_command(user.uid, user.gid, project_dir, list(command))
     sys.exit(returncode)

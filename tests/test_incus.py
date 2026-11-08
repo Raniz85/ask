@@ -5,19 +5,12 @@ from unittest.mock import patch
 import pytest
 
 from ask.incus import (
+    Container,
     Mount,
     _diff_devices,
-    converge,
-    create_container,
     device_name_for,
-    exec_command,
-    get_managed_packages,
     image_for,
-    is_running,
-    run_command,
-    set_managed_packages,
     stale_packages,
-    start_container,
 )
 
 
@@ -38,14 +31,15 @@ def test_image_for_unknown_distribution_raises() -> None:
         image_for("nonexistent")
 
 
-def test_create_container_launches_image_with_given_name() -> None:
+def test_container_create_launches_image_with_given_name_and_returns_it() -> None:
     # given a mocked subprocess.run
     with patch("ask.incus.subprocess.run") as run:
         # when creating a container for the "arch" distribution named "my-project"
-        create_container("my-project", "arch")
+        container = Container.create("my-project", "arch")
 
-    # then incus is invoked to launch the matching image under that name, with the
-    # common container configuration applied
+    # then incus is invoked to launch the matching image under that name, with
+    # the common container configuration applied, and a Container for it is
+    # returned
     run.assert_called_once_with(
         [
             "incus",
@@ -59,6 +53,7 @@ def test_create_container_launches_image_with_given_name() -> None:
         ],
         check=True,
     )
+    assert container == Container("my-project")
 
 
 def test_device_name_for_produces_a_stable_slug_from_the_path() -> None:
@@ -113,16 +108,16 @@ def test_diff_devices_removes_devices_no_longer_desired() -> None:
 def test_converge_adds_devices_for_mounts_not_yet_present() -> None:
     # given a container with no existing bind-mount devices, and two desired
     # mounts whose host and container paths are the same
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = _list_devices_result()
 
         # when converging
-        converge(
-            "my-project",
+        container.converge(
             [
                 Mount(host_path=Path("/project"), container_path=Path("/project")),
                 Mount(host_path=Path("/extra"), container_path=Path("/extra")),
-            ],
+            ]
         )
 
     # then a shifted disk device is added for each desired mount
@@ -164,18 +159,18 @@ def test_converge_adds_a_writable_device_with_differing_host_and_container_paths
     # given a container with no existing devices, and a desired mount whose
     # host and container paths differ (e.g. agent state shared from a
     # differently-named host user)
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = _list_devices_result()
 
         # when converging
-        converge(
-            "my-project",
+        container.converge(
             [
                 Mount(
                     host_path=Path("/home/raniz/.claude.json"),
                     container_path=Path("/home/other/.claude.json"),
                 )
-            ],
+            ]
         )
 
     # then a shifted, writable disk device is added, named after the
@@ -200,19 +195,19 @@ def test_converge_adds_a_writable_device_with_differing_host_and_container_paths
 def test_converge_adds_a_readonly_device_when_requested() -> None:
     # given a container with no existing devices, and a desired read-only
     # mount (e.g. a shell rc file)
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = _list_devices_result()
 
         # when converging
-        converge(
-            "my-project",
+        container.converge(
             [
                 Mount(
                     host_path=Path("/home/raniz/.zshrc"),
                     container_path=Path("/home/other/.zshrc"),
                     readonly=True,
                 )
-            ],
+            ]
         )
 
     # then a shifted, read-only disk device is added
@@ -236,13 +231,13 @@ def test_converge_adds_a_readonly_device_when_requested() -> None:
 
 def test_converge_does_not_re_add_an_already_present_device() -> None:
     # given a container that already has the device for the desired mount
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = _list_devices_result("bind--project")
 
         # when converging on that same mount
-        converge(
-            "my-project",
-            [Mount(host_path=Path("/project"), container_path=Path("/project"))],
+        container.converge(
+            [Mount(host_path=Path("/project"), container_path=Path("/project"))]
         )
 
     # then no "config device add" call is made
@@ -252,11 +247,12 @@ def test_converge_does_not_re_add_an_already_present_device() -> None:
 
 def test_converge_removes_bind_devices_no_longer_desired() -> None:
     # given a container with a bind-mount device for a mount that is no longer configured
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = _list_devices_result("bind--stale")
 
         # when converging with no desired mounts
-        converge("my-project", [])
+        container.converge([])
 
     # then the stale device is removed
     run.assert_any_call(
@@ -264,15 +260,31 @@ def test_converge_removes_bind_devices_no_longer_desired() -> None:
     )
 
 
+def test_converge_leaves_unrelated_devices_alone() -> None:
+    # given a container with devices unrelated to bind-mount management (e.g.
+    # from the profile, such as "root" or "eth0")
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result("root", "eth0", "shellrc")
+
+        # when converging with no desired mounts
+        container.converge([])
+
+    # then no "config device remove" call is made for them
+    remove_calls = [c for c in run.call_args_list if "remove" in c.args[0]]
+    assert remove_calls == []
+
+
 def test_get_managed_packages_returns_empty_list_when_unset() -> None:
     # given a container with no previously tracked packages
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="\n"
         )
 
         # when reading the previously managed packages
-        packages = get_managed_packages("my-project")
+        packages = container.get_managed_packages()
 
     # then there are none
     assert packages == []
@@ -280,13 +292,14 @@ def test_get_managed_packages_returns_empty_list_when_unset() -> None:
 
 def test_get_managed_packages_returns_the_tracked_packages() -> None:
     # given a container with previously tracked packages
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="zsh,python\n"
         )
 
         # when reading the previously managed packages
-        packages = get_managed_packages("my-project")
+        packages = container.get_managed_packages()
 
     # then the tracked packages are returned
     assert packages == ["zsh", "python"]
@@ -300,9 +313,10 @@ def test_get_managed_packages_returns_the_tracked_packages() -> None:
 
 def test_set_managed_packages_stores_the_given_packages() -> None:
     # given a list of packages to track
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         # when storing them as managed
-        set_managed_packages("my-project", ["zsh", "python"])
+        container.set_managed_packages(["zsh", "python"])
 
     # then they are stored, comma-separated, under the custom config key
     run.assert_called_once_with(
@@ -313,9 +327,10 @@ def test_set_managed_packages_stores_the_given_packages() -> None:
 
 def test_set_managed_packages_stores_an_empty_value_for_no_packages() -> None:
     # given no packages to track
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         # when storing them as managed
-        set_managed_packages("my-project", [])
+        container.set_managed_packages([])
 
     # then the custom config key is cleared
     run.assert_called_once_with(
@@ -327,13 +342,12 @@ def test_set_managed_packages_stores_an_empty_value_for_no_packages() -> None:
 def test_exec_command_runs_the_command_as_the_given_user_and_cwd() -> None:
     # given a command to run inside the container, as a specific uid/gid and
     # working directory
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
 
         # when executing it
-        exec_command(
-            "my-project", 1000, 1000, Path("/home/raniz/src/ask"), ["ls", "-la"]
-        )
+        container.exec_command(1000, 1000, Path("/home/raniz/src/ask"), ["ls", "-la"])
 
     # then incus exec is invoked targeting that user, group and working
     # directory, with the command passed through after "--"
@@ -358,12 +372,12 @@ def test_exec_command_runs_the_command_as_the_given_user_and_cwd() -> None:
 def test_exec_command_passes_extra_environment_variables() -> None:
     # given a command to run inside the container, with extra environment
     # variables to set for it
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
 
         # when executing it
-        exec_command(
-            "my-project",
+        container.exec_command(
             1000,
             1000,
             Path("/project"),
@@ -396,11 +410,12 @@ def test_exec_command_passes_extra_environment_variables() -> None:
 
 def test_exec_command_does_not_capture_or_check_the_result() -> None:
     # given a command to run inside the container
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
 
         # when executing it
-        exec_command("my-project", 1000, 1000, Path("/project"), ["true"])
+        container.exec_command(1000, 1000, Path("/project"), ["true"])
 
     # then stdio is left to inherit the caller's (no output capturing), and
     # a non-zero exit is not treated as an error (no check=True)
@@ -414,11 +429,12 @@ def test_exec_command_does_not_capture_or_check_the_result() -> None:
 
 def test_exec_command_returns_the_commands_exit_code() -> None:
     # given a command that exits non-zero inside the container
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(args=[], returncode=7)
 
         # when executing it
-        returncode = exec_command("my-project", 1000, 1000, Path("/project"), ["false"])
+        returncode = container.exec_command(1000, 1000, Path("/project"), ["false"])
 
     # then the command's exit code is returned, without raising
     assert returncode == 7
@@ -426,13 +442,14 @@ def test_exec_command_returns_the_commands_exit_code() -> None:
 
 def test_is_running_returns_true_for_a_running_container() -> None:
     # given a container currently in the running state
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="RUNNING\n"
         )
 
         # when checking whether it is running
-        result = is_running("my-project")
+        result = container.is_running()
 
     # then it is reported as running
     assert result is True
@@ -446,26 +463,56 @@ def test_is_running_returns_true_for_a_running_container() -> None:
 
 def test_is_running_returns_false_for_a_stopped_container() -> None:
     # given a container currently in the stopped state
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="STOPPED\n"
         )
 
         # when checking whether it is running
-        result = is_running("my-project")
+        result = container.is_running()
 
     # then it is reported as not running
     assert result is False
 
 
-def test_start_container_starts_the_named_container() -> None:
+def test_start_starts_the_named_container() -> None:
     # given a container to start
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         # when starting it
-        start_container("my-project")
+        container.start()
 
     # then incus is invoked to start the named container
     run.assert_called_once_with(["incus", "start", "my-project"], check=True)
+
+
+def test_ensure_running_starts_a_container_that_is_not_already_running() -> None:
+    # given a container that is not currently running
+    container = Container("my-project")
+    with (
+        patch.object(Container, "is_running", return_value=False),
+        patch.object(Container, "start") as start,
+    ):
+        # when ensuring it is running
+        container.ensure_running()
+
+    # then it is started
+    start.assert_called_once_with()
+
+
+def test_ensure_running_does_not_start_an_already_running_container() -> None:
+    # given a container that is already running
+    container = Container("my-project")
+    with (
+        patch.object(Container, "is_running", return_value=True),
+        patch.object(Container, "start") as start,
+    ):
+        # when ensuring it is running
+        container.ensure_running()
+
+    # then it is not started again
+    start.assert_not_called()
 
 
 def test_stale_packages_returns_managed_packages_no_longer_desired() -> None:
@@ -507,13 +554,14 @@ def test_stale_packages_returns_nothing_for_empty_inputs() -> None:
 
 def test_run_command_runs_the_given_command_capturing_output() -> None:
     # given a command to run inside the container
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="hello\n", stderr=""
         )
 
         # when running it
-        result = run_command("my-project", ["pacman", "-Qq", "paru"])
+        result = container.run_command(["pacman", "-Qq", "paru"])
 
     # then incus exec is invoked with the command, capturing output rather
     # than inheriting the caller's stdio
@@ -527,27 +575,14 @@ def test_run_command_runs_the_given_command_capturing_output() -> None:
 
 def test_run_command_does_not_raise_on_a_non_zero_exit() -> None:
     # given a command that exits non-zero inside the container
+    container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="", stderr=""
         )
 
         # when running it
-        result = run_command("my-project", ["pacman", "-Qq", "missing"])
+        result = container.run_command(["pacman", "-Qq", "missing"])
 
     # then the non-zero exit is returned rather than raised
     assert result.returncode == 1
-
-
-def test_converge_leaves_unrelated_devices_alone() -> None:
-    # given a container with devices unrelated to bind-mount management (e.g.
-    # from the profile, such as "root" or "eth0")
-    with patch("ask.incus.subprocess.run") as run:
-        run.return_value = _list_devices_result("root", "eth0", "shellrc")
-
-        # when converging with no desired mounts
-        converge("my-project", [])
-
-    # then no "config device remove" call is made for them
-    remove_calls = [c for c in run.call_args_list if "remove" in c.args[0]]
-    assert remove_calls == []

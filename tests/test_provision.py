@@ -349,7 +349,9 @@ def test_provision_aur_builder_ensures_a_system_group_and_user() -> None:
 
     # then a system group and user named "aur" are ensured, with a home
     # directory to build in and no login shell
-    add_op.assert_any_call(state_cls.return_value, server.group, group="aur", system=True)
+    add_op.assert_any_call(
+        state_cls.return_value, server.group, group="aur", system=True
+    )
     add_op.assert_any_call(
         state_cls.return_value,
         server.user,
@@ -430,46 +432,50 @@ def _completed(returncode: int, stdout: str = "") -> subprocess.CompletedProcess
 
 def test_ensure_paru_does_nothing_when_already_installed() -> None:
     # given a container that already has paru installed
-    with (
-        patch("ask.provision.incus.run_command", return_value=_completed(0)) as run_command,
-        patch("ask.provision.incus.exec_command") as exec_command,
-    ):
+    with patch("ask.provision.incus.Container") as container_cls:
+        container = container_cls.return_value
+        container.run_command.return_value = _completed(0)
+
         # when ensuring paru is present
         ensure_paru("my-project")
 
-    # then only the presence check is made, and nothing is built
-    run_command.assert_called_once_with("my-project", ["pacman", "-Qq", "paru"])
-    exec_command.assert_not_called()
+    # then the container is targeted by name, only the presence check is
+    # made, and nothing is built
+    container_cls.assert_called_once_with("my-project")
+    container.run_command.assert_called_once_with(["pacman", "-Qq", "paru"])
+    container.exec_command.assert_not_called()
 
 
 def test_ensure_paru_builds_it_when_missing_and_the_user_approves() -> None:
     # given a container without paru, and a user who approves the build after
     # reviewing the PKGBUILD
     with (
-        patch(
-            "ask.provision.incus.run_command",
-            side_effect=[_completed(1), _completed(0, "1001\n"), _completed(0, "1001\n")],
-        ),
-        patch("ask.provision.incus.exec_command", return_value=0) as exec_command,
+        patch("ask.provision.incus.Container") as container_cls,
         patch("builtins.input", return_value="y"),
     ):
+        container = container_cls.return_value
+        container.run_command.side_effect = [
+            _completed(1),
+            _completed(0, "1001\n"),
+            _completed(0, "1001\n"),
+        ]
+        container.exec_command.return_value = 0
+
         # when ensuring paru is present
         ensure_paru("my-project")
 
     # then paru-bin is cloned, its PKGBUILD is shown, and it is built as the
     # aur builder user
-    exec_command.assert_any_call(
-        "my-project",
+    container.exec_command.assert_any_call(
         1001,
         1001,
         Path("/home/aur"),
         ["git", "clone", "https://aur.archlinux.org/paru-bin.git", "paru-bin"],
     )
-    exec_command.assert_any_call(
-        "my-project", 1001, 1001, Path("/home/aur/paru-bin"), ["cat", "PKGBUILD"]
+    container.exec_command.assert_any_call(
+        1001, 1001, Path("/home/aur/paru-bin"), ["cat", "PKGBUILD"]
     )
-    exec_command.assert_any_call(
-        "my-project",
+    container.exec_command.assert_any_call(
         1001,
         1001,
         Path("/home/aur/paru-bin"),
@@ -481,19 +487,25 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
     # given a container without paru, and a user who declines after
     # reviewing the PKGBUILD
     with (
-        patch(
-            "ask.provision.incus.run_command",
-            side_effect=[_completed(1), _completed(0, "1001\n"), _completed(0, "1001\n")],
-        ),
-        patch("ask.provision.incus.exec_command", return_value=0) as exec_command,
+        patch("ask.provision.incus.Container") as container_cls,
         patch("builtins.input", return_value="n"),
     ):
+        container = container_cls.return_value
+        container.run_command.side_effect = [
+            _completed(1),
+            _completed(0, "1001\n"),
+            _completed(0, "1001\n"),
+        ]
+        container.exec_command.return_value = 0
+
         # when ensuring paru is present
         # then a clear error is raised, and the package is never built
         with pytest.raises(RuntimeError, match="declined"):
             ensure_paru("my-project")
 
-    build_calls = [c for c in exec_command.call_args_list if "makepkg" in c.args[4]]
+    build_calls = [
+        c for c in container.exec_command.call_args_list if "makepkg" in c.args[3]
+    ]
     assert build_calls == []
 
 
@@ -502,7 +514,7 @@ def test_provision_aur_packages_does_nothing_for_no_packages() -> None:
     with (
         patch("ask.provision.provision_aur_builder") as builder,
         patch("ask.provision.ensure_paru") as paru,
-        patch("ask.provision.incus.exec_command") as exec_command,
+        patch("ask.provision.incus.Container") as container_cls,
     ):
         # when provisioning aur packages
         provision_aur_packages("my-project", "arch", [])
@@ -510,7 +522,7 @@ def test_provision_aur_packages_does_nothing_for_no_packages() -> None:
     # then nothing is provisioned at all
     builder.assert_not_called()
     paru.assert_not_called()
-    exec_command.assert_not_called()
+    container_cls.assert_not_called()
 
 
 def test_provision_aur_packages_raises_for_an_unsupported_distribution() -> None:
@@ -526,12 +538,15 @@ def test_provision_aur_packages_builds_the_builder_and_paru_then_installs() -> N
     with (
         patch("ask.provision.provision_aur_builder") as builder,
         patch("ask.provision.ensure_paru") as paru,
-        patch(
-            "ask.provision.incus.run_command",
-            side_effect=[_completed(0, "1001\n"), _completed(0, "1001\n")],
-        ),
-        patch("ask.provision.incus.exec_command", return_value=0) as exec_command,
+        patch("ask.provision.incus.Container") as container_cls,
     ):
+        container = container_cls.return_value
+        container.run_command.side_effect = [
+            _completed(0, "1001\n"),
+            _completed(0, "1001\n"),
+        ]
+        container.exec_command.return_value = 0
+
         # when provisioning aur packages
         provision_aur_packages("my-project", "arch", ["yay-bin", "some-other-pkg"])
 
@@ -539,8 +554,8 @@ def test_provision_aur_packages_builds_the_builder_and_paru_then_installs() -> N
     # installing the declared packages as the aur builder user, interactively
     builder.assert_called_once_with("my-project")
     paru.assert_called_once_with("my-project")
-    exec_command.assert_called_once_with(
-        "my-project",
+    container_cls.assert_called_once_with("my-project")
+    container.exec_command.assert_called_once_with(
         1001,
         1001,
         Path("/home/aur"),

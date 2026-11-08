@@ -17,21 +17,21 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
     # when running create from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.incus.create_container") as create_container,
+        patch("ask.cli.incus.Container.create") as container_create,
         patch("ask.cli.converge") as converge_mock,
     ):
         create()
 
     # then a container named after the project directory is launched for that
     # distribution, and converge is run to apply the rest of the configuration
-    create_container.assert_called_once_with("my-project", "arch")
+    container_create.assert_called_once_with("my-project", "arch")
     converge_mock.assert_called_once_with()
 
 
-def test_converge_starts_the_container_when_not_already_running(
+def test_converge_ensures_the_targeted_container_is_running(
     tmp_path: Path,
 ) -> None:
-    # given a project directory, and a container that is not currently running
+    # given a project directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\n')
@@ -42,50 +42,21 @@ def test_converge_starts_the_container_when_not_already_running(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=False),
-        patch("ask.cli.incus.start_container") as start_container,
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
-    # then the container is started before the rest of convergence runs
-    start_container.assert_called_once_with("my-project")
-
-
-def test_converge_does_not_start_an_already_running_container(
-    tmp_path: Path,
-) -> None:
-    # given a project directory, and a container that is already running
-    project_dir = tmp_path / "my-project"
-    project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
-    config_path = tmp_path / "config.toml"
-    config_path.write_text("")
-
-    # when converging from within that project directory
-    with (
-        patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container") as start_container,
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
-        patch("ask.cli.provision.provision_user"),
-        patch("ask.cli.provision.provision_packages"),
-        patch("ask.cli.provision.remove_packages"),
-        patch("ask.cli.provision.fix_bind_mount_ownership"),
-    ):
-        converge()
-
-    # then it is not started again
-    start_container.assert_not_called()
+    # then the container named after the project directory is targeted, and
+    # ensured to be running before the rest of convergence runs
+    container_cls.assert_called_once_with("my-project")
+    container.ensure_running.assert_called_once_with()
 
 
 def test_converge_applies_resolved_bind_mounts_including_project_dir(
@@ -111,36 +82,33 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge") as incus_converge,
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then the instance is converged with the project directory plus every resolved
     # bind mount (project-level and layer-level), alongside the shell rc mount
-    incus_converge.assert_called_once_with(
-        "my-project",
+    container.converge.assert_called_once_with(
         [
             Mount(host_path=project_dir, container_path=project_dir),
             Mount(
                 host_path=Path("/configured/mount"),
                 container_path=Path("/configured/mount"),
             ),
-            Mount(
-                host_path=Path("/layer/mount"), container_path=Path("/layer/mount")
-            ),
+            Mount(host_path=Path("/layer/mount"), container_path=Path("/layer/mount")),
             Mount(
                 host_path=home_dir / ".bashrc",
                 container_path=Path("/home/raniz/.bashrc"),
                 readonly=True,
             ),
-        ],
+        ]
     )
 
 
@@ -156,15 +124,15 @@ def test_converge_provisions_the_resolved_user(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user") as provision_user,
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then the resolved user is provisioned into the container
@@ -197,13 +165,7 @@ def test_converge_provisions_the_user_before_mounting_home_relative_paths(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch(
-            "ask.cli.incus.converge",
-            side_effect=lambda *a, **k: call_order.append("converge"),
-        ),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch(
             "ask.cli.provision.provision_user",
             side_effect=lambda *a, **k: call_order.append("provision_user"),
@@ -212,6 +174,10 @@ def test_converge_provisions_the_user_before_mounting_home_relative_paths(
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+        container.converge.side_effect = lambda *a, **k: call_order.append("converge")
+
         converge()
 
     # then the user, and therefore their home directory, is provisioned
@@ -236,15 +202,15 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages") as provision_packages,
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then the resolved packages (project-level and layer-level) are
@@ -268,15 +234,15 @@ def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> 
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages") as provision_packages,
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then zsh's own package is included among the packages to provision
@@ -298,16 +264,16 @@ def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> N
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages") as set_managed_packages,
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages") as provision_packages,
         patch("ask.cli.provision.provision_aur_packages") as provision_aur_packages,
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then the official packages go through the regular pacman path, the aur
@@ -315,7 +281,7 @@ def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> N
     # tracked managed set records both by their plain names
     provision_packages.assert_called_once_with("my-project", "arch", ["git", "bash"])
     provision_aur_packages.assert_called_once_with("my-project", "arch", ["yay-bin"])
-    set_managed_packages.assert_called_once_with("my-project", ["git", "bash", "yay-bin"])
+    container.set_managed_packages.assert_called_once_with(["git", "bash", "yay-bin"])
 
 
 def test_converge_removes_a_package_that_is_no_longer_declared_as_aur(
@@ -333,19 +299,16 @@ def test_converge_removes_a_package_that_is_no_longer_declared_as_aur(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch(
-            "ask.cli.incus.get_managed_packages",
-            return_value=["bash", "yay-bin"],
-        ),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.provision_aur_packages"),
         patch("ask.cli.provision.remove_packages") as remove_packages,
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = ["bash", "yay-bin"]
+
         converge()
 
     # then it is removed the same way as any other stale package, regardless
@@ -369,22 +332,21 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge") as incus_converge,
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then the shell's rc file is mounted read-only, from the calling host's
     # home directory to the matching file under the resolved container user's
     # home, alongside the project directory mount
-    incus_converge.assert_called_once_with(
-        "my-project",
+    container.converge.assert_called_once_with(
         [
             Mount(host_path=project_dir, container_path=project_dir),
             Mount(
@@ -392,7 +354,7 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
                 container_path=Path("/home/raniz/.zshrc"),
                 readonly=True,
             ),
-        ],
+        ]
     )
 
 
@@ -408,23 +370,25 @@ def test_converge_installs_declared_agent_packages(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages") as set_managed_packages,
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages") as provision_packages,
         patch("ask.cli.provision.provision_aur_packages") as provision_aur_packages,
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then the agent's aur-prefixed package is installed through the aur
     # path, alongside the default shell's official package
     provision_packages.assert_called_once_with("my-project", "arch", ["bash"])
-    provision_aur_packages.assert_called_once_with("my-project", "arch", ["claude-code"])
-    set_managed_packages.assert_called_once_with("my-project", ["bash", "claude-code"])
+    provision_aur_packages.assert_called_once_with(
+        "my-project", "arch", ["claude-code"]
+    )
+    container.set_managed_packages.assert_called_once_with(["bash", "claude-code"])
 
 
 def test_converge_mounts_agent_state_when_shared_state_is_enabled(
@@ -448,23 +412,22 @@ def test_converge_mounts_agent_state_when_shared_state_is_enabled(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge") as incus_converge,
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.provision_aur_packages"),
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then each of the agent's state paths is mounted from the calling host's
     # home directory to the matching path under the resolved container user's
     # home, alongside the project directory and shell rc mounts
-    incus_converge.assert_called_once_with(
-        "my-project",
+    container.converge.assert_called_once_with(
         [
             Mount(host_path=project_dir, container_path=project_dir),
             Mount(
@@ -492,7 +455,7 @@ def test_converge_mounts_agent_state_when_shared_state_is_enabled(
                 host_path=home_dir / ".claude" / "CLAUDE.md",
                 container_path=Path("/home/raniz/.claude/CLAUDE.md"),
             ),
-        ],
+        ]
     )
 
 
@@ -516,22 +479,21 @@ def test_converge_does_not_mount_agent_state_without_shared_state(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge") as incus_converge,
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.provision_aur_packages"),
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then no agent state is mounted, just the project directory and shell rc
     # mounts
-    incus_converge.assert_called_once_with(
-        "my-project",
+    container.converge.assert_called_once_with(
         [
             Mount(host_path=project_dir, container_path=project_dir),
             Mount(
@@ -539,7 +501,7 @@ def test_converge_does_not_mount_agent_state_without_shared_state(
                 container_path=Path("/home/raniz/.bashrc"),
                 readonly=True,
             ),
-        ],
+        ]
     )
 
 
@@ -558,24 +520,25 @@ def test_converge_removes_packages_no_longer_declared(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch(
-            "ask.cli.incus.get_managed_packages",
-            return_value=["project-pkg", "bash", "stale-pkg"],
-        ),
-        patch("ask.cli.incus.set_managed_packages") as set_managed_packages,
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.remove_packages") as remove_packages,
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = [
+            "project-pkg",
+            "bash",
+            "stale-pkg",
+        ]
+
         converge()
 
     # then the package no longer declared is removed, and the newly resolved
     # set of packages becomes the tracked set for next time
     remove_packages.assert_called_once_with("my-project", "arch", ["stale-pkg"])
-    set_managed_packages.assert_called_once_with("my-project", ["project-pkg", "bash"])
+    container.set_managed_packages.assert_called_once_with(["project-pkg", "bash"])
 
 
 def test_converge_does_not_remove_packages_when_nothing_is_stale(
@@ -595,18 +558,15 @@ def test_converge_does_not_remove_packages_when_nothing_is_stale(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch(
-            "ask.cli.incus.get_managed_packages",
-            return_value=["project-pkg", "bash"],
-        ),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.remove_packages") as remove_packages,
         patch("ask.cli.provision.fix_bind_mount_ownership"),
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = ["project-pkg", "bash"]
+
         converge()
 
     # then nothing is removed
@@ -630,15 +590,15 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership") as fix_ownership,
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then bind mount ownership is fixed for the resolved user, covering every
@@ -680,16 +640,16 @@ def test_converge_fixes_agent_state_mount_ownership_when_shared_state_is_enabled
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.converge"),
-        patch("ask.cli.incus.get_managed_packages", return_value=[]),
-        patch("ask.cli.incus.set_managed_packages"),
+        patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.provision_user"),
         patch("ask.cli.provision.provision_packages"),
         patch("ask.cli.provision.provision_aur_packages"),
         patch("ask.cli.provision.remove_packages"),
         patch("ask.cli.provision.fix_bind_mount_ownership") as fix_ownership,
     ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
         converge()
 
     # then ownership is fixed using every one of the agent's state paths too,
@@ -717,8 +677,8 @@ def test_converge_fixes_agent_state_mount_ownership_when_shared_state_is_enabled
     )
 
 
-def test_enter_starts_the_container_when_not_already_running(tmp_path: Path) -> None:
-    # given a project directory, and a container that is not currently running
+def test_enter_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
+    # given a project directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     config_path = tmp_path / "config.toml"
@@ -728,37 +688,18 @@ def test_enter_starts_the_container_when_not_already_running(tmp_path: Path) -> 
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=False),
-        patch("ask.cli.incus.start_container") as start_container,
-        patch("ask.cli.incus.exec_command", return_value=0),
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
         enter()
 
-    # then the container is started before entering
-    start_container.assert_called_once_with("my-project")
-
-
-def test_enter_does_not_start_an_already_running_container(tmp_path: Path) -> None:
-    # given a project directory, and a container that is already running
-    project_dir = tmp_path / "my-project"
-    project_dir.mkdir()
-    config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
-
-    # when entering the container
-    with (
-        patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container") as start_container,
-        patch("ask.cli.incus.exec_command", return_value=0),
-        pytest.raises(SystemExit),
-    ):
-        enter()
-
-    # then it is not started again
-    start_container.assert_not_called()
+    # then the container named after the project directory is targeted, and
+    # ensured to be running before entering
+    container_cls.assert_called_once_with("my-project")
+    container.ensure_running.assert_called_once_with()
 
 
 def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
@@ -772,18 +713,19 @@ def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container"),
-        patch("ask.cli.incus.exec_command", return_value=0) as exec_command,
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
         enter()
 
-    # then the resolved shell is executed in the container as the resolved
-    # user, in the project directory, with environment variables that make
-    # it look like an SSH session, and ask exits with its exit code
-    exec_command.assert_called_once_with(
-        "my-project", 1000, 1000, project_dir, ["zsh"], env=FAKE_SSH_ENV
+    # then the resolved shell is executed in the right container, as the
+    # resolved user, in the project directory, with environment variables
+    # that make it look like an SSH session, and ask exits with its exit code
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["zsh"], env=FAKE_SSH_ENV
     )
     assert exc_info.value.code == 0
 
@@ -799,19 +741,20 @@ def test_enter_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container"),
-        patch("ask.cli.incus.exec_command", return_value=3),
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 3
+
         enter()
 
     # then ask exits with that same code, rather than raising
     assert exc_info.value.code == 3
 
 
-def test_exec_starts_the_container_when_not_already_running(tmp_path: Path) -> None:
-    # given a project directory, and a container that is not currently running
+def test_exec_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
+    # given a project directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     config_path = tmp_path / "config.toml"
@@ -821,37 +764,18 @@ def test_exec_starts_the_container_when_not_already_running(tmp_path: Path) -> N
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=False),
-        patch("ask.cli.incus.start_container") as start_container,
-        patch("ask.cli.incus.exec_command", return_value=0),
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
         exec("ls", "-la")
 
-    # then the container is started before the command is executed
-    start_container.assert_called_once_with("my-project")
-
-
-def test_exec_does_not_start_an_already_running_container(tmp_path: Path) -> None:
-    # given a project directory, and a container that is already running
-    project_dir = tmp_path / "my-project"
-    project_dir.mkdir()
-    config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
-
-    # when executing a command from within that project directory
-    with (
-        patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container") as start_container,
-        patch("ask.cli.incus.exec_command", return_value=0),
-        pytest.raises(SystemExit),
-    ):
-        exec("ls", "-la")
-
-    # then it is not started again
-    start_container.assert_not_called()
+    # then the container named after the project directory is targeted, and
+    # ensured to be running before the command is executed
+    container_cls.assert_called_once_with("my-project")
+    container.ensure_running.assert_called_once_with()
 
 
 def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
@@ -865,17 +789,19 @@ def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container"),
-        patch("ask.cli.incus.exec_command", return_value=0) as exec_command,
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
         exec("ls", "-la")
 
-    # then the command is executed in the container as the resolved user, in
-    # the project directory, and ask exits with the command's exit code
-    exec_command.assert_called_once_with(
-        "my-project", 1000, 1000, project_dir, ["ls", "-la"]
+    # then the command is executed in the right container as the resolved
+    # user, in the project directory, and ask exits with the command's exit
+    # code
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["ls", "-la"]
     )
     assert exc_info.value.code == 0
 
@@ -891,11 +817,12 @@ def test_exec_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container"),
-        patch("ask.cli.incus.exec_command", return_value=3),
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 3
+
         exec("false")
 
     # then ask exits with that same code, rather than raising
@@ -920,19 +847,18 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container"),
-        patch("ask.cli.incus.exec_command", return_value=0) as exec_command,
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
         agent()
 
     # then the first configured agent is executed in the container as the
     # resolved user, in the project directory, and ask exits with its exit
-    # code
-    exec_command.assert_called_once_with(
-        "my-project", 1000, 1000, project_dir, ["claude"]
-    )
+    # code (the second, unregistered agent name is never resolved)
+    container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["claude"])
     assert exc_info.value.code == 0
 
 
@@ -948,22 +874,22 @@ def test_agent_launches_the_named_agent_when_given(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container"),
-        patch("ask.cli.incus.exec_command", return_value=0) as exec_command,
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
         agent("claude")
 
     # then the named agent is executed, regardless of what is configured
-    exec_command.assert_called_once_with(
-        "my-project", 1000, 1000, project_dir, ["claude"]
-    )
+    container_cls.assert_called_once_with("my-project")
+    container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["claude"])
     assert exc_info.value.code == 0
 
 
-def test_agent_starts_the_container_when_not_already_running(tmp_path: Path) -> None:
-    # given a project directory, and a container that is not currently running
+def test_agent_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
+    # given a project directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\n')
@@ -974,38 +900,18 @@ def test_agent_starts_the_container_when_not_already_running(tmp_path: Path) -> 
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=False),
-        patch("ask.cli.incus.start_container") as start_container,
-        patch("ask.cli.incus.exec_command", return_value=0),
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
         agent("claude")
 
-    # then the container is started before the agent is executed
-    start_container.assert_called_once_with("my-project")
-
-
-def test_agent_does_not_start_an_already_running_container(tmp_path: Path) -> None:
-    # given a project directory, and a container that is already running
-    project_dir = tmp_path / "my-project"
-    project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
-    config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
-
-    # when launching an agent
-    with (
-        patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container") as start_container,
-        patch("ask.cli.incus.exec_command", return_value=0),
-        pytest.raises(SystemExit),
-    ):
-        agent("claude")
-
-    # then it is not started again
-    start_container.assert_not_called()
+    # then the container named after the project directory is targeted, and
+    # ensured to be running before the agent is executed
+    container_cls.assert_called_once_with("my-project")
+    container.ensure_running.assert_called_once_with()
 
 
 def test_agent_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
@@ -1020,11 +926,12 @@ def test_agent_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.is_running", return_value=True),
-        patch("ask.cli.incus.start_container"),
-        patch("ask.cli.incus.exec_command", return_value=3),
+        patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 3
+
         agent("claude")
 
     # then ask exits with that same code, rather than raising
