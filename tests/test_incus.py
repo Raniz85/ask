@@ -331,7 +331,7 @@ def test_set_managed_packages_stores_the_given_packages() -> None:
 
     # then they are stored, comma-separated, under the custom config key
     run.assert_called_once_with(
-        ["incus", "config", "set", "my-project", "user.ask.packages", "zsh,python"],
+        ["incus", "config", "set", "my-project", "user.ask.packages=zsh,python"],
         check=True,
     )
 
@@ -345,7 +345,7 @@ def test_set_managed_packages_stores_an_empty_value_for_no_packages() -> None:
 
     # then the custom config key is cleared
     run.assert_called_once_with(
-        ["incus", "config", "set", "my-project", "user.ask.packages", ""],
+        ["incus", "config", "set", "my-project", "user.ask.packages="],
         check=True,
     )
 

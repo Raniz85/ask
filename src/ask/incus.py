@@ -173,8 +173,7 @@ class Container:
                 "config",
                 "set",
                 self.name,
-                _MANAGED_PACKAGES_CONFIG_KEY,
-                ",".join(packages),
+                f"{_MANAGED_PACKAGES_CONFIG_KEY}={','.join(packages)}",
             ],
             check=True,
         )
