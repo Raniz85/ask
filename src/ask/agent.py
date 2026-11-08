@@ -71,10 +71,25 @@ class Codex(Agent):
     )
 
 
+@dataclass(frozen=True)
+class Pi(Agent):
+    name: str = "pi"
+    packages: dict[str, list[str]] = field(default_factory=lambda: {"arch": ["aur:pi"]})
+    state_paths: list[str] = field(
+        default_factory=lambda: [
+            ".pi/agent/auth.json",
+            ".pi/agent/settings.json",
+            ".pi/agent/mcp.json",
+            ".pi/agent/models.json",
+        ]
+    )
+
+
 _AGENTS: dict[str, Agent] = {
     "claude": Claude(),
     "opencode": OpenCode(),
     "codex": Codex(),
+    "pi": Pi(),
 }
 
 

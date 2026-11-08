@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ask.agent import Agent, Claude, Codex, OpenCode, resolve
+from ask.agent import Agent, Claude, Codex, OpenCode, Pi, resolve
 from ask.config import ResolvedUser
 from ask.incus import Mount
 
@@ -56,6 +56,23 @@ def test_codex_has_its_packages_and_state_paths() -> None:
     ]
 
 
+def test_pi_has_its_packages_and_state_paths() -> None:
+    # given the pi agent
+    # when inspecting its properties
+    pi = Pi()
+
+    # then its distro-keyed packages and home-relative state paths are as
+    # expected
+    assert pi.name == "pi"
+    assert pi.packages == {"arch": ["aur:pi"]}
+    assert pi.state_paths == [
+        ".pi/agent/auth.json",
+        ".pi/agent/settings.json",
+        ".pi/agent/mcp.json",
+        ".pi/agent/models.json",
+    ]
+
+
 def test_resolve_returns_claude_for_claude() -> None:
     # given the name "claude"
     # when resolving it to an agent
@@ -75,6 +92,13 @@ def test_resolve_returns_codex_for_codex() -> None:
     # when resolving it to an agent
     # then the Codex agent is returned
     assert resolve("codex") == Codex()
+
+
+def test_resolve_returns_pi_for_pi() -> None:
+    # given the name "pi"
+    # when resolving it to an agent
+    # then the Pi agent is returned
+    assert resolve("pi") == Pi()
 
 
 def test_resolve_raises_for_unknown_agent() -> None:
