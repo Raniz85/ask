@@ -2,6 +2,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ask import agent
 from ask.agent import Agent
 from ask.config import Layer
 
@@ -28,61 +29,62 @@ def load(path: Path) -> Manifest:
     )
 
 
-def resolve_bind_mounts(manifest: Manifest, layers: dict[str, Layer]) -> list[Path]:
-    mounts = list(manifest.bind_mounts)
-    for layer_name in manifest.layers:
-        try:
-            layer = layers[layer_name]
-        except KeyError:
-            raise ValueError(f"no known layer named {layer_name!r}") from None
-        mounts += layer.bind_mounts
-    return mounts
+@dataclass
+class ResolvedManifest:
+    manifest: Manifest
+    layers: dict[str, Layer]
 
+    def _configured_layers(self) -> list[Layer]:
+        result = []
+        for layer_name in self.manifest.layers:
+            try:
+                result.append(self.layers[layer_name])
+            except KeyError:
+                raise ValueError(f"no known layer named {layer_name!r}") from None
+        return result
 
-def _packages_for_distribution(
-    packages: dict[str, list[str]], distribution: str
-) -> list[str]:
-    return packages.get("common", []) + packages.get(distribution, [])
+    @staticmethod
+    def _packages_for(packages: dict[str, list[str]], distribution: str) -> list[str]:
+        return packages.get("common", []) + packages.get(distribution, [])
 
+    @property
+    def bind_mounts(self) -> list[Path]:
+        mounts = list(self.manifest.bind_mounts)
+        for layer in self._configured_layers():
+            mounts += layer.bind_mounts
+        return mounts
 
-def resolve_packages(manifest: Manifest, layers: dict[str, Layer]) -> list[str]:
-    packages = _packages_for_distribution(manifest.packages, manifest.distribution)
-    for layer_name in manifest.layers:
-        try:
-            layer = layers[layer_name]
-        except KeyError:
-            raise ValueError(f"no known layer named {layer_name!r}") from None
-        packages += _packages_for_distribution(layer.packages, manifest.distribution)
-    return packages
+    @property
+    def packages(self) -> list[str]:
+        packages = self._packages_for(
+            self.manifest.packages, self.manifest.distribution
+        )
+        for layer in self._configured_layers():
+            packages += self._packages_for(layer.packages, self.manifest.distribution)
+        return packages
 
+    @property
+    def agent_names(self) -> list[str]:
+        names: list[str] = []
+        for layer in self._configured_layers():
+            names += layer.agents
+        return names
 
-def resolve_agents(manifest: Manifest, layers: dict[str, Layer]) -> list[str]:
-    agents: list[str] = []
-    for layer_name in manifest.layers:
-        try:
-            layer = layers[layer_name]
-        except KeyError:
-            raise ValueError(f"no known layer named {layer_name!r}") from None
-        agents += layer.agents
-    return agents
+    @property
+    def agents(self) -> list[Agent]:
+        return [agent.resolve(name) for name in self.agent_names]
 
+    @property
+    def shared_state_agents(self) -> list[Agent]:
+        names: list[str] = []
+        for layer in self._configured_layers():
+            if layer.shared_state:
+                names += layer.agents
+        return [agent.resolve(name) for name in names]
 
-def resolve_shared_state_agents(
-    manifest: Manifest, layers: dict[str, Layer]
-) -> list[str]:
-    agents: list[str] = []
-    for layer_name in manifest.layers:
-        try:
-            layer = layers[layer_name]
-        except KeyError:
-            raise ValueError(f"no known layer named {layer_name!r}") from None
-        if layer.shared_state:
-            agents += layer.agents
-    return agents
-
-
-def resolve_agent_packages(agents: list[Agent], distribution: str) -> list[str]:
-    packages: list[str] = []
-    for a in agents:
-        packages += _packages_for_distribution(a.packages, distribution)
-    return packages
+    @property
+    def agent_packages(self) -> list[str]:
+        packages: list[str] = []
+        for a in self.agents:
+            packages += self._packages_for(a.packages, self.manifest.distribution)
+        return packages

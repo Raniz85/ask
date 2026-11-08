@@ -1,18 +1,11 @@
 from pathlib import Path
+from unittest.mock import call, patch
 
 import pytest
 
 from ask.agent import Agent
 from ask.config import Layer
-from ask.manifest import (
-    Manifest,
-    load,
-    resolve_agent_packages,
-    resolve_agents,
-    resolve_bind_mounts,
-    resolve_packages,
-    resolve_shared_state_agents,
-)
+from ask.manifest import Manifest, ResolvedManifest, load
 
 
 def test_load_reads_distribution_from_toml(tmp_path: Path) -> None:
@@ -118,100 +111,127 @@ def test_load_reads_layers_from_toml(tmp_path: Path) -> None:
     assert manifest.layers == ["base", "python"]
 
 
-def test_resolve_bind_mounts_combines_project_and_layer_mounts() -> None:
+def test_bind_mounts_combines_project_and_layer_mounts() -> None:
     # given a manifest with its own bind mount and one declared layer, and the
     # defined layers mapping, defining that layer's bind mount
     manifest = Manifest(
         distribution="arch", bind_mounts=[Path("/project/mount")], layers=["python"]
     )
     layers = {"python": Layer(bind_mounts=[Path("/layer/mount")])}
+    resolved = ResolvedManifest(manifest, layers)
 
     # when resolving the full set of bind mounts
-    mounts = resolve_bind_mounts(manifest, layers)
+    mounts = resolved.bind_mounts
 
     # then the project-level and layer-level mounts are both included
     assert mounts == [Path("/project/mount"), Path("/layer/mount")]
 
 
-def test_resolve_bind_mounts_raises_on_unknown_layer() -> None:
+def test_bind_mounts_raises_on_unknown_layer() -> None:
     # given a manifest declaring a layer that isn't defined in the layers mapping
     manifest = Manifest(distribution="arch", layers=["nonexistent"])
+    resolved = ResolvedManifest(manifest, {})
 
     # when resolving the full set of bind mounts
     # then a clear error is raised
     with pytest.raises(ValueError, match="nonexistent"):
-        resolve_bind_mounts(manifest, {})
+        resolved.bind_mounts
 
 
-def test_resolve_packages_combines_common_and_distribution_packages() -> None:
+def test_packages_combines_common_and_distribution_packages() -> None:
     # given a manifest targeting arch, declaring common and per-distribution
     # packages
     manifest = Manifest(
         distribution="arch",
         packages={"common": ["python"], "arch": ["zsh"], "debian": ["other"]},
     )
+    resolved = ResolvedManifest(manifest, {})
 
     # when resolving the full set of packages
-    packages = resolve_packages(manifest, {})
+    packages = resolved.packages
 
     # then the common packages and the packages for the manifest's own
     # distribution are included, and other distributions' packages are not
     assert packages == ["python", "zsh"]
 
 
-def test_resolve_packages_combines_project_and_layer_packages() -> None:
+def test_packages_combines_project_and_layer_packages() -> None:
     # given a manifest with its own packages and one declared layer, and the
     # defined layers mapping, defining that layer's packages
     manifest = Manifest(
         distribution="arch", packages={"arch": ["project-pkg"]}, layers=["python"]
     )
     layers = {"python": Layer(packages={"arch": ["layer-pkg"]})}
+    resolved = ResolvedManifest(manifest, layers)
 
     # when resolving the full set of packages
-    packages = resolve_packages(manifest, layers)
+    packages = resolved.packages
 
     # then the project-level and layer-level packages are both included
     assert packages == ["project-pkg", "layer-pkg"]
 
 
-def test_resolve_packages_raises_on_unknown_layer() -> None:
+def test_packages_raises_on_unknown_layer() -> None:
     # given a manifest declaring a layer that isn't defined in the layers mapping
     manifest = Manifest(distribution="arch", layers=["nonexistent"])
+    resolved = ResolvedManifest(manifest, {})
 
     # when resolving the full set of packages
     # then a clear error is raised
     with pytest.raises(ValueError, match="nonexistent"):
-        resolve_packages(manifest, {})
+        resolved.packages
 
 
-def test_resolve_agents_combines_agents_from_every_declared_layer() -> None:
+def test_agent_names_combines_agents_from_every_declared_layer() -> None:
     # given a manifest declaring two layers, each enabling an agent
     manifest = Manifest(distribution="arch", layers=["base", "python"])
     layers = {
         "base": Layer(agents=["claude"]),
         "python": Layer(agents=["other"]),
     }
+    resolved = ResolvedManifest(manifest, layers)
 
-    # when resolving the full set of agents
-    agents = resolve_agents(manifest, layers)
+    # when resolving the full set of agent names
+    agent_names = resolved.agent_names
 
-    # then the agents from both layers are included
-    assert agents == ["claude", "other"]
+    # then the agent names from both layers are included, without being
+    # resolved to actual agents
+    assert agent_names == ["claude", "other"]
 
 
-def test_resolve_agents_raises_on_unknown_layer() -> None:
+def test_agent_names_raises_on_unknown_layer() -> None:
     # given a manifest declaring a layer that isn't defined in the layers mapping
     manifest = Manifest(distribution="arch", layers=["nonexistent"])
+    resolved = ResolvedManifest(manifest, {})
 
-    # when resolving the full set of agents
+    # when resolving the full set of agent names
     # then a clear error is raised
     with pytest.raises(ValueError, match="nonexistent"):
-        resolve_agents(manifest, {})
+        resolved.agent_names
 
 
-def test_resolve_shared_state_agents_includes_only_agents_from_shared_state_layers() -> (
-    None
-):
+def test_agents_resolves_each_configured_agent_name_in_order() -> None:
+    # given a manifest declaring two layers, each enabling an agent
+    manifest = Manifest(distribution="arch", layers=["base", "python"])
+    layers = {
+        "base": Layer(agents=["claude"]),
+        "python": Layer(agents=["other"]),
+    }
+    resolved = ResolvedManifest(manifest, layers)
+    claude_agent = Agent(name="claude")
+    other_agent = Agent(name="other")
+
+    # when resolving the full set of agents
+    with patch("ask.manifest.agent.resolve") as resolve:
+        resolve.side_effect = {"claude": claude_agent, "other": other_agent}.__getitem__
+        agents = resolved.agents
+
+    # then each configured agent name is resolved, in order
+    resolve.assert_has_calls([call("claude"), call("other")])
+    assert agents == [claude_agent, other_agent]
+
+
+def test_shared_state_agents_includes_only_agents_from_shared_state_layers() -> None:
     # given a manifest declaring one layer with shared state enabled, and
     # another without
     manifest = Manifest(distribution="arch", layers=["base", "python"])
@@ -219,34 +239,44 @@ def test_resolve_shared_state_agents_includes_only_agents_from_shared_state_laye
         "base": Layer(agents=["claude"], shared_state=True),
         "python": Layer(agents=["other"], shared_state=False),
     }
+    resolved = ResolvedManifest(manifest, layers)
+    claude_agent = Agent(name="claude")
 
     # when resolving the agents whose state should be shared
-    agents = resolve_shared_state_agents(manifest, layers)
+    with patch("ask.manifest.agent.resolve", return_value=claude_agent) as resolve:
+        agents = resolved.shared_state_agents
 
-    # then only the agent from the shared-state layer is included
-    assert agents == ["claude"]
+    # then only the agent from the shared-state layer is resolved and included
+    resolve.assert_called_once_with("claude")
+    assert agents == [claude_agent]
 
 
-def test_resolve_shared_state_agents_raises_on_unknown_layer() -> None:
+def test_shared_state_agents_raises_on_unknown_layer() -> None:
     # given a manifest declaring a layer that isn't defined in the layers mapping
     manifest = Manifest(distribution="arch", layers=["nonexistent"])
+    resolved = ResolvedManifest(manifest, {})
 
     # when resolving the agents whose state should be shared
     # then a clear error is raised
     with pytest.raises(ValueError, match="nonexistent"):
-        resolve_shared_state_agents(manifest, {})
+        resolved.shared_state_agents
 
 
-def test_resolve_agent_packages_combines_common_and_distribution_packages() -> None:
-    # given an agent declaring common and per-distribution packages
+def test_agent_packages_combines_common_and_distribution_packages() -> None:
+    # given a manifest targeting arch, with a layer declaring one agent whose
+    # packages include common and per-distribution entries
+    manifest = Manifest(distribution="arch", layers=["base"])
+    layers = {"base": Layer(agents=["test"])}
+    resolved = ResolvedManifest(manifest, layers)
     test_agent = Agent(
         name="test",
         packages={"common": ["shared-pkg"], "arch": ["arch-pkg"], "debian": ["other"]},
     )
 
-    # when resolving its packages for arch
-    packages = resolve_agent_packages([test_agent], "arch")
+    # when resolving the configured agents' packages for arch
+    with patch("ask.manifest.agent.resolve", return_value=test_agent):
+        packages = resolved.agent_packages
 
-    # then the common packages and the packages for the given distribution are
-    # included, and other distributions' packages are not
+    # then the common packages and the packages for the manifest's distribution
+    # are included, and other distributions' packages are not
     assert packages == ["shared-pkg", "arch-pkg"]

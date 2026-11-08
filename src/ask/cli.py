@@ -21,24 +21,20 @@ def converge() -> None:
     project_dir = Path.cwd()
     m = manifest.load(project_dir / "ask.toml")
     cfg = config.load(config.default_path())
+    resolved_manifest = manifest.ResolvedManifest(m, cfg.layers)
     if not incus.is_running(project_dir.name):
         incus.start_container(project_dir.name)
-    bind_mounts = [project_dir] + manifest.resolve_bind_mounts(m, cfg.layers)
+    bind_mounts = [project_dir] + resolved_manifest.bind_mounts
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
-    resolved_agents = [
-        agents.resolve(name) for name in manifest.resolve_agents(m, cfg.layers)
-    ]
-    agent_packages = manifest.resolve_agent_packages(resolved_agents, m.distribution)
     packages = (
-        manifest.resolve_packages(m, cfg.layers) + user_shell.packages + agent_packages
+        resolved_manifest.packages
+        + user_shell.packages
+        + resolved_manifest.agent_packages
     )
     official_packages, aur_packages = provision.split_aur_packages(packages)
 
-    shared_state_agents = [
-        agents.resolve(name)
-        for name in manifest.resolve_shared_state_agents(m, cfg.layers)
-    ]
+    shared_state_agents = resolved_manifest.shared_state_agents
     mounts = (
         [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
         + [
@@ -100,7 +96,7 @@ def agent(name: str | None = None) -> None:
     cfg = config.load(config.default_path())
     user = config.resolve_user(cfg)
     if name is None:
-        agent_names = manifest.resolve_agents(m, cfg.layers)
+        agent_names = manifest.ResolvedManifest(m, cfg.layers).agent_names
         if not agent_names:
             raise ValueError("no agents configured")
         name = agent_names[0]
