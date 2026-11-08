@@ -38,9 +38,17 @@ class Zsh(Shell):
     packages: list[str] = field(default_factory=lambda: ["zsh"])
 
 
+@dataclass(frozen=True)
+class Fish(Shell):
+    name: str = "fish"
+    rc_filename: str = ".config/fish/config.fish"
+    packages: list[str] = field(default_factory=lambda: ["fish"])
+
+
 _SHELLS: dict[str, Shell] = {
     "bash": Bash(),
     "zsh": Zsh(),
+    "fish": Fish(),
 }
 
 

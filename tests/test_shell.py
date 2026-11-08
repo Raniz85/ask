@@ -29,6 +29,17 @@ def test_zsh_has_its_rc_filename_and_package() -> None:
     assert zsh.packages == ["zsh"]
 
 
+def test_fish_has_its_rc_filename_and_package() -> None:
+    # given the fish shell
+    # when inspecting its properties
+    fish = Fish()
+
+    # then its name, rc filename and required package are as expected
+    assert fish.name == "fish"
+    assert fish.rc_filename == ".config/fish/config.fish"
+    assert fish.packages == ["fish"]
+
+
 def test_resolve_returns_bash_for_bash() -> None:
     # given the name "bash"
     # when resolving it to a shell
@@ -41,6 +52,13 @@ def test_resolve_returns_zsh_for_zsh() -> None:
     # when resolving it to a shell
     # then the Zsh shell is returned
     assert resolve("zsh") == Zsh()
+
+
+def test_resolve_returns_fish_for_fish() -> None:
+    # given the name "fish"
+    # when resolving it to a shell
+    # then the Fish shell is returned
+    assert resolve("fish") == Fish()
 
 
 def test_resolve_raises_for_unknown_shell() -> None:
