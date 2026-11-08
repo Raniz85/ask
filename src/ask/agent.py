@@ -42,7 +42,40 @@ class Claude(Agent):
     )
 
 
-_AGENTS: dict[str, Agent] = {"claude": Claude()}
+@dataclass(frozen=True)
+class OpenCode(Agent):
+    name: str = "opencode"
+    packages: dict[str, list[str]] = field(
+        default_factory=lambda: {"arch": ["opencode"]}
+    )
+    state_paths: list[str] = field(
+        default_factory=lambda: [
+            ".config/opencode/opencode.jsonc",
+            ".config/opencode/cli.json",
+            ".local/share/opencode/auth.json",
+        ]
+    )
+
+
+@dataclass(frozen=True)
+class Codex(Agent):
+    name: str = "codex"
+    packages: dict[str, list[str]] = field(
+        default_factory=lambda: {"arch": ["openai-codex"]}
+    )
+    state_paths: list[str] = field(
+        default_factory=lambda: [
+            ".codex/config.toml",
+            ".codex/auth.json",
+        ]
+    )
+
+
+_AGENTS: dict[str, Agent] = {
+    "claude": Claude(),
+    "opencode": OpenCode(),
+    "codex": Codex(),
+}
 
 
 def resolve(name: str) -> Agent:

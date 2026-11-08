@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ask.agent import Agent, Claude, resolve
+from ask.agent import Agent, Claude, Codex, OpenCode, resolve
 from ask.config import ResolvedUser
 from ask.incus import Mount
 
@@ -25,11 +25,56 @@ def test_claude_has_its_packages_and_state_paths() -> None:
     ]
 
 
+def test_opencode_has_its_packages_and_state_paths() -> None:
+    # given the opencode agent
+    # when inspecting its properties
+    opencode = OpenCode()
+
+    # then its distro-keyed packages and home-relative state paths are as
+    # expected
+    assert opencode.name == "opencode"
+    assert opencode.packages == {"arch": ["opencode"]}
+    assert opencode.state_paths == [
+        ".config/opencode/opencode.jsonc",
+        ".config/opencode/cli.json",
+        ".local/share/opencode/auth.json",
+    ]
+
+
+def test_codex_has_its_packages_and_state_paths() -> None:
+    # given the codex agent
+    # when inspecting its properties
+    codex = Codex()
+
+    # then its distro-keyed packages and home-relative state paths are as
+    # expected
+    assert codex.name == "codex"
+    assert codex.packages == {"arch": ["openai-codex"]}
+    assert codex.state_paths == [
+        ".codex/config.toml",
+        ".codex/auth.json",
+    ]
+
+
 def test_resolve_returns_claude_for_claude() -> None:
     # given the name "claude"
     # when resolving it to an agent
     # then the Claude agent is returned
     assert resolve("claude") == Claude()
+
+
+def test_resolve_returns_opencode_for_opencode() -> None:
+    # given the name "opencode"
+    # when resolving it to an agent
+    # then the OpenCode agent is returned
+    assert resolve("opencode") == OpenCode()
+
+
+def test_resolve_returns_codex_for_codex() -> None:
+    # given the name "codex"
+    # when resolving it to an agent
+    # then the Codex agent is returned
+    assert resolve("codex") == Codex()
 
 
 def test_resolve_raises_for_unknown_agent() -> None:
