@@ -9,7 +9,6 @@ from ask.config import (
     Layer,
     ResolvedUser,
     User,
-    ancestors_under_home,
     default_path,
     load,
     resolve_user,
@@ -119,9 +118,7 @@ def test_load_reads_layer_packages(tmp_path: Path) -> None:
 def test_load_reads_layer_agents(tmp_path: Path) -> None:
     # given a layer declaring agents to install, with shared state enabled
     config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        '[layers.base]\nagents = ["claude"]\nshared_state = true\n'
-    )
+    config_path.write_text('[layers.base]\nagents = ["claude"]\nshared_state = true\n')
 
     # when loading the config
     config = load(config_path)
@@ -148,7 +145,10 @@ def test_load_defaults_layer_agents_and_shared_state(tmp_path: Path) -> None:
     assert config == Config(
         layers={
             "base": Layer(
-                bind_mounts=[], packages={"arch": ["zsh"]}, agents=[], shared_state=False
+                bind_mounts=[],
+                packages={"arch": ["zsh"]},
+                agents=[],
+                shared_state=False,
             )
         }
     )
@@ -287,42 +287,3 @@ def test_resolve_user_defaults_group_to_a_private_group_of_the_declared_user() -
         gid=1000,
         extra_groups=[],
     )
-
-
-def test_ancestors_under_home_returns_the_immediate_parent() -> None:
-    # given a bind-mounted path one level under home
-    # when finding its ancestors under home
-    ancestors = ancestors_under_home(Path("/home/raniz/src/ask"), Path("/home/raniz"))
-
-    # then only its immediate parent is returned
-    assert ancestors == [Path("/home/raniz/src")]
-
-
-def test_ancestors_under_home_returns_every_level_innermost_first() -> None:
-    # given a bind-mounted path nested several levels under home
-    # when finding its ancestors under home
-    ancestors = ancestors_under_home(
-        Path("/home/raniz/.local/share/foo"), Path("/home/raniz")
-    )
-
-    # then every intermediate directory is returned, innermost first, excluding
-    # home itself
-    assert ancestors == [Path("/home/raniz/.local/share"), Path("/home/raniz/.local")]
-
-
-def test_ancestors_under_home_returns_none_when_path_is_home() -> None:
-    # given a path that is the home directory itself
-    # when finding its ancestors under home
-    ancestors = ancestors_under_home(Path("/home/raniz"), Path("/home/raniz"))
-
-    # then there are no ancestors to fix
-    assert ancestors == []
-
-
-def test_ancestors_under_home_returns_none_when_path_is_outside_home() -> None:
-    # given a path that doesn't live under home at all
-    # when finding its ancestors under home
-    ancestors = ancestors_under_home(Path("/opt/foo"), Path("/home/raniz"))
-
-    # then nothing is returned, since ownership outside home isn't ours to fix
-    assert ancestors == []

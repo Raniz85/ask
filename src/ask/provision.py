@@ -15,7 +15,7 @@ from pyinfra.api.output import set_echo
 from pyinfra.operations import files, pacman, server
 
 from ask import incus
-from ask.config import ResolvedUser, ancestors_under_home
+from ask.config import ResolvedUser
 
 
 def _echo(message: object = "", *, err: bool = False, **_kwargs: Any) -> None:
@@ -45,6 +45,17 @@ def split_aur_packages(packages: list[str]) -> tuple[list[str], list[str]]:
     official = [p for p in packages if not p.startswith(_AUR_PREFIX)]
     aur = [p.removeprefix(_AUR_PREFIX) for p in packages if p.startswith(_AUR_PREFIX)]
     return official, aur
+
+
+def _ancestors_under_home(path: Path, home: Path) -> list[Path]:
+    if path == home or home not in path.parents:
+        return []
+    ancestors = []
+    current = path.parent
+    while current != home:
+        ancestors.append(current)
+        current = current.parent
+    return ancestors
 
 
 @dataclass(frozen=True)
@@ -91,7 +102,7 @@ class Provisioner:
         home = Path(f"/home/{user.name}")
         ancestors: set[Path] = set()
         for mount in bind_mounts:
-            ancestors.update(ancestors_under_home(mount, home))
+            ancestors.update(_ancestors_under_home(mount, home))
 
         if not ancestors:
             return

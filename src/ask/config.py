@@ -60,17 +60,6 @@ def resolve_user(cfg: Config) -> ResolvedUser:
     )
 
 
-def ancestors_under_home(path: Path, home: Path) -> list[Path]:
-    if path == home or home not in path.parents:
-        return []
-    ancestors = []
-    current = path.parent
-    while current != home:
-        ancestors.append(current)
-        current = current.parent
-    return ancestors
-
-
 def default_path() -> Path:
     config_home = os.environ.get("XDG_CONFIG_PATH", str(Path.home() / ".config"))
     return Path(config_home) / "ask" / "config.toml"
