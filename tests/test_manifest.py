@@ -260,23 +260,3 @@ def test_shared_state_agents_raises_on_unknown_layer() -> None:
     # then a clear error is raised
     with pytest.raises(ValueError, match="nonexistent"):
         resolved.shared_state_agents
-
-
-def test_agent_packages_combines_common_and_distribution_packages() -> None:
-    # given a manifest targeting arch, with a layer declaring one agent whose
-    # packages include common and per-distribution entries
-    manifest = Manifest(distribution="arch", layers=["base"])
-    layers = {"base": Layer(agents=["test"])}
-    resolved = ResolvedManifest(manifest, layers)
-    test_agent = Agent(
-        name="test",
-        packages={"common": ["shared-pkg"], "arch": ["arch-pkg"], "debian": ["other"]},
-    )
-
-    # when resolving the configured agents' packages for arch
-    with patch("ask.manifest.agent.resolve", return_value=test_agent):
-        packages = resolved.agent_packages
-
-    # then the common packages and the packages for the manifest's distribution
-    # are included, and other distributions' packages are not
-    assert packages == ["shared-pkg", "arch-pkg"]

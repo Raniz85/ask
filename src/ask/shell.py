@@ -1,4 +1,8 @@
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from ask.config import ResolvedUser
+from ask.incus import Mount
 
 
 @dataclass(frozen=True)
@@ -6,6 +10,18 @@ class Shell:
     name: str
     rc_filename: str
     packages: list[str] = field(default_factory=list)
+
+    def packages_for(self, distribution: str) -> list[str]:
+        return list(self.packages)
+
+    def mounts_for(self, user: ResolvedUser) -> list[Mount]:
+        return [
+            Mount(
+                host_path=Path.home() / self.rc_filename,
+                container_path=Path(f"/home/{user.name}") / self.rc_filename,
+                readonly=True,
+            )
+        ]
 
 
 @dataclass(frozen=True)

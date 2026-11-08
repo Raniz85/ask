@@ -10,6 +10,7 @@ from ask import (
     provision,
     shell,
 )
+from ask.module import Module
 
 FAKE_SSH_ENV = {
     "SSH_CLIENT": "127.0.0.1 1 22",
@@ -35,32 +36,17 @@ def converge() -> None:
     bind_mounts = [project_dir] + resolved_manifest.bind_mounts
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
-    packages = (
-        resolved_manifest.packages
-        + user_shell.packages
-        + resolved_manifest.agent_packages
-    )
+
+    package_modules: list[Module] = [user_shell, *resolved_manifest.agents]
+    packages = resolved_manifest.packages
+    for mod in package_modules:
+        packages += mod.packages_for(m.distribution)
     official_packages, aur_packages = provision.split_aur_packages(packages)
 
-    shared_state_agents = resolved_manifest.shared_state_agents
-    mounts = (
-        [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
-        + [
-            incus.Mount(
-                host_path=Path.home() / user_shell.rc_filename,
-                container_path=Path(f"/home/{user.name}") / user_shell.rc_filename,
-                readonly=True,
-            )
-        ]
-        + [
-            incus.Mount(
-                host_path=Path.home() / state_path,
-                container_path=Path(f"/home/{user.name}") / state_path,
-            )
-            for a in shared_state_agents
-            for state_path in a.state_paths
-        ]
-    )
+    mount_modules: list[Module] = [user_shell, *resolved_manifest.shared_state_agents]
+    mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
+    for mod in mount_modules:
+        mounts += mod.mounts_for(user)
 
     provisioner = provision.Provisioner(container)
     aur_builder = provision.AurBuilder(container)

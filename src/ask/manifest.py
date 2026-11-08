@@ -5,6 +5,7 @@ from pathlib import Path
 from ask import agent
 from ask.agent import Agent
 from ask.config import Layer
+from ask.module import resolve_packages
 
 
 @dataclass
@@ -43,10 +44,6 @@ class ResolvedManifest:
                 raise ValueError(f"no known layer named {layer_name!r}") from None
         return result
 
-    @staticmethod
-    def _packages_for(packages: dict[str, list[str]], distribution: str) -> list[str]:
-        return packages.get("common", []) + packages.get(distribution, [])
-
     @property
     def bind_mounts(self) -> list[Path]:
         mounts = list(self.manifest.bind_mounts)
@@ -56,11 +53,9 @@ class ResolvedManifest:
 
     @property
     def packages(self) -> list[str]:
-        packages = self._packages_for(
-            self.manifest.packages, self.manifest.distribution
-        )
+        packages = resolve_packages(self.manifest.packages, self.manifest.distribution)
         for layer in self._configured_layers():
-            packages += self._packages_for(layer.packages, self.manifest.distribution)
+            packages += resolve_packages(layer.packages, self.manifest.distribution)
         return packages
 
     @property
@@ -81,10 +76,3 @@ class ResolvedManifest:
             if layer.shared_state:
                 names += layer.agents
         return [agent.resolve(name) for name in names]
-
-    @property
-    def agent_packages(self) -> list[str]:
-        packages: list[str] = []
-        for a in self.agents:
-            packages += self._packages_for(a.packages, self.manifest.distribution)
-        return packages
