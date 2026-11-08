@@ -45,10 +45,18 @@ class Fish(Shell):
     packages: list[str] = field(default_factory=lambda: ["fish"])
 
 
+@dataclass(frozen=True)
+class Ksh(Shell):
+    name: str = "ksh"
+    rc_filename: str = ".kshrc"
+    packages: list[str] = field(default_factory=lambda: ["ksh"])
+
+
 _SHELLS: dict[str, Shell] = {
     "bash": Bash(),
     "zsh": Zsh(),
     "fish": Fish(),
+    "ksh": Ksh(),
 }
 
 

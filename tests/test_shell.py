@@ -4,7 +4,7 @@ import pytest
 
 from ask.config import ResolvedUser
 from ask.incus import Mount
-from ask.shell import Bash, Fish, Zsh, resolve
+from ask.shell import Bash, Fish, Ksh, Zsh, resolve
 
 
 def test_bash_has_its_rc_filename_and_package() -> None:
@@ -40,6 +40,17 @@ def test_fish_has_its_rc_filename_and_package() -> None:
     assert fish.packages == ["fish"]
 
 
+def test_ksh_has_its_rc_filename_and_package() -> None:
+    # given the ksh shell
+    # when inspecting its properties
+    ksh = Ksh()
+
+    # then its name, rc filename and required package are as expected
+    assert ksh.name == "ksh"
+    assert ksh.rc_filename == ".kshrc"
+    assert ksh.packages == ["ksh"]
+
+
 def test_resolve_returns_bash_for_bash() -> None:
     # given the name "bash"
     # when resolving it to a shell
@@ -61,12 +72,19 @@ def test_resolve_returns_fish_for_fish() -> None:
     assert resolve("fish") == Fish()
 
 
+def test_resolve_returns_ksh_for_ksh() -> None:
+    # given the name "ksh"
+    # when resolving it to a shell
+    # then the Ksh shell is returned
+    assert resolve("ksh") == Ksh()
+
+
 def test_resolve_raises_for_unknown_shell() -> None:
     # given a name with no known shell
     # when resolving it to a shell
     # then a clear error is raised
-    with pytest.raises(ValueError, match="ksh"):
-        resolve("ksh")
+    with pytest.raises(ValueError, match="tcsh"):
+        resolve("tcsh")
 
 
 def test_packages_for_returns_its_packages_regardless_of_distribution() -> None:
