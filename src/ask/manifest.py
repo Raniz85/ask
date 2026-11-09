@@ -4,7 +4,8 @@ from pathlib import Path
 
 from ask import agent
 from ask.agent import Agent
-from ask.config import Layer
+from ask.config import Layer, ResolvedUser
+from ask.incus import Mount
 from ask.module import resolve_packages
 
 
@@ -62,17 +63,18 @@ class ResolvedManifest:
     def agent_names(self) -> list[str]:
         names: list[str] = []
         for layer in self._configured_layers():
-            names += layer.agents
+            names += [option.name for option in layer.agents]
         return names
 
     @property
     def agents(self) -> list[Agent]:
         return [agent.resolve(name) for name in self.agent_names]
 
-    @property
-    def shared_state_agents(self) -> list[Agent]:
-        names: list[str] = []
+    def shared_state_mounts(self, user: ResolvedUser) -> list[Mount]:
+        mounts: list[Mount] = []
         for layer in self._configured_layers():
             if layer.shared_state:
-                names += layer.agents
-        return [agent.resolve(name) for name in names]
+                for option in layer.agents:
+                    resolved_agent = agent.resolve(option.name)
+                    mounts += resolved_agent.mounts_for(user, option.options)
+        return mounts

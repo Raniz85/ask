@@ -399,6 +399,16 @@ def test_converge_mounts_agent_state_when_shared_state_is_enabled(
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
+    for state_path in [
+        ".claude/CLAUDE.md",
+        ".claude/.credentials.json",
+        ".claude/skills",
+        ".claude.json",
+        ".claude/settings.json",
+    ]:
+        path = home_dir / state_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
 
     # when converging from within that project directory
     with (
@@ -426,24 +436,24 @@ def test_converge_mounts_agent_state_when_shared_state_is_enabled(
                 readonly=True,
             ),
             Mount(
-                host_path=home_dir / ".claude.json",
-                container_path=Path("/home/raniz/.claude.json"),
+                host_path=home_dir / ".claude" / "CLAUDE.md",
+                container_path=Path("/home/raniz/.claude/CLAUDE.md"),
             ),
             Mount(
                 host_path=home_dir / ".claude" / ".credentials.json",
                 container_path=Path("/home/raniz/.claude/.credentials.json"),
             ),
             Mount(
-                host_path=home_dir / ".claude" / "settings.json",
-                container_path=Path("/home/raniz/.claude/settings.json"),
-            ),
-            Mount(
                 host_path=home_dir / ".claude" / "skills",
                 container_path=Path("/home/raniz/.claude/skills"),
             ),
             Mount(
-                host_path=home_dir / ".claude" / "CLAUDE.md",
-                container_path=Path("/home/raniz/.claude/CLAUDE.md"),
+                host_path=home_dir / ".claude.json",
+                container_path=Path("/home/raniz/.claude.json"),
+            ),
+            Mount(
+                host_path=home_dir / ".claude" / "settings.json",
+                container_path=Path("/home/raniz/.claude/settings.json"),
             ),
         ]
     )
@@ -617,10 +627,23 @@ def test_converge_fixes_agent_state_mount_ownership_when_shared_state_is_enabled
         '[layers.base]\nagents = ["claude"]\nshared_state = true\n'
         '[user]\nname = "raniz"\nuid = 1000\n'
     )
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    for state_path in [
+        ".claude/CLAUDE.md",
+        ".claude/.credentials.json",
+        ".claude/skills",
+        ".claude.json",
+        ".claude/settings.json",
+    ]:
+        path = home_dir / state_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.Path.home", return_value=home_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
@@ -638,11 +661,11 @@ def test_converge_fixes_agent_state_mount_ownership_when_shared_state_is_enabled
         [
             project_dir,
             Path("/home/raniz/.bashrc"),
-            Path("/home/raniz/.claude.json"),
-            Path("/home/raniz/.claude/.credentials.json"),
-            Path("/home/raniz/.claude/settings.json"),
-            Path("/home/raniz/.claude/skills"),
             Path("/home/raniz/.claude/CLAUDE.md"),
+            Path("/home/raniz/.claude/.credentials.json"),
+            Path("/home/raniz/.claude/skills"),
+            Path("/home/raniz/.claude.json"),
+            Path("/home/raniz/.claude/settings.json"),
         ],
         ResolvedUser(
             name="raniz",
@@ -1087,3 +1110,95 @@ def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
         pytest.raises(ValueError, match="copilot"),
     ):
         agent("copilot")
+
+
+def test_agent_forwards_extra_arguments_to_the_agent(tmp_path: Path) -> None:
+    # given a project directory, and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when launching an agent by name with extra arguments
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        agent("claude", "--resume")
+
+    # then the agent is executed with those arguments appended
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["claude", "--resume"]
+    )
+
+
+def test_agent_forwards_wayland_display_when_gui_is_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project directory, a config declaring a user, and a live
+    # wayland session
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when launching an agent with --gui
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
+        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.release") as release_mock,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        agent("claude", gui=True)
+
+    # then the gui session is acquired before, and released after, running
+    # the agent with the wayland display environment variable set
+    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["claude"], env=_WAYLAND_ENV
+    )
+
+
+def test_agent_treats_a_dash_prefixed_name_as_an_argument_to_the_default_agent(
+    tmp_path: Path,
+) -> None:
+    # given a project directory using a layer that declares the claude agent,
+    # and a resolved user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when launching an agent with arguments but without naming one
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        agent("--resume", "--verbose")
+
+    # then the default agent is executed with all arguments, in order
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["claude", "--resume", "--verbose"]
+    )

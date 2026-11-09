@@ -22,7 +22,13 @@ packages.arch = [
 ]
 
 agents = [
+  # Can be the name of the agent, which sets default options
   "claude",
+  # Or with full options (defaults shown)
+  # { name: "claude", claude_md: true, auth: true, skills: true, config: true },
+  # { name: "opencode", agents_md: true, auth: true, skills: true, config: true },
+  # { name: "codex", agents_md: true, auth: true, skills: true, config: true },
+  # { name: "pi", system_md: true, auth: true, skills: true, config: true },
 ]
 
 # Bind mount Cloude state directories needed to share skills, auth and configuration

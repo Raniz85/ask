@@ -43,10 +43,9 @@ def converge() -> None:
         packages += mod.packages_for(m.distribution)
     official_packages, aur_packages = provision.split_aur_packages(packages)
 
-    mount_modules: list[Module] = [user_shell, *resolved_manifest.shared_state_agents]
     mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
-    for mod in mount_modules:
-        mounts += mod.mounts_for(user)
+    mounts += user_shell.mounts_for(user)
+    mounts += resolved_manifest.shared_state_mounts(user)
 
     provisioner = provision.Provisioner(container)
     aur_builder = provision.AurBuilder(container)
@@ -85,23 +84,20 @@ def enter(gui: bool = False) -> None:
     sys.exit(returncode)
 
 
-def agent(name: str | None = None) -> None:
+def agent(name: str | None = None, *args: str, gui: bool = False) -> None:
     project_dir = Path.cwd()
     m = manifest.load(project_dir / "ask.toml")
     cfg = config.load(config.default_path())
-    user = config.resolve_user(cfg)
+    if name is not None and name.startswith("-"):
+        args = (name, *args)
+        name = None
     if name is None:
         agent_names = manifest.ResolvedManifest(m, cfg.layers).agent_names
         if not agent_names:
             raise ValueError("no agents configured")
         name = agent_names[0]
     resolved_agent = agents.resolve(name)
-    container = incus.Container(project_dir.name)
-    container.ensure_running()
-    returncode = container.exec_command(
-        user.uid, user.gid, project_dir, [resolved_agent.name]
-    )
-    sys.exit(returncode)
+    exec(resolved_agent.name, *args, gui=gui)
 
 
 def exec(*command: str, gui: bool = False) -> None:

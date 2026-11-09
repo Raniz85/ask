@@ -6,10 +6,16 @@ from pathlib import Path
 
 
 @dataclass
+class AgentOption:
+    name: str
+    options: dict[str, bool] = field(default_factory=dict)
+
+
+@dataclass
 class Layer:
     bind_mounts: list[Path] = field(default_factory=list)
     packages: dict[str, list[str]] = field(default_factory=dict)
-    agents: list[str] = field(default_factory=list)
+    agents: list[AgentOption] = field(default_factory=list)
     shared_state: bool = False
 
 
@@ -60,6 +66,14 @@ def resolve_user(cfg: Config) -> ResolvedUser:
     )
 
 
+def _parse_agent(entry: str | dict) -> AgentOption:
+    if isinstance(entry, str):
+        return AgentOption(name=entry)
+    name = entry["name"]
+    options = {key: value for key, value in entry.items() if key != "name"}
+    return AgentOption(name=name, options=options)
+
+
 def default_path() -> Path:
     config_home = os.environ.get("XDG_CONFIG_PATH", str(Path.home() / ".config"))
     return Path(config_home) / "ask" / "config.toml"
@@ -79,7 +93,7 @@ def load(path: Path) -> Config:
                 distro: list(pkgs)
                 for distro, pkgs in layer_data.get("packages", {}).items()
             },
-            agents=list(layer_data.get("agents", [])),
+            agents=[_parse_agent(entry) for entry in layer_data.get("agents", [])],
             shared_state=layer_data.get("shared_state", False),
         )
         for name, layer_data in data.get("layers", {}).items()

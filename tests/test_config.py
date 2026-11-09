@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from ask.config import (
+    AgentOption,
     Config,
     Group,
     Layer,
@@ -123,11 +124,50 @@ def test_load_reads_layer_agents(tmp_path: Path) -> None:
     # when loading the config
     config = load(config_path)
 
-    # then the layer's agents and shared_state flag are read
+    # then the layer's agents are read as name-only options, and the
+    # shared_state flag is read
     assert config == Config(
         layers={
             "base": Layer(
-                bind_mounts=[], packages={}, agents=["claude"], shared_state=True
+                bind_mounts=[],
+                packages={},
+                agents=[AgentOption(name="claude")],
+                shared_state=True,
+            )
+        }
+    )
+
+
+def test_load_reads_layer_agents_with_full_options(tmp_path: Path) -> None:
+    # given a layer declaring an agent with its full set of options
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "[layers.base]\n"
+        "agents = [\n"
+        '  { name = "claude", claude_md = false, auth = true, skills = true, config = true },\n'
+        "]\n"
+    )
+
+    # when loading the config
+    config = load(config_path)
+
+    # then the agent's name and its options table are both read
+    assert config == Config(
+        layers={
+            "base": Layer(
+                bind_mounts=[],
+                packages={},
+                agents=[
+                    AgentOption(
+                        name="claude",
+                        options={
+                            "claude_md": False,
+                            "auth": True,
+                            "skills": True,
+                            "config": True,
+                        },
+                    )
+                ],
             )
         }
     )
