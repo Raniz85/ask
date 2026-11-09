@@ -1,3 +1,4 @@
+import json
 import re
 import shlex
 import subprocess
@@ -96,6 +97,22 @@ class ConvergedState:
     at: datetime
 
 
+@dataclass(frozen=True)
+class InstanceSnapshot:
+    status: str
+    config: dict[str, str]
+
+    def is_running(self) -> bool:
+        return self.status == "Running"
+
+    def converged_fingerprint(self) -> Fingerprint | None:
+        version = self.config.get(_CONVERGED_VERSION_CONFIG_KEY)
+        config_hash = self.config.get(_CONVERGED_HASH_CONFIG_KEY)
+        if not version or not config_hash:
+            return None
+        return Fingerprint(version=version, config_hash=config_hash)
+
+
 def _diff_devices(
     existing: set[str], desired: dict[str, Mount]
 ) -> tuple[set[str], dict[str, Mount]]:
@@ -168,34 +185,19 @@ class Container:
         _incus(command)
         return Container(name)
 
-    def status(self) -> str | None:
+    def snapshot(self) -> InstanceSnapshot | None:
         result = _incus(
-            ["incus", "list", self.name, "--format", "csv", "-c", "ns"],
-            capture=True,
+            ["incus", "list", self.name, "--format", "json"], capture=True
         )
-        for line in result.stdout.splitlines():
-            name, _, status = line.partition(",")
-            if name == self.name:
-                return status
+        for instance in json.loads(result.stdout):
+            if instance["name"] == self.name:
+                return InstanceSnapshot(
+                    status=instance["status"], config=instance["config"]
+                )
         return None
-
-    def exists(self) -> bool:
-        return self.status() is not None
-
-    def is_running(self) -> bool:
-        return self.status() == "RUNNING"
 
     def start(self) -> None:
         _incus(["incus", "start", self.name])
-
-    def ensure_running(self) -> None:
-        status = self.status()
-        if status is None:
-            raise ContainerNotFoundError(
-                f"no container named {self.name!r}; run `ask create` first"
-            )
-        if status != "RUNNING":
-            self.start()
 
     def run_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -263,17 +265,6 @@ class Container:
                 f"{_MANAGED_PACKAGES_CONFIG_KEY}={','.join(packages)}",
             ],
         )
-
-    def _get_config(self, key: str) -> str:
-        result = _incus(["incus", "config", "get", self.name, key], capture=True)
-        return result.stdout.strip()
-
-    def get_converged_fingerprint(self) -> Fingerprint | None:
-        version = self._get_config(_CONVERGED_VERSION_CONFIG_KEY)
-        config_hash = self._get_config(_CONVERGED_HASH_CONFIG_KEY)
-        if not version or not config_hash:
-            return None
-        return Fingerprint(version=version, config_hash=config_hash)
 
     def set_converged_state(self, state: ConvergedState) -> None:
         _incus(

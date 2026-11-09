@@ -1,5 +1,5 @@
+import json
 import subprocess
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -8,9 +8,9 @@ import pytest
 
 from ask.incus import (
     Container,
-    ContainerNotFoundError,
     ConvergedState,
     Fingerprint,
+    InstanceSnapshot,
     IncusError,
     Mount,
     _diff_devices,
@@ -440,59 +440,129 @@ def test_converge_leaves_a_gui_device_alone() -> None:
     assert remove_calls == []
 
 
-def _config_values(
-    values: dict[str, str],
-) -> Callable[..., subprocess.CompletedProcess]:
-    def run(command: list[str], **_: object) -> subprocess.CompletedProcess:
-        return subprocess.CompletedProcess(
-            args=command, returncode=0, stdout=values.get(command[-1], "") + "\n"
+def _instances_result(*instances: dict) -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=json.dumps(list(instances))
+    )
+
+
+def test_snapshot_lists_the_container_in_a_single_call() -> None:
+    # given a container
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _instances_result()
+
+        # when taking a snapshot of it
+        container.snapshot()
+
+    # then instances matching its name are listed, in the current project and
+    # with their configuration, in one call
+    run.assert_called_once_with(
+        ["incus", "list", "my-project", "--format", "json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_snapshot_returns_none_for_a_container_that_does_not_exist() -> None:
+    # given only a container whose name merely starts with the project's name
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _instances_result(
+            {"name": "my-project-2", "status": "Running", "config": {}}
         )
 
-    return run
+        # when taking a snapshot of the project's container
+        snapshot = container.snapshot()
+
+    # then there is none
+    assert snapshot is None
 
 
-def test_get_converged_fingerprint_returns_none_when_never_converged() -> None:
-    # given a container without any recorded convergence
+def test_snapshot_returns_the_status_and_config_of_the_named_container() -> None:
+    # given the project's container among other containers
     container = Container("my-project")
-    with patch("ask.incus.subprocess.run", side_effect=_config_values({})):
-        # when reading the fingerprint of the last convergence
-        fingerprint = container.get_converged_fingerprint()
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _instances_result(
+            {"name": "other", "status": "Running", "config": {"a": "b"}},
+            {
+                "name": "my-project",
+                "status": "Stopped",
+                "config": {"user.ask.packages": "zsh"},
+            },
+        )
+
+        # when taking a snapshot of the project's container
+        snapshot = container.snapshot()
+
+    # then its own status and config are captured
+    assert snapshot == InstanceSnapshot(
+        status="Stopped", config={"user.ask.packages": "zsh"}
+    )
+
+
+def test_snapshot_is_running_for_a_running_container() -> None:
+    # given a snapshot of a running container
+    snapshot = InstanceSnapshot(status="Running", config={})
+
+    # when checking whether it is running
+    running = snapshot.is_running()
+
+    # then it is
+    assert running is True
+
+
+def test_snapshot_is_not_running_for_a_stopped_container() -> None:
+    # given a snapshot of a stopped container
+    snapshot = InstanceSnapshot(status="Stopped", config={})
+
+    # when checking whether it is running
+    running = snapshot.is_running()
+
+    # then it is not
+    assert running is False
+
+
+def test_converged_fingerprint_is_none_when_never_converged() -> None:
+    # given a snapshot of a container without any recorded convergence
+    snapshot = InstanceSnapshot(status="Running", config={})
+
+    # when reading the fingerprint of the last convergence
+    fingerprint = snapshot.converged_fingerprint()
 
     # then there is none
     assert fingerprint is None
 
 
-def test_get_converged_fingerprint_returns_none_when_partially_recorded() -> None:
-    # given a container with only the version of the last convergence recorded
-    container = Container("my-project")
-    values = {"user.ask.converged.version": "0.1.0"}
-    with patch("ask.incus.subprocess.run", side_effect=_config_values(values)):
-        # when reading the fingerprint of the last convergence
-        fingerprint = container.get_converged_fingerprint()
+def test_converged_fingerprint_is_none_when_partially_recorded() -> None:
+    # given a snapshot with only the version of the last convergence recorded
+    snapshot = InstanceSnapshot(
+        status="Running", config={"user.ask.converged.version": "0.1.0"}
+    )
+
+    # when reading the fingerprint of the last convergence
+    fingerprint = snapshot.converged_fingerprint()
 
     # then there is none
     assert fingerprint is None
 
 
-def test_get_converged_fingerprint_returns_the_recorded_version_and_hash() -> None:
-    # given a container with a recorded convergence
-    container = Container("my-project")
-    values = {
-        "user.ask.converged.version": "0.1.0",
-        "user.ask.converged.hash": "abc123",
-    }
-    with patch(
-        "ask.incus.subprocess.run", side_effect=_config_values(values)
-    ) as run:
-        # when reading the fingerprint of the last convergence
-        fingerprint = container.get_converged_fingerprint()
+def test_converged_fingerprint_is_the_recorded_version_and_hash() -> None:
+    # given a snapshot with a recorded convergence
+    snapshot = InstanceSnapshot(
+        status="Running",
+        config={
+            "user.ask.converged.version": "0.1.0",
+            "user.ask.converged.hash": "abc123",
+        },
+    )
 
-    # then the recorded version and hash are returned, read from their config keys
+    # when reading the fingerprint of the last convergence
+    fingerprint = snapshot.converged_fingerprint()
+
+    # then the recorded version and hash are returned
     assert fingerprint == Fingerprint(version="0.1.0", config_hash="abc123")
-    assert [call.args[0] for call in run.call_args_list] == [
-        ["incus", "config", "get", "my-project", "user.ask.converged.version"],
-        ["incus", "config", "get", "my-project", "user.ask.converged.hash"],
-    ]
 
 
 def test_set_converged_state_stores_every_part_of_the_state_at_once() -> None:
@@ -674,36 +744,6 @@ def test_exec_command_returns_the_commands_exit_code() -> None:
     assert returncode == 7
 
 
-def test_is_running_returns_true_for_a_running_container() -> None:
-    # given a container currently in the running state
-    container = Container("my-project")
-    with patch("ask.incus.subprocess.run") as run:
-        run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="my-project,RUNNING\n"
-        )
-
-        # when checking whether it is running
-        result = container.is_running()
-
-    # then it is reported as running
-    assert result is True
-
-
-def test_is_running_returns_false_for_a_stopped_container() -> None:
-    # given a container currently in the stopped state
-    container = Container("my-project")
-    with patch("ask.incus.subprocess.run") as run:
-        run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="my-project,STOPPED\n"
-        )
-
-        # when checking whether it is running
-        result = container.is_running()
-
-    # then it is reported as not running
-    assert result is False
-
-
 def test_start_starts_the_named_container() -> None:
     # given a container to start
     container = Container("my-project")
@@ -713,34 +753,6 @@ def test_start_starts_the_named_container() -> None:
 
     # then incus is invoked to start the named container
     run.assert_called_once_with(["incus", "start", "my-project"], check=True)
-
-
-def test_ensure_running_starts_a_container_that_is_not_already_running() -> None:
-    # given a container that is not currently running
-    container = Container("my-project")
-    with (
-        patch.object(Container, "status", return_value="STOPPED"),
-        patch.object(Container, "start") as start,
-    ):
-        # when ensuring it is running
-        container.ensure_running()
-
-    # then it is started
-    start.assert_called_once_with()
-
-
-def test_ensure_running_does_not_start_an_already_running_container() -> None:
-    # given a container that is already running
-    container = Container("my-project")
-    with (
-        patch.object(Container, "status", return_value="RUNNING"),
-        patch.object(Container, "start") as start,
-    ):
-        # when ensuring it is running
-        container.ensure_running()
-
-    # then it is not started again
-    start.assert_not_called()
 
 
 def test_stale_packages_returns_managed_packages_no_longer_desired() -> None:
@@ -868,76 +880,6 @@ def test_failing_captured_incus_commands_include_the_captured_error_output() -> 
         "`incus config get my-project user.ask.packages` failed with exit status 1"
         ": Error: Instance not found"
     )
-
-
-def test_status_returns_the_state_of_the_exactly_named_container() -> None:
-    # given incus lists the container along with one whose name shares its prefix
-    container = Container("my-project")
-    with patch("ask.incus.subprocess.run") as run:
-        run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="my-project-2,RUNNING\nmy-project,STOPPED\n"
-        )
-
-        # when getting its status
-        status = container.status()
-
-    # then the state of the container with exactly that name is returned
-    assert status == "STOPPED"
-    run.assert_called_once_with(
-        ["incus", "list", "my-project", "--format", "csv", "-c", "ns"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
-def test_status_returns_none_for_a_container_that_does_not_exist() -> None:
-    # given incus only lists a container whose name shares the prefix
-    container = Container("my-project")
-    with patch("ask.incus.subprocess.run") as run:
-        run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="my-project-2,RUNNING\n"
-        )
-
-        # when getting its status
-        status = container.status()
-
-    # then there is no status
-    assert status is None
-
-
-@pytest.mark.parametrize(
-    ("status", "expected"), [("STOPPED", True), ("RUNNING", True), (None, False)]
-)
-def test_exists_reports_whether_the_container_has_a_status(
-    status: str | None, expected: bool
-) -> None:
-    # given a container with the given status
-    container = Container("my-project")
-    with patch.object(Container, "status", return_value=status):
-        # when checking whether it exists
-        result = container.exists()
-
-    # then it exists exactly when it has a status
-    assert result is expected
-
-
-def test_ensure_running_reports_a_container_that_does_not_exist() -> None:
-    # given a container that has not been created
-    container = Container("my-project")
-    with (
-        patch.object(Container, "status", return_value=None),
-        patch.object(Container, "start") as start,
-        pytest.raises(ContainerNotFoundError) as error,
-    ):
-        # when ensuring it is running
-        container.ensure_running()
-
-    # then the error says how to create it, and nothing is started
-    assert str(error.value) == (
-        "no container named 'my-project'; run `ask create` first"
-    )
-    start.assert_not_called()
 
 
 def _list_volumes_result(*names: str) -> subprocess.CompletedProcess:

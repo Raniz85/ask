@@ -1,13 +1,24 @@
+import hashlib
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
 from ask.agent import AgentError
 from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec
-from ask.config import ConfigError
-from ask.incus import ContainerExistsError, ContainerNotFoundError, Mount
+from ask.config import Config, ConfigError, User
+from ask.convergence import effective_configuration, fingerprint
+from ask.incus import (
+    ContainerExistsError,
+    ContainerNotFoundError,
+    ConvergedState,
+    Fingerprint,
+    InstanceSnapshot,
+    Mount,
+)
+from ask.manifest import Manifest
 from ask.user import ResolvedUser
 
 _WAYLAND_MOUNT = Mount(
@@ -30,7 +41,7 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container.create") as container_create,
-        patch("ask.cli.incus.Container.exists", return_value=False),
+        patch("ask.cli.incus.Container.snapshot", return_value=None),
         patch("ask.cli.converge") as converge_mock,
     ):
         create()
@@ -53,7 +64,10 @@ def test_create_rejects_a_container_that_already_exists(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.Container.exists", return_value=True),
+        patch(
+            "ask.cli.incus.Container.snapshot",
+            return_value=InstanceSnapshot(status="Running", config={}),
+        ),
         patch("ask.cli.incus.Container.create") as container_create,
         patch("ask.cli.converge") as converge_mock,
         pytest.raises(ContainerExistsError) as error,
@@ -123,10 +137,10 @@ def test_converge_rejects_undefined_layers_before_touching_the_container(
     container_cls.assert_not_called()
 
 
-def test_converge_ensures_the_targeted_container_is_running(
+def test_converge_starts_a_stopped_targeted_container(
     tmp_path: Path,
 ) -> None:
-    # given a project directory
+    # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\n')
@@ -142,14 +156,17 @@ def test_converge_ensures_the_targeted_container_is_running(
         patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(
+            status="Stopped", config={}
+        )
         container.get_managed_packages.return_value = []
 
         converge()
 
     # then the container named after the project directory is targeted, and
-    # ensured to be running before the rest of convergence runs
+    # started, since it was stopped
     container_cls.assert_called_once_with("my-project")
-    container.ensure_running.assert_called_once_with()
+    container.start.assert_called_once_with()
     provisioner_cls.assert_called_once_with(container)
 
 
@@ -176,7 +193,7 @@ def test_converge_creates_a_missing_container_without_asking_when_requested(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
         container.get_managed_packages.return_value = []
 
         converge(create_missing=True)
@@ -845,8 +862,83 @@ def test_converge_fixes_agent_state_mount_ownership_when_shared_state_is_enabled
     )
 
 
-def test_enter_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
+def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
+    # given a project directory, and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # and an installed ask version and a clock
+    converged_at = datetime(2026, 11, 9, 12, 30, tzinfo=UTC)
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+        patch("ask.convergence.version", return_value="1.2.3"),
+        patch("ask.cli.datetime") as datetime_mock,
+    ):
+        datetime_mock.now.return_value = converged_at
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the effective configuration, its fingerprint and the time are
+    # recorded as the last thing done to the container
+    configuration = effective_configuration(
+        Manifest(distribution="arch"), Config(user=User(name="raniz", uid=1000))
+    )
+    datetime_mock.now.assert_called_once_with(UTC)
+    assert container.method_calls[-1] == call.set_converged_state(
+        ConvergedState(
+            fingerprint=Fingerprint(
+                version="1.2.3",
+                config_hash=hashlib.sha256(configuration.encode()).hexdigest(),
+            ),
+            configuration=configuration,
+            at=converged_at,
+        )
+    )
+
+
+def test_converge_does_not_record_the_state_when_provisioning_fails(
+    tmp_path: Path,
+) -> None:
     # given a project directory
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # and provisioning that fails
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+        pytest.raises(RuntimeError),
+    ):
+        provisioner_cls.return_value.provision_packages.side_effect = RuntimeError
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        # when converging from within that project directory
+        converge()
+
+    # then no converged state is recorded
+    container.set_converged_state.assert_not_called()
+
+
+def test_enter_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
+    # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\n')
@@ -861,14 +953,44 @@ def test_enter_ensures_the_targeted_container_is_running(tmp_path: Path) -> None
         pytest.raises(SystemExit),
     ):
         container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(
+            status="Stopped", config={}
+        )
         container.exec_command.return_value = 0
 
         enter()
 
     # then the container named after the project directory is targeted, and
-    # ensured to be running before entering
+    # started, since it was stopped
     container_cls.assert_called_once_with("my-project")
-    container.ensure_running.assert_called_once_with()
+    container.start.assert_called_once_with()
+
+
+def test_enter_does_not_start_an_already_running_container(tmp_path: Path) -> None:
+    # given a project directory with a running container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(
+            status="Running", config={}
+        )
+        container.exec_command.return_value = 0
+
+        enter()
+
+    # then the container is not started again
+    container.start.assert_not_called()
 
 
 def test_enter_rejects_an_unknown_shell_before_touching_the_container(
@@ -1042,7 +1164,7 @@ def test_enter_creates_a_missing_container_when_the_user_accepts(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
         container.exec_command.return_value = 0
 
         enter()
@@ -1077,7 +1199,7 @@ def test_enter_creates_a_missing_container_when_the_user_accepts_the_default(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
         container.exec_command.return_value = 0
 
         enter()
@@ -1108,7 +1230,7 @@ def test_enter_refuses_a_missing_container_when_the_user_declines(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
 
         enter()
 
@@ -1143,7 +1265,7 @@ def test_enter_refuses_a_missing_container_when_stdin_is_closed(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
 
         enter()
 
@@ -1177,7 +1299,7 @@ def test_enter_creates_a_missing_container_without_asking_when_requested(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
         container.exec_command.return_value = 0
 
         enter(create_missing=True)
@@ -1209,7 +1331,7 @@ def test_enter_does_not_offer_to_create_a_missing_container_without_a_terminal(
     ):
         stdin_mock.isatty.return_value = False
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
 
         enter()
 
@@ -1225,12 +1347,8 @@ def test_enter_does_not_offer_to_create_a_missing_container_without_a_terminal(
 def test_enter_does_not_offer_to_create_an_existing_container(
     tmp_path: Path,
 ) -> None:
-    # given a project directory with an existing container
-    project_dir = tmp_path / "my-project"
-    project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
-    config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    # given a project directory with an existing, converged container
+    project_dir, config_path = _project(tmp_path)
 
     # when entering the container from a terminal
     with (
@@ -1244,7 +1362,9 @@ def test_enter_does_not_offer_to_create_an_existing_container(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = True
+        container.snapshot.return_value = _converged_snapshot(
+            _PROJECT_MANIFEST, _PROJECT_CONFIG
+        )
         container.exec_command.return_value = 0
 
         enter()
@@ -1254,8 +1374,288 @@ def test_enter_does_not_offer_to_create_an_existing_container(
     create_mock.assert_not_called()
 
 
-def test_exec_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
-    # given a project directory
+_CHANGED_PROMPT = (
+    "Configuration has changed since the container was last converged. "
+    "Converge now? [Y/n] "
+)
+_CHANGED_WARNING = (
+    "ask: warning: configuration has changed since the container was last "
+    "converged; run `ask converge` to apply it\n"
+)
+
+
+def _project(tmp_path: Path) -> tuple[Path, Path]:
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    return project_dir, config_path
+
+
+def _converged_snapshot(m: Manifest, cfg: Config) -> InstanceSnapshot:
+    converged = fingerprint(effective_configuration(m, cfg))
+    return InstanceSnapshot(
+        status="Running",
+        config={
+            "user.ask.converged.version": converged.version,
+            "user.ask.converged.hash": converged.config_hash,
+        },
+    )
+
+
+_PROJECT_MANIFEST = Manifest(distribution="arch")
+_PROJECT_CONFIG = Config(user=User(name="raniz", uid=1000))
+_STALE_SNAPSHOT = InstanceSnapshot(
+    status="Running",
+    config={
+        "user.ask.converged.version": "0.0.1",
+        "user.ask.converged.hash": "stale",
+    },
+)
+
+
+def _enter_with(
+    project_dir: Path,
+    config_path: Path,
+    snapshot: InstanceSnapshot,
+    tty: bool,
+    answer: str = "",
+    **kwargs: bool | None,
+) -> tuple[Mock, Mock, Mock]:
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
+        patch("builtins.input", return_value=answer) as input_mock,
+        patch("ask.cli.converge") as converge_mock,
+        pytest.raises(SystemExit),
+    ):
+        stdin_mock.isatty.return_value = tty
+        container = container_cls.return_value
+        container.snapshot.return_value = snapshot
+        container.exec_command.return_value = 0
+
+        enter(**kwargs)
+    return container, input_mock, converge_mock
+
+
+def test_enter_does_not_converge_an_unchanged_configuration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a project whose container was converged with its current configuration
+    project_dir, config_path = _project(tmp_path)
+    snapshot = _converged_snapshot(_PROJECT_MANIFEST, _PROJECT_CONFIG)
+
+    # when entering the container from a terminal
+    container, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, snapshot, tty=True
+    )
+
+    # then nothing is asked or converged, and the shell is run
+    input_mock.assert_not_called()
+    converge_mock.assert_not_called()
+    assert capsys.readouterr().err == ""
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+    )
+
+
+def test_enter_converges_a_changed_configuration_when_the_user_accepts(
+    tmp_path: Path,
+) -> None:
+    # given a project whose container was converged with another configuration
+    project_dir, config_path = _project(tmp_path)
+
+    # when entering the container from a terminal and accepting to converge
+    container, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, _STALE_SNAPSHOT, tty=True, answer="y"
+    )
+
+    # then the user is asked, the container is converged, and the shell is run
+    input_mock.assert_called_once_with(_CHANGED_PROMPT)
+    converge_mock.assert_called_once_with()
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+    )
+
+
+def test_enter_asks_to_converge_a_container_that_was_never_converged(
+    tmp_path: Path,
+) -> None:
+    # given a project whose container has no recorded convergence
+    project_dir, config_path = _project(tmp_path)
+    snapshot = InstanceSnapshot(status="Running", config={})
+
+    # when entering the container from a terminal and accepting the default
+    _, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, snapshot, tty=True
+    )
+
+    # then the user is asked and the container is converged
+    input_mock.assert_called_once_with(_CHANGED_PROMPT)
+    converge_mock.assert_called_once_with()
+
+
+def test_enter_does_not_converge_a_changed_configuration_when_the_user_declines(
+    tmp_path: Path,
+) -> None:
+    # given a project whose container was converged with another configuration
+    project_dir, config_path = _project(tmp_path)
+
+    # when entering the container from a terminal and declining to converge
+    container, _, converge_mock = _enter_with(
+        project_dir, config_path, _STALE_SNAPSHOT, tty=True, answer="n"
+    )
+
+    # then nothing is converged, and the shell is still run
+    converge_mock.assert_not_called()
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+    )
+
+
+def test_enter_warns_about_a_changed_configuration_without_a_terminal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a project whose container was converged with another configuration
+    project_dir, config_path = _project(tmp_path)
+
+    # when entering the container without a terminal
+    container, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, _STALE_SNAPSHOT, tty=False
+    )
+
+    # then nothing is asked or converged, a warning is printed, and the shell
+    # is still run
+    input_mock.assert_not_called()
+    converge_mock.assert_not_called()
+    assert capsys.readouterr().err == _CHANGED_WARNING
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+    )
+
+
+def test_enter_converges_a_changed_configuration_without_asking_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project whose container was converged with another configuration
+    project_dir, config_path = _project(tmp_path)
+
+    # when entering the container with changes to be converged
+    _, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, _STALE_SNAPSHOT, tty=True, converge_changed=True
+    )
+
+    # then the container is converged without asking
+    input_mock.assert_not_called()
+    converge_mock.assert_called_once_with()
+
+
+def test_enter_skips_converging_a_changed_configuration_when_requested(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a project whose container was converged with another configuration
+    project_dir, config_path = _project(tmp_path)
+
+    # when entering the container with changes not to be converged
+    _, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, _STALE_SNAPSHOT, tty=True, converge_changed=False
+    )
+
+    # then nothing is asked, converged or warned about
+    input_mock.assert_not_called()
+    converge_mock.assert_not_called()
+    assert capsys.readouterr().err == ""
+
+
+def test_enter_does_not_ask_to_converge_a_container_it_just_created(
+    tmp_path: Path,
+) -> None:
+    # given a project without a container
+    project_dir, config_path = _project(tmp_path)
+
+    # when entering the container, accepting to create it
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
+        patch("builtins.input", return_value="y") as input_mock,
+        patch("ask.cli.create"),
+        patch("ask.cli.converge") as converge_mock,
+        pytest.raises(SystemExit),
+    ):
+        stdin_mock.isatty.return_value = True
+        container = container_cls.return_value
+        container.snapshot.return_value = None
+        container.exec_command.return_value = 0
+
+        enter()
+
+    # then the user is only asked about creating it, and it is not converged
+    # again
+    input_mock.assert_called_once_with(
+        "No container named 'my-project' exists. Create it now? [Y/n] "
+    )
+    converge_mock.assert_not_called()
+
+
+def test_exec_converges_a_changed_configuration_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project whose container was converged with another configuration
+    project_dir, config_path = _project(tmp_path)
+
+    # when executing a command with changes to be converged
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.converge") as converge_mock,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = _STALE_SNAPSHOT
+        container.exec_command.return_value = 0
+
+        exec("ls", converge_changed=True)
+
+    # then the container is converged before the command is executed
+    converge_mock.assert_called_once_with()
+    container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["ls"])
+
+
+def test_agent_converges_a_changed_configuration_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project whose container was converged with another configuration
+    project_dir, config_path = _project(tmp_path)
+
+    # when launching an agent with changes to be converged
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.converge") as converge_mock,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = _STALE_SNAPSHOT
+        container.exec_command.return_value = 0
+
+        agent("claude", converge_changed=True)
+
+    # then the container is converged before the agent is executed
+    converge_mock.assert_called_once_with()
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["claude"]
+    )
+
+
+def test_exec_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
+    # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\n')
@@ -1270,14 +1670,17 @@ def test_exec_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
         pytest.raises(SystemExit),
     ):
         container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(
+            status="Stopped", config={}
+        )
         container.exec_command.return_value = 0
 
         exec("ls", "-la")
 
     # then the container named after the project directory is targeted, and
-    # ensured to be running before the command is executed
+    # started, since it was stopped
     container_cls.assert_called_once_with("my-project")
-    container.ensure_running.assert_called_once_with()
+    container.start.assert_called_once_with()
 
 
 def test_exec_creates_a_missing_container_when_the_user_accepts(
@@ -1302,7 +1705,7 @@ def test_exec_creates_a_missing_container_when_the_user_accepts(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
         container.exec_command.return_value = 0
 
         exec("ls", "-la")
@@ -1336,7 +1739,7 @@ def test_exec_creates_a_missing_container_without_asking_when_requested(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
         container.exec_command.return_value = 0
 
         exec("ls", create_missing=True)
@@ -1554,8 +1957,8 @@ def test_agent_launches_the_named_agent_when_given(tmp_path: Path) -> None:
     assert exc_info.value.code == 0
 
 
-def test_agent_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
-    # given a project directory
+def test_agent_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
+    # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\n')
@@ -1570,14 +1973,17 @@ def test_agent_ensures_the_targeted_container_is_running(tmp_path: Path) -> None
         pytest.raises(SystemExit),
     ):
         container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(
+            status="Stopped", config={}
+        )
         container.exec_command.return_value = 0
 
         agent("claude")
 
     # then the container named after the project directory is targeted, and
-    # ensured to be running before the agent is executed
+    # started, since it was stopped
     container_cls.assert_called_once_with("my-project")
-    container.ensure_running.assert_called_once_with()
+    container.start.assert_called_once_with()
 
 
 def test_agent_creates_a_missing_container_when_the_user_accepts(
@@ -1602,7 +2008,7 @@ def test_agent_creates_a_missing_container_when_the_user_accepts(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
         container.exec_command.return_value = 0
 
         agent("claude")
@@ -1634,7 +2040,7 @@ def test_agent_creates_a_missing_container_without_asking_when_requested(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.exists.return_value = False
+        container.snapshot.return_value = None
         container.exec_command.return_value = 0
 
         agent("claude", create_missing=True)
@@ -1852,7 +2258,7 @@ def test_agent_prints_manifest_warnings_once(
         pytest.raises(SystemExit),
     ):
         container_cls.return_value.exec_command.return_value = 0
-        agent()
+        agent(converge_changed=False)
 
     # then the warning is printed exactly once
     assert capsys.readouterr().err == (

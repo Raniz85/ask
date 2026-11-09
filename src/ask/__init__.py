@@ -16,10 +16,13 @@ app.command(exec)
 app.command(agent)
 
 
-def run(tokens: Sequence[str], debug: bool, create: bool) -> None:
+def run(
+    tokens: Sequence[str], debug: bool, create: bool, converge: bool | None
+) -> None:
     try:
         command, bound, ignored = app.parse_args(tokens)
-        injected = {"create_missing": create} if "create_missing" in ignored else {}
+        flags = {"create_missing": create, "converge_changed": converge}
+        injected = {name: value for name, value in flags.items() if name in ignored}
         command(*bound.args, **bound.kwargs, **injected)
     except (Exception, KeyboardInterrupt) as error:
         if debug:
@@ -59,8 +62,21 @@ def _launcher(
             help="Create the project's container if it does not exist, without asking.",
         ),
     ] = False,
+    converge: Annotated[
+        bool | None,
+        cyclopts.Parameter(
+            help="Converge the project's container if its configuration has "
+            "changed since it was last converged, without asking. "
+            "--no-converge never converges it."
+        ),
+    ] = None,
 ) -> None:
-    run(tokens, debug=debug or bool(os.environ.get("ASK_DEBUG")), create=create)
+    run(
+        tokens,
+        debug=debug or bool(os.environ.get("ASK_DEBUG")),
+        create=create,
+        converge=converge,
+    )
 
 
 def main(tokens: Sequence[str] | None = None) -> None:

@@ -1,4 +1,5 @@
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -7,6 +8,7 @@ from cyclopts import Parameter
 from ask import (
     agent as agents,
     config,
+    convergence,
     gui as gui_support,
     incus,
     manifest,
@@ -18,6 +20,7 @@ from ask import (
 from ask.module import Module
 
 CreateMissing = Annotated[bool, Parameter(parse=False)]
+ConvergeChanged = Annotated[bool | None, Parameter(parse=False)]
 
 FAKE_SSH_ENV = {
     "SSH_CLIENT": "127.0.0.1 1 22",
@@ -25,12 +28,21 @@ FAKE_SSH_ENV = {
     "SSH_TTY": "/dev/pts/0",
 }
 
+CHANGED_PROMPT = (
+    "Configuration has changed since the container was last converged. "
+    "Converge now? [Y/n] "
+)
+CHANGED_WARNING = (
+    "ask: warning: configuration has changed since the container was last "
+    "converged; run `ask converge` to apply it"
+)
+
 
 def create() -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
     m = validation.load_manifest(project_dir / "ask.toml", cfg)
-    if incus.Container(project_dir.name).exists():
+    if incus.Container(project_dir.name).snapshot() is not None:
         raise incus.ContainerExistsError(
             f"container {project_dir.name!r} already exists; "
             "run `ask converge` to update it"
@@ -44,7 +56,7 @@ def converge(*, create_missing: CreateMissing = False) -> None:
     cfg = validation.load_config(config.default_path())
     m = validation.load_manifest(project_dir / "ask.toml", cfg)
     resolved_manifest = manifest.ResolvedManifest(m, cfg.layers)
-    container = _running_container(project_dir, create_missing)
+    container, _ = _running_container(project_dir, create_missing)
     bind_mounts = [project_dir] + resolved_manifest.bind_mounts
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
@@ -78,13 +90,29 @@ def converge(*, create_missing: CreateMissing = False) -> None:
         [mount.container_path for mount in mounts], user
     )
 
+    configuration = convergence.effective_configuration(m, cfg)
+    container.set_converged_state(
+        incus.ConvergedState(
+            fingerprint=convergence.fingerprint(configuration),
+            configuration=configuration,
+            at=datetime.now(UTC),
+        )
+    )
 
-def enter(gui: bool = False, *, create_missing: CreateMissing = False) -> None:
+
+def enter(
+    gui: bool = False,
+    *,
+    create_missing: CreateMissing = False,
+    converge_changed: ConvergeChanged = None,
+) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
-    validation.load_manifest(project_dir / "ask.toml", cfg)
+    m = validation.load_manifest(project_dir / "ask.toml", cfg)
     user = config.resolve_user(cfg)
-    container = _running_container(project_dir, create_missing)
+    container = _converged_container(
+        project_dir, m, cfg, create_missing, converge_changed
+    )
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
             user.uid,
@@ -101,6 +129,7 @@ def agent(
     *args: str,
     gui: bool = False,
     create_missing: CreateMissing = False,
+    converge_changed: ConvergeChanged = None,
 ) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
@@ -119,17 +148,28 @@ def agent(
         )
     resolved_agent = agents.resolve(name)
     _exec_in_container(
-        project_dir, cfg, [resolved_agent.name, *args], gui, create_missing
+        project_dir,
+        m,
+        cfg,
+        [resolved_agent.name, *args],
+        gui,
+        create_missing,
+        converge_changed,
     )
 
 
 def exec(
-    *command: str, gui: bool = False, create_missing: CreateMissing = False
+    *command: str,
+    gui: bool = False,
+    create_missing: CreateMissing = False,
+    converge_changed: ConvergeChanged = None,
 ) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
-    validation.load_manifest(project_dir / "ask.toml", cfg)
-    _exec_in_container(project_dir, cfg, list(command), gui, create_missing)
+    m = validation.load_manifest(project_dir / "ask.toml", cfg)
+    _exec_in_container(
+        project_dir, m, cfg, list(command), gui, create_missing, converge_changed
+    )
 
 
 def _confirm(prompt: str) -> bool:
@@ -142,9 +182,12 @@ def _confirm(prompt: str) -> bool:
     return answer.strip().lower() in ("", "y", "yes")
 
 
-def _running_container(project_dir: Path, create_missing: bool) -> incus.Container:
+def _running_container(
+    project_dir: Path, create_missing: bool
+) -> tuple[incus.Container, incus.InstanceSnapshot | None]:
     container = incus.Container(project_dir.name)
-    if not container.exists():
+    snapshot = container.snapshot()
+    if snapshot is None:
         if not create_missing and not _confirm(
             f"No container named {project_dir.name!r} exists. Create it now? [Y/n] "
         ):
@@ -152,19 +195,59 @@ def _running_container(project_dir: Path, create_missing: bool) -> incus.Contain
                 f"no container named {project_dir.name!r}; run `ask create` first"
             )
         create()
-    container.ensure_running()
+        return container, None
+    if not snapshot.is_running():
+        container.start()
+    return container, snapshot
+
+
+def _configuration_changed(
+    snapshot: incus.InstanceSnapshot, m: manifest.Manifest, cfg: config.Config
+) -> bool:
+    configuration = convergence.effective_configuration(m, cfg)
+    return snapshot.converged_fingerprint() != convergence.fingerprint(configuration)
+
+
+def _should_converge(converge_changed: bool | None) -> bool:
+    if converge_changed is not None:
+        return converge_changed
+    if not sys.stdin.isatty():
+        print(CHANGED_WARNING, file=sys.stderr)
+        return False
+    return _confirm(CHANGED_PROMPT)
+
+
+def _converged_container(
+    project_dir: Path,
+    m: manifest.Manifest,
+    cfg: config.Config,
+    create_missing: bool,
+    converge_changed: bool | None,
+) -> incus.Container:
+    container, snapshot = _running_container(project_dir, create_missing)
+    freshly_created = snapshot is None
+    if (
+        not freshly_created
+        and _configuration_changed(snapshot, m, cfg)
+        and _should_converge(converge_changed)
+    ):
+        converge()
     return container
 
 
 def _exec_in_container(
     project_dir: Path,
+    m: manifest.Manifest,
     cfg: config.Config,
     command: list[str],
     gui: bool,
     create_missing: bool,
+    converge_changed: bool | None,
 ) -> None:
     user = config.resolve_user(cfg)
-    container = _running_container(project_dir, create_missing)
+    container = _converged_container(
+        project_dir, m, cfg, create_missing, converge_changed
+    )
     with gui_support.session(container, user, enabled=gui) as gui_env:
         if gui_env:
             returncode = container.exec_command(

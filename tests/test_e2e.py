@@ -81,7 +81,9 @@ def test_ask_does_not_offer_to_create_a_missing_container_without_a_terminal(
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_incus = fake_bin / "incus"
-    fake_incus.write_text("#!/bin/sh\nexit 0\n")
+    fake_incus.write_text(
+        '#!/bin/sh\nif [ "$1" = list ]; then echo "[]"; fi\n'
+    )
     fake_incus.chmod(0o755)
 
     # when running ask enter from within the project directory, with "yes"
@@ -121,7 +123,9 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
     fake_bin.mkdir()
     fake_incus = fake_bin / "incus"
     fake_incus.write_text(
-        '#!/bin/sh\nif [ "$1" = launch ]; then echo refused >&2; exit 1; fi\n'
+        "#!/bin/sh\n"
+        'if [ "$1" = list ]; then echo "[]"; fi\n'
+        'if [ "$1" = launch ]; then echo refused >&2; exit 1; fi\n'
     )
     fake_incus.chmod(0o755)
 
@@ -143,3 +147,68 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
         "--config security.nesting=true --config security.privileged=false` "
         "failed with exit status 1\n",
     )
+
+
+def _project_with_an_unconverged_container(tmp_path: Path) -> tuple[Path, dict]:
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_home = tmp_path / "config"
+    config_home.mkdir()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_incus = fake_bin / "incus"
+    fake_incus.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = list ]; then\n'
+        '  echo \'[{"name": "my-project", "status": "Running", "config": {}}]\'\n'
+        "fi\n"
+    )
+    fake_incus.chmod(0o755)
+    env = {"PATH": str(fake_bin), "XDG_CONFIG_HOME": str(config_home)}
+    return project_dir, env
+
+
+def test_ask_warns_about_a_changed_configuration_without_a_terminal(
+    tmp_path: Path,
+) -> None:
+    # given a project directory whose running container was never converged
+    project_dir, env = _project_with_an_unconverged_container(tmp_path)
+
+    # when running ask exec without a terminal
+    result = subprocess.run(
+        [str(ASK), "exec", "true"],
+        cwd=project_dir,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+
+    # then a warning is printed, and the command still runs successfully
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        "",
+        "ask: warning: configuration has changed since the container was last "
+        "converged; run `ask converge` to apply it\n",
+    )
+
+
+def test_ask_does_not_warn_about_a_changed_configuration_when_told_not_to_converge(
+    tmp_path: Path,
+) -> None:
+    # given a project directory whose running container was never converged
+    project_dir, env = _project_with_an_unconverged_container(tmp_path)
+
+    # when running ask --no-converge exec without a terminal
+    result = subprocess.run(
+        [str(ASK), "--no-converge", "exec", "true"],
+        cwd=project_dir,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+
+    # then nothing is printed, and the command runs successfully
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
