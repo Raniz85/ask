@@ -9,3 +9,7 @@ class ResolvedUser:
     group_name: str
     gid: int
     extra_groups: list[str]
+
+
+def home_env(user: ResolvedUser) -> dict[str, str]:
+    return {"HOME": f"/home/{user.name}"}

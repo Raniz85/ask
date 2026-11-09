@@ -7,6 +7,7 @@ from ask.agent import Agent, AgentOption
 from ask.config import ConfigError, Layer
 from ask.incus import Mount
 from ask.manifest import Manifest, ResolvedManifest, load
+from ask.tool_manager import Mise
 from ask.user import ResolvedUser
 
 
@@ -118,8 +119,7 @@ def test_load_reads_agents_from_toml(tmp_path: Path) -> None:
     # given a manifest file enabling agents, one with options
     manifest_path = tmp_path / "ask.toml"
     manifest_path.write_text(
-        'distribution = "arch"\n'
-        'agents = ["claude", { name = "codex", auth = false }]\n'
+        'distribution = "arch"\nagents = ["claude", { name = "codex", auth = false }]\n'
     )
 
     # when loading the manifest
@@ -599,3 +599,39 @@ def test_load_reports_every_wrongly_typed_value(tmp_path: Path) -> None:
         "distribution: Input should be a valid string",
         "layers: Input should be a valid list",
     ]
+
+
+def test_tool_managers_enables_every_tool_manager_by_default() -> None:
+    # given a manifest and layer that don't mention tool managers
+    manifest = Manifest(distribution="arch", layers=["base"])
+    resolved = ResolvedManifest(manifest, {"base": Layer()})
+
+    # when resolving the enabled tool managers
+    tool_managers = resolved.tool_managers
+
+    # then every known tool manager is enabled
+    assert tool_managers == [Mise()]
+
+
+def test_tool_managers_removes_dash_prefixed_tool_managers() -> None:
+    # given a declared layer opting out of mise
+    manifest = Manifest(distribution="arch", layers=["base"])
+    resolved = ResolvedManifest(manifest, {"base": Layer(tool_managers=["-mise"])})
+
+    # when resolving the enabled tool managers
+    tool_managers = resolved.tool_managers
+
+    # then mise is not enabled
+    assert tool_managers == []
+
+
+def test_tool_managers_lets_the_project_enable_a_tool_manager_a_layer_removed() -> None:
+    # given a declared layer opting out of mise, and a manifest enabling it again
+    manifest = Manifest(distribution="arch", layers=["base"], tool_managers=["mise"])
+    resolved = ResolvedManifest(manifest, {"base": Layer(tool_managers=["-mise"])})
+
+    # when resolving the enabled tool managers
+    tool_managers = resolved.tool_managers
+
+    # then mise is enabled
+    assert tool_managers == [Mise()]

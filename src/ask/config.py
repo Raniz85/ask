@@ -20,6 +20,7 @@ from ask.agent import AgentOption
 from ask.errors import AskError
 from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.shell import ShellOption
+from ask.tool_manager import check_name as check_tool_manager_name
 from ask.user import ResolvedUser
 
 
@@ -101,6 +102,9 @@ class Layer:
     agents: list[Annotated[AgentOption, BeforeValidator(_flatten_options)]] = field(
         default_factory=list
     )
+    tool_managers: list[
+        Annotated[StrictStr, AfterValidator(check_tool_manager_name)]
+    ] = field(default_factory=list)
 
 
 @dataclass

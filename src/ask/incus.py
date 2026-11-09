@@ -12,6 +12,8 @@ _IMAGE_ALIASES = {
     "arch": "images:archlinux/current",
 }
 
+_DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 _COMMON_CONFIG = {
     "security.nesting": "true",
     "security.privileged": "false",
@@ -23,6 +25,10 @@ _CONVERGED_VERSION_CONFIG_KEY = "user.ask.converged.version"
 _CONVERGED_HASH_CONFIG_KEY = "user.ask.converged.hash"
 _CONVERGED_CONFIGURATION_CONFIG_KEY = "user.ask.converged.configuration"
 _CONVERGED_AT_CONFIG_KEY = "user.ask.converged.at"
+
+
+def _trusted_config_key(tool_manager: str) -> str:
+    return f"user.ask.{tool_manager}.trusted"
 
 
 class IncusError(AskError):
@@ -186,9 +192,7 @@ class Container:
         return Container(name)
 
     def snapshot(self) -> InstanceSnapshot | None:
-        result = _incus(
-            ["incus", "list", self.name, "--format", "json"], capture=True
-        )
+        result = _incus(["incus", "list", self.name, "--format", "json"], capture=True)
         for instance in json.loads(result.stdout):
             if instance["name"] == self.name:
                 return InstanceSnapshot(
@@ -279,6 +283,28 @@ class Container:
                 f"{_CONVERGED_AT_CONFIG_KEY}={state.at.isoformat()}",
             ],
         )
+
+    def get_trusted_config_digest(self, tool_manager: str) -> str | None:
+        result = _incus(
+            ["incus", "config", "get", self.name, _trusted_config_key(tool_manager)],
+            capture=True,
+        )
+        return result.stdout.strip() or None
+
+    def set_trusted_config_digest(self, tool_manager: str, digest: str) -> None:
+        _incus(
+            [
+                "incus",
+                "config",
+                "set",
+                self.name,
+                f"{_trusted_config_key(tool_manager)}={digest}",
+            ],
+        )
+
+    def set_path_prefix(self, entries: list[Path]) -> None:
+        path = ":".join([*map(str, entries), _DEFAULT_PATH])
+        _incus(["incus", "config", "set", self.name, f"environment.PATH={path}"])
 
     def get_gui_session_count(self) -> int:
         result = _incus(

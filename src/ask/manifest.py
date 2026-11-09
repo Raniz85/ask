@@ -3,12 +3,13 @@ from pathlib import Path
 
 from pydantic import StrictStr
 
-from ask import agent
+from ask import agent, tool_manager
 from ask.agent import Agent
 from ask.config import Layer, load_as
 from ask.incus import Mount
 from ask.module import resolve_packages
 from ask.removal import is_removal, removals
+from ask.tool_manager import Mise
 from ask.user import ResolvedUser
 
 
@@ -80,6 +81,22 @@ class ResolvedManifest:
     @property
     def agents(self) -> list[Agent]:
         return [agent.resolve(name) for name in self.agent_names]
+
+    @property
+    def tool_managers(self) -> list[Mise]:
+        names = tool_manager.known_names()
+        for layer in self._configured_layers():
+            removed = removals(layer.tool_managers)
+            names = [name for name in names if name not in removed]
+            names += [name for name in layer.tool_managers if not is_removal(name)]
+        return [tool_manager.resolve(name) for name in dict.fromkeys(names)]
+
+    @property
+    def services(self) -> dict[str, str]:
+        services: dict[str, str] = {}
+        for layer in self._flavor_layers():
+            services.update(layer.services)
+        return services
 
     def agent_mounts(self, user: ResolvedUser) -> list[Mount]:
         mounts: list[Mount] = []

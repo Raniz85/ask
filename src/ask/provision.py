@@ -18,7 +18,8 @@ from pyinfra.operations import files, pacman, server
 
 from ask import incus
 from ask.errors import AskError
-from ask.user import ResolvedUser
+from ask.tool_manager import config_digest
+from ask.user import ResolvedUser, home_env
 
 
 class ProvisioningError(AskError):
@@ -130,6 +131,25 @@ class Provisioner:
                 )
 
 
+def _run_checked(
+    container: incus.Container,
+    uid: int,
+    gid: int,
+    cwd: Path,
+    command: list[str],
+    env: dict[str, str] | None = None,
+) -> None:
+    if env:
+        returncode = container.exec_command(uid, gid, cwd, command, env=env)
+    else:
+        returncode = container.exec_command(uid, gid, cwd, command)
+    if returncode != 0:
+        raise ProvisioningError(
+            f"`{shlex.join(command)}` failed in container "
+            f"{container.name!r} with exit status {returncode}"
+        )
+
+
 _AUR_BUILD_USER = "aur"
 _AUR_BUILD_ID = 900
 _AUR_SUDOERS_PATH = "/etc/sudoers.d/ask-aur"
@@ -202,12 +222,7 @@ class AurBuilder:
     def _run_as_builder(
         self, uid: int, gid: int, cwd: Path, command: list[str]
     ) -> None:
-        returncode = self.container.exec_command(uid, gid, cwd, command)
-        if returncode != 0:
-            raise ProvisioningError(
-                f"`{shlex.join(command)}` failed in container "
-                f"{self.container.name!r} with exit status {returncode}"
-            )
+        _run_checked(self.container, uid, gid, cwd, command)
 
     def _builder_git_ref(self, ref: str) -> str | None:
         result = self.container.run_command(
@@ -290,4 +305,54 @@ class AurBuilder:
         uid, gid = self._builder_ids()
         self._run_as_builder(
             uid, gid, _AUR_BUILD_HOME, ["paru", "-S", "--needed", *packages]
+        )
+
+
+_MISE = "mise"
+
+
+@dataclass(frozen=True)
+class MiseProvisioner:
+    container: incus.Container
+
+    def trust(
+        self, project_dir: Path, user: ResolvedUser, config_files: list[Path]
+    ) -> None:
+        digest = config_digest(project_dir, config_files)
+        if self.container.get_trusted_config_digest(_MISE) == digest:
+            return
+        if not sys.stdin.isatty():
+            raise ProvisioningError(
+                "mise config has not been reviewed; "
+                "run `ask converge` from a terminal to review it"
+            )
+
+        for config_file in config_files:
+            print(f"==> {config_file} <==")
+            print((project_dir / config_file).read_text())
+        answer = input("Trust the mise config above and install its tools? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            raise ProvisioningError(
+                "mise config was declined; cannot install its tools"
+            )
+
+        for config_file in config_files:
+            _run_checked(
+                self.container,
+                user.uid,
+                user.gid,
+                project_dir,
+                ["mise", "trust", str(project_dir / config_file)],
+                env=home_env(user),
+            )
+        self.container.set_trusted_config_digest(_MISE, digest)
+
+    def install(self, project_dir: Path, user: ResolvedUser) -> None:
+        _run_checked(
+            self.container,
+            user.uid,
+            user.gid,
+            project_dir,
+            ["mise", "install"],
+            env=home_env(user),
         )

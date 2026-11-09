@@ -18,6 +18,7 @@ from ask import (
     validation,
 )
 from ask.module import Module
+from ask.user import home_env
 
 CreateMissing = Annotated[bool, Parameter(parse=False)]
 ConvergeChanged = Annotated[bool | None, Parameter(parse=False)]
@@ -61,10 +62,18 @@ def converge(*, create_missing: CreateMissing = False) -> None:
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
 
+    tool_managers = [
+        (tool_manager, config_files)
+        for tool_manager in resolved_manifest.tool_managers
+        if (config_files := tool_manager.config_files(project_dir))
+    ]
+
     package_modules: list[Module] = [user_shell, *resolved_manifest.agents]
     packages = resolved_manifest.packages
     for mod in package_modules:
         packages += mod.packages_for(m.distribution)
+    for tool_manager, _ in tool_managers:
+        packages += tool_manager.packages_for(m.distribution)
     official_packages, aur_packages = provision.split_aur_packages(packages)
 
     mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
@@ -90,7 +99,15 @@ def converge(*, create_missing: CreateMissing = False) -> None:
         [mount.container_path for mount in mounts], user
     )
 
-    configuration = convergence.effective_configuration(m, cfg)
+    mise_provisioner = provision.MiseProvisioner(container)
+    path_entries: list[Path] = []
+    for tool_manager, config_files in tool_managers:
+        mise_provisioner.trust(project_dir, user, config_files)
+        mise_provisioner.install(project_dir, user)
+        path_entries += tool_manager.path_entries(user)
+    container.set_path_prefix(path_entries)
+
+    configuration = convergence.effective_configuration(m, cfg, project_dir)
     container.set_converged_state(
         incus.ConvergedState(
             fingerprint=convergence.fingerprint(configuration),
@@ -119,7 +136,7 @@ def enter(
             user.gid,
             project_dir,
             [user.shell],
-            env=FAKE_SSH_ENV | gui_env,
+            env=home_env(user) | FAKE_SSH_ENV | gui_env,
         )
     sys.exit(returncode)
 
@@ -202,9 +219,12 @@ def _running_container(
 
 
 def _configuration_changed(
-    snapshot: incus.InstanceSnapshot, m: manifest.Manifest, cfg: config.Config
+    snapshot: incus.InstanceSnapshot,
+    m: manifest.Manifest,
+    cfg: config.Config,
+    project_dir: Path,
 ) -> bool:
-    configuration = convergence.effective_configuration(m, cfg)
+    configuration = convergence.effective_configuration(m, cfg, project_dir)
     return snapshot.converged_fingerprint() != convergence.fingerprint(configuration)
 
 
@@ -228,7 +248,7 @@ def _converged_container(
     freshly_created = snapshot is None
     if (
         not freshly_created
-        and _configuration_changed(snapshot, m, cfg)
+        and _configuration_changed(snapshot, m, cfg, project_dir)
         and _should_converge(converge_changed)
     ):
         converge()
@@ -249,12 +269,7 @@ def _exec_in_container(
         project_dir, m, cfg, create_missing, converge_changed
     )
     with gui_support.session(container, user, enabled=gui) as gui_env:
-        if gui_env:
-            returncode = container.exec_command(
-                user.uid, user.gid, project_dir, command, env=gui_env
-            )
-        else:
-            returncode = container.exec_command(
-                user.uid, user.gid, project_dir, command
-            )
+        returncode = container.exec_command(
+            user.uid, user.gid, project_dir, command, env=home_env(user) | gui_env
+        )
     sys.exit(returncode)

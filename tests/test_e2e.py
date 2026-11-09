@@ -81,9 +81,7 @@ def test_ask_does_not_offer_to_create_a_missing_container_without_a_terminal(
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_incus = fake_bin / "incus"
-    fake_incus.write_text(
-        '#!/bin/sh\nif [ "$1" = list ]; then echo "[]"; fi\n'
-    )
+    fake_incus.write_text('#!/bin/sh\nif [ "$1" = list ]; then echo "[]"; fi\n')
     fake_incus.chmod(0o755)
 
     # when running ask enter from within the project directory, with "yes"
@@ -212,3 +210,37 @@ def test_ask_does_not_warn_about_a_changed_configuration_when_told_not_to_conver
 
     # then nothing is printed, and the command runs successfully
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+
+
+def test_ask_reports_an_unknown_tool_manager_without_a_traceback(
+    tmp_path: Path,
+) -> None:
+    # given a project directory whose ask.toml opts out of a tool manager ask
+    # doesn't support
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(
+        'distribution = "arch"\ntool_managers = ["-asdf"]\n'
+    )
+
+    # and an empty global configuration directory
+    config_home = tmp_path / "config"
+    config_home.mkdir()
+
+    # when running ask converge from within the project directory
+    result = subprocess.run(
+        [str(ASK), "converge"],
+        cwd=project_dir,
+        env={"PATH": "/usr/bin:/bin", "XDG_CONFIG_HOME": str(config_home)},
+        capture_output=True,
+        text=True,
+    )
+
+    # then the unknown tool manager is reported along with the supported ones,
+    # and ask exits with status 1
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1,
+        "",
+        f"ask: invalid configuration in {project_dir / 'ask.toml'}\n"
+        "  tool_managers.0: unknown tool manager 'asdf' (known: mise)\n",
+    )

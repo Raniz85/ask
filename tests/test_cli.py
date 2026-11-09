@@ -2,7 +2,7 @@ import hashlib
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import Mock, call, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 
@@ -26,6 +26,62 @@ _WAYLAND_MOUNT = Mount(
     container_path=Path("/home/raniz/.wayland-socket"),
 )
 _WAYLAND_ENV = {"WAYLAND_DISPLAY": "/home/raniz/.wayland-socket"}
+_HOME_ENV = {"HOME": "/home/raniz"}
+
+
+def _run_in_project(tmp_path: Path, command: Callable[[], None]) -> tuple[Path, Mock]:
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(
+        'distribution = "arch"\nagents = ["claude"]\n'
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.converge"),
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+        command()
+    return project_dir, container
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_command"),
+    [
+        (lambda: exec("erl"), ["erl"]),
+        (lambda: agent(), ["claude"]),
+    ],
+    ids=["exec", "agent"],
+)
+def test_commands_run_with_the_users_home_directory(
+    tmp_path: Path, command: Callable[[], None], expected_command: list[str]
+) -> None:
+    # given a project directory and a config declaring a user
+    # when running a command in the project's container
+    project_dir, container = _run_in_project(tmp_path, command)
+
+    # then it runs with HOME set to the user's home directory, since incus
+    # does not set it for the user it runs commands as
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, expected_command, env=_HOME_ENV
+    )
+
+
+def test_enter_runs_the_shell_with_the_users_home_directory(tmp_path: Path) -> None:
+    # given a project directory and a config declaring a user
+    # when entering the project's container
+    project_dir, container = _run_in_project(tmp_path, lambda: enter())
+
+    # then the shell runs with HOME set to the user's home directory, alongside
+    # the variables that make it look like an SSH session
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+    )
 
 
 def test_create_launches_container_and_converges(tmp_path: Path) -> None:
@@ -156,9 +212,7 @@ def test_converge_starts_a_stopped_targeted_container(
         patch("ask.cli.provision.AurBuilder"),
     ):
         container = container_cls.return_value
-        container.snapshot.return_value = InstanceSnapshot(
-            status="Stopped", config={}
-        )
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
         container.get_managed_packages.return_value = []
 
         converge()
@@ -846,7 +900,9 @@ def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
     # then the effective configuration, its fingerprint and the time are
     # recorded as the last thing done to the container
     configuration = effective_configuration(
-        Manifest(distribution="arch"), Config(user=User(name="raniz", uid=1000))
+        Manifest(distribution="arch"),
+        Config(user=User(name="raniz", uid=1000)),
+        project_dir,
     )
     datetime_mock.now.assert_called_once_with(UTC)
     assert container.method_calls[-1] == call.set_converged_state(
@@ -891,6 +947,114 @@ def test_converge_does_not_record_the_state_when_provisioning_fails(
     container.set_converged_state.assert_not_called()
 
 
+_RANIZ = ResolvedUser(
+    name="raniz",
+    uid=1000,
+    shell="bash",
+    group_name="raniz",
+    gid=1000,
+    extra_groups=[],
+)
+
+
+def _converge_with_mise(tmp_path: Path, ask_toml: str) -> tuple[Path, MagicMock]:
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir(exist_ok=True)
+    (project_dir / "ask.toml").write_text(ask_toml)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    steps = MagicMock()
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+        patch("ask.cli.provision.MiseProvisioner") as mise_provisioner_cls,
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+        steps.attach_mock(container, "container")
+        steps.attach_mock(provisioner_cls.return_value, "provisioner")
+        steps.attach_mock(mise_provisioner_cls.return_value, "mise")
+
+        converge()
+
+    return project_dir, steps
+
+
+def _step_names(steps: MagicMock) -> list[str]:
+    return [name for name, _, _ in steps.mock_calls]
+
+
+def test_converge_hands_tool_installation_to_mise_for_a_project_with_mise_config(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a mise.toml
+    (tmp_path / "my-project").mkdir()
+    (tmp_path / "my-project" / "mise.toml").write_text('[tools]\nerlang = "29"\n')
+
+    # when converging from within that project directory
+    project_dir, steps = _converge_with_mise(tmp_path, 'distribution = "arch"\n')
+
+    # then mise is installed alongside the shell's package
+    steps.provisioner.provision_packages.assert_called_once_with(
+        "arch", ["bash", "mise"]
+    )
+
+    # and once packages and mount ownership are in place, the mise config is
+    # trusted and its tools installed as the user
+    names = _step_names(steps)
+    assert names.index("provisioner.fix_bind_mount_ownership") < names.index(
+        "mise.trust"
+    )
+    assert [c for c in steps.mock_calls if c[0].startswith("mise.")] == [
+        call.mise.trust(project_dir, _RANIZ, [Path("mise.toml")]),
+        call.mise.install(project_dir, _RANIZ),
+    ]
+
+    # and mise's shims are put on the PATH of commands run in the container
+    steps.container.set_path_prefix.assert_called_once_with(
+        [Path("/home/raniz/.local/share/mise/shims")]
+    )
+
+
+def test_converge_leaves_mise_out_of_a_project_without_mise_config(
+    tmp_path: Path,
+) -> None:
+    # given a project directory without mise config
+    # when converging from within that project directory
+    _, steps = _converge_with_mise(tmp_path, 'distribution = "arch"\n')
+
+    # then mise is neither installed nor run
+    steps.provisioner.provision_packages.assert_called_once_with("arch", ["bash"])
+    assert [c for c in steps.mock_calls if c[0].startswith("mise.")] == []
+
+    # and the PATH of commands run in the container is the default one
+    steps.container.set_path_prefix.assert_called_once_with([])
+
+
+def test_converge_leaves_mise_out_of_a_project_that_opts_out_of_it(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a mise.toml
+    (tmp_path / "my-project").mkdir()
+    (tmp_path / "my-project" / "mise.toml").write_text('[tools]\nerlang = "29"\n')
+
+    # when converging with an ask.toml that opts out of mise
+    _, steps = _converge_with_mise(
+        tmp_path, 'distribution = "arch"\ntool_managers = ["-mise"]\n'
+    )
+
+    # then mise is neither installed nor run
+    steps.provisioner.provision_packages.assert_called_once_with("arch", ["bash"])
+    assert [c for c in steps.mock_calls if c[0].startswith("mise.")] == []
+
+    # and the PATH of commands run in the container is the default one
+    steps.container.set_path_prefix.assert_called_once_with([])
+
+
 def test_enter_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
@@ -907,9 +1071,7 @@ def test_enter_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
         pytest.raises(SystemExit),
     ):
         container = container_cls.return_value
-        container.snapshot.return_value = InstanceSnapshot(
-            status="Stopped", config={}
-        )
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
         container.exec_command.return_value = 0
 
         enter()
@@ -936,9 +1098,7 @@ def test_enter_does_not_start_an_already_running_container(tmp_path: Path) -> No
         pytest.raises(SystemExit),
     ):
         container = container_cls.return_value
-        container.snapshot.return_value = InstanceSnapshot(
-            status="Running", config={}
-        )
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
         container.exec_command.return_value = 0
 
         enter()
@@ -997,7 +1157,7 @@ def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     # resolved user, in the project directory, with environment variables
     # that make it look like an SSH session, and ask exits with its exit code
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["zsh"], env=FAKE_SSH_ENV
+        1000, 1000, project_dir, ["zsh"], env=_HOME_ENV | FAKE_SSH_ENV
     )
     assert exc_info.value.code == 0
 
@@ -1056,7 +1216,7 @@ def test_enter_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) ->
     acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV | _WAYLAND_ENV
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV | _WAYLAND_ENV
     )
     assert exc_info.value.code == 0
 
@@ -1092,7 +1252,7 @@ def test_enter_does_not_forward_anything_when_gui_requested_without_a_session(
     acquire_mock.assert_not_called()
     release_mock.assert_not_called()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
     )
 
 
@@ -1126,7 +1286,7 @@ def test_enter_creates_a_missing_container_when_the_user_accepts(
     # then the container is created, and the shell is run in it afterwards
     create_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
     )
 
 
@@ -1317,7 +1477,7 @@ def test_enter_does_not_offer_to_create_an_existing_container(
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
         container.snapshot.return_value = _converged_snapshot(
-            _PROJECT_MANIFEST, _PROJECT_CONFIG
+            _PROJECT_MANIFEST, _PROJECT_CONFIG, project_dir
         )
         container.exec_command.return_value = 0
 
@@ -1347,8 +1507,10 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     return project_dir, config_path
 
 
-def _converged_snapshot(m: Manifest, cfg: Config) -> InstanceSnapshot:
-    converged = fingerprint(effective_configuration(m, cfg))
+def _converged_snapshot(
+    m: Manifest, cfg: Config, project_dir: Path
+) -> InstanceSnapshot:
+    converged = fingerprint(effective_configuration(m, cfg, project_dir))
     return InstanceSnapshot(
         status="Running",
         config={
@@ -1400,7 +1562,7 @@ def test_enter_does_not_converge_an_unchanged_configuration(
 ) -> None:
     # given a project whose container was converged with its current configuration
     project_dir, config_path = _project(tmp_path)
-    snapshot = _converged_snapshot(_PROJECT_MANIFEST, _PROJECT_CONFIG)
+    snapshot = _converged_snapshot(_PROJECT_MANIFEST, _PROJECT_CONFIG, project_dir)
 
     # when entering the container from a terminal
     container, input_mock, converge_mock = _enter_with(
@@ -1412,8 +1574,26 @@ def test_enter_does_not_converge_an_unchanged_configuration(
     converge_mock.assert_not_called()
     assert capsys.readouterr().err == ""
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
     )
+
+
+def test_enter_asks_to_converge_after_the_mise_config_changed(
+    tmp_path: Path,
+) -> None:
+    # given a project with a mise.toml, whose container was converged with it
+    project_dir, config_path = _project(tmp_path)
+    (project_dir / "mise.toml").write_text('[tools]\nerlang = "29.1.1"\n')
+    snapshot = _converged_snapshot(_PROJECT_MANIFEST, _PROJECT_CONFIG, project_dir)
+
+    # and a mise.toml that has changed since
+    (project_dir / "mise.toml").write_text('[tools]\nerlang = "29.2.0"\n')
+
+    # when entering the container from a terminal
+    _, input_mock, _ = _enter_with(project_dir, config_path, snapshot, tty=True)
+
+    # then the user is asked to converge
+    input_mock.assert_called_once_with(_CHANGED_PROMPT)
 
 
 def test_enter_converges_a_changed_configuration_when_the_user_accepts(
@@ -1431,7 +1611,7 @@ def test_enter_converges_a_changed_configuration_when_the_user_accepts(
     input_mock.assert_called_once_with(_CHANGED_PROMPT)
     converge_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
     )
 
 
@@ -1466,7 +1646,7 @@ def test_enter_does_not_converge_a_changed_configuration_when_the_user_declines(
     # then nothing is converged, and the shell is still run
     converge_mock.assert_not_called()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
     )
 
 
@@ -1487,7 +1667,7 @@ def test_enter_warns_about_a_changed_configuration_without_a_terminal(
     converge_mock.assert_not_called()
     assert capsys.readouterr().err == _CHANGED_WARNING
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
     )
 
 
@@ -1578,7 +1758,9 @@ def test_exec_converges_a_changed_configuration_when_requested(
 
     # then the container is converged before the command is executed
     converge_mock.assert_called_once_with()
-    container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["ls"])
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["ls"], env=_HOME_ENV
+    )
 
 
 def test_agent_converges_a_changed_configuration_when_requested(
@@ -1604,7 +1786,7 @@ def test_agent_converges_a_changed_configuration_when_requested(
     # then the container is converged before the agent is executed
     converge_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude"]
+        1000, 1000, project_dir, ["claude"], env=_HOME_ENV
     )
 
 
@@ -1624,9 +1806,7 @@ def test_exec_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
         pytest.raises(SystemExit),
     ):
         container = container_cls.return_value
-        container.snapshot.return_value = InstanceSnapshot(
-            status="Stopped", config={}
-        )
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
         container.exec_command.return_value = 0
 
         exec("ls", "-la")
@@ -1667,7 +1847,7 @@ def test_exec_creates_a_missing_container_when_the_user_accepts(
     # then the container is created, and the command is run in it afterwards
     create_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls", "-la"]
+        1000, 1000, project_dir, ["ls", "-la"], env=_HOME_ENV
     )
 
 
@@ -1727,7 +1907,7 @@ def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
     # user, in the project directory, and ask exits with the command's exit
     # code
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls", "-la"]
+        1000, 1000, project_dir, ["ls", "-la"], env=_HOME_ENV
     )
     assert exc_info.value.code == 0
 
@@ -1785,12 +1965,12 @@ def test_exec_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> 
     acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls", "-la"], env=_WAYLAND_ENV
+        1000, 1000, project_dir, ["ls", "-la"], env=_HOME_ENV | _WAYLAND_ENV
     )
     assert exc_info.value.code == 0
 
 
-def test_exec_passes_no_env_when_gui_requested_without_a_session(
+def test_exec_passes_only_home_when_gui_requested_without_a_session(
     tmp_path: Path,
 ) -> None:
     # given a project directory, a config declaring a user, and no live
@@ -1817,11 +1997,11 @@ def test_exec_passes_no_env_when_gui_requested_without_a_session(
         exec("ls", "-la", gui=True)
 
     # then no gui session is acquired or released, and the command runs with
-    # no env argument at all, exactly as without --gui
+    # only HOME set, exactly as without --gui
     acquire_mock.assert_not_called()
     release_mock.assert_not_called()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls", "-la"]
+        1000, 1000, project_dir, ["ls", "-la"], env=_HOME_ENV
     )
 
 
@@ -1881,7 +2061,9 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
     # then the first configured agent is executed in the container as the
     # resolved user, in the project directory, and ask exits with its exit
     # code
-    container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["claude"])
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["claude"], env=_HOME_ENV
+    )
     assert exc_info.value.code == 0
 
 
@@ -1907,7 +2089,9 @@ def test_agent_launches_the_named_agent_when_given(tmp_path: Path) -> None:
 
     # then the named agent is executed, regardless of what is configured
     container_cls.assert_called_once_with("my-project")
-    container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["claude"])
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["claude"], env=_HOME_ENV
+    )
     assert exc_info.value.code == 0
 
 
@@ -1927,9 +2111,7 @@ def test_agent_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
         pytest.raises(SystemExit),
     ):
         container = container_cls.return_value
-        container.snapshot.return_value = InstanceSnapshot(
-            status="Stopped", config={}
-        )
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
         container.exec_command.return_value = 0
 
         agent("claude")
@@ -1969,7 +2151,9 @@ def test_agent_creates_a_missing_container_when_the_user_accepts(
 
     # then the container is created, and the agent is run in it afterwards
     create_mock.assert_called_once_with()
-    container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["claude"])
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["claude"], env=_HOME_ENV
+    )
 
 
 def test_agent_creates_a_missing_container_without_asking_when_requested(
@@ -2094,7 +2278,7 @@ def test_agent_forwards_extra_arguments_to_the_agent(tmp_path: Path) -> None:
 
     # then the agent is executed with those arguments appended
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude", "--resume"]
+        1000, 1000, project_dir, ["claude", "--resume"], env=_HOME_ENV
     )
 
 
@@ -2129,7 +2313,7 @@ def test_agent_forwards_wayland_display_when_gui_is_requested(
     acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude"], env=_WAYLAND_ENV
+        1000, 1000, project_dir, ["claude"], env=_HOME_ENV | _WAYLAND_ENV
     )
 
 
@@ -2160,7 +2344,7 @@ def test_agent_treats_a_dash_prefixed_name_as_an_argument_to_the_default_agent(
 
     # then the default agent is executed with all arguments, in order
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude", "--resume", "--verbose"]
+        1000, 1000, project_dir, ["claude", "--resume", "--verbose"], env=_HOME_ENV
     )
 
 

@@ -969,3 +969,95 @@ def test_attach_volume_does_not_reattach_an_already_attached_volume() -> None:
     # then no "storage volume attach" call is made
     attach_calls = [c for c in run.call_args_list if "attach" in c.args[0]]
     assert attach_calls == []
+
+
+def test_get_trusted_config_digest_returns_none_when_unset() -> None:
+    # given a container on which no mise config was ever trusted
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="\n"
+        )
+
+        # when reading the trusted mise config digest
+        digest = container.get_trusted_config_digest("mise")
+
+    # then there is none
+    assert digest is None
+
+
+def test_get_trusted_config_digest_returns_the_recorded_digest() -> None:
+    # given a container on which a mise config was trusted
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n"
+        )
+
+        # when reading the trusted mise config digest
+        digest = container.get_trusted_config_digest("mise")
+
+    # then the recorded digest is read from the tool manager's config key
+    assert digest == "abc123"
+    run.assert_called_once_with(
+        ["incus", "config", "get", "my-project", "user.ask.mise.trusted"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_set_trusted_config_digest_stores_the_digest() -> None:
+    # given a digest of trusted mise config files
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when recording it
+        container.set_trusted_config_digest("mise", "abc123")
+
+    # then it is stored under the tool manager's config key
+    run.assert_called_once_with(
+        ["incus", "config", "set", "my-project", "user.ask.mise.trusted=abc123"],
+        check=True,
+    )
+
+
+def test_set_path_prefix_puts_the_entries_before_the_default_path() -> None:
+    # given directories to put on the PATH of commands run in the container
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when setting them as the PATH prefix
+        container.set_path_prefix([Path("/home/raniz/.local/share/mise/shims")])
+
+    # then the container's PATH is those directories followed by incus' default
+    run.assert_called_once_with(
+        [
+            "incus",
+            "config",
+            "set",
+            "my-project",
+            "environment.PATH=/home/raniz/.local/share/mise/shims:"
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        ],
+        check=True,
+    )
+
+
+def test_set_path_prefix_restores_the_default_path_without_entries() -> None:
+    # given no directories to put on the PATH
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when setting them as the PATH prefix
+        container.set_path_prefix([])
+
+    # then the container's PATH is incus' default
+    run.assert_called_once_with(
+        [
+            "incus",
+            "config",
+            "set",
+            "my-project",
+            "environment.PATH="
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        ],
+        check=True,
+    )

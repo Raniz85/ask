@@ -1,0 +1,7 @@
+[tools]
+erlang = "29.1.1"
+elixir = "1.20.4-otp-29"
+
+[env]
+# Local development settings, if you create .env (see .env.example).
+_.file = ".env"

@@ -45,6 +45,10 @@ agents = [
   # { name: "pi", system_md: true, auth: true, skills: true, config: true },
 ]
 
+# Tool managers install a project's tools from its own config, e.g. mise from a
+# mise.toml. All are used when their config is present; prefix with "-" to opt out
+# tool_managers = ["-mise"]
+
 [layers.python]
 packages.common = [
   "python",

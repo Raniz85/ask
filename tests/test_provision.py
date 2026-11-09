@@ -12,8 +12,10 @@ from pyinfra.api.output import echo
 from pyinfra.operations import files, pacman, server
 
 from ask.incus import Container
+from ask.tool_manager import config_digest
 from ask.provision import (
     AurBuilder,
+    MiseProvisioner,
     ProvisioningError,
     Provisioner,
     _ancestors_under_home,
@@ -1022,4 +1024,216 @@ def test_install_packages_reports_a_failing_paru_install() -> None:
     # then the error names the failing command and its exit status
     assert str(error.value) == (
         "`paru -S --needed yay-bin` failed in container 'my-project' with exit status 1"
+    )
+
+
+_MISE_USER = ResolvedUser(
+    name="raniz",
+    uid=1000,
+    shell="zsh",
+    group_name="raniz",
+    gid=1000,
+    extra_groups=[],
+)
+
+
+def _mise_project(tmp_path: Path) -> tuple[Path, list[Path]]:
+    project_dir = tmp_path / "my-project"
+    (project_dir / ".config" / "mise").mkdir(parents=True)
+    (project_dir / "mise.toml").write_text('[tools]\nerlang = "29.1.1"\n')
+    (project_dir / ".config" / "mise" / "config.toml").write_text(
+        '[env]\n_.file = ".env"\n'
+    )
+    return project_dir, [Path(".config/mise/config.toml"), Path("mise.toml")]
+
+
+def test_mise_trust_shows_the_config_and_trusts_it_when_approved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a project with two mise config files that were never trusted
+    project_dir, config_files = _mise_project(tmp_path)
+
+    # and a user on a terminal who approves them
+    with (
+        patch.object(Container, "get_trusted_config_digest", return_value=None),
+        patch.object(Container, "set_trusted_config_digest") as set_digest,
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("ask.provision.sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="y"),
+    ):
+        # when trusting the project's mise config
+        MiseProvisioner(Container("my-project")).trust(
+            project_dir, _MISE_USER, config_files
+        )
+
+    # then each file is shown for review
+    assert capsys.readouterr().out == (
+        "==> .config/mise/config.toml <==\n"
+        '[env]\n_.file = ".env"\n'
+        "\n"
+        "==> mise.toml <==\n"
+        '[tools]\nerlang = "29.1.1"\n'
+        "\n"
+    )
+
+    # and each file is trusted by mise, as the user with their home directory,
+    # from the project directory
+    assert exec_command.call_args_list == [
+        call(
+            1000,
+            1000,
+            project_dir,
+            ["mise", "trust", str(project_dir / ".config/mise/config.toml")],
+            env={"HOME": "/home/raniz"},
+        ),
+        call(
+            1000,
+            1000,
+            project_dir,
+            ["mise", "trust", str(project_dir / "mise.toml")],
+            env={"HOME": "/home/raniz"},
+        ),
+    ]
+
+    # and the reviewed files are recorded as trusted on the container
+    set_digest.assert_called_once_with("mise", config_digest(project_dir, config_files))
+
+
+def test_mise_trust_does_nothing_when_the_config_was_already_trusted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a project whose mise config was trusted as it is now
+    project_dir, config_files = _mise_project(tmp_path)
+    digest = config_digest(project_dir, config_files)
+
+    with (
+        patch.object(Container, "get_trusted_config_digest", return_value=digest),
+        patch.object(Container, "set_trusted_config_digest") as set_digest,
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("builtins.input") as input_,
+    ):
+        # when trusting the project's mise config
+        MiseProvisioner(Container("my-project")).trust(
+            project_dir, _MISE_USER, config_files
+        )
+
+    # then nothing is shown, asked, trusted or recorded
+    assert capsys.readouterr().out == ""
+    input_.assert_not_called()
+    exec_command.assert_not_called()
+    set_digest.assert_not_called()
+
+
+def test_mise_trust_raises_without_trusting_when_the_user_declines(
+    tmp_path: Path,
+) -> None:
+    # given a project with mise config that changed since it was last trusted
+    project_dir, config_files = _mise_project(tmp_path)
+
+    # and a user on a terminal who declines it
+    with (
+        patch.object(Container, "get_trusted_config_digest", return_value="old"),
+        patch.object(Container, "set_trusted_config_digest") as set_digest,
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("ask.provision.sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="n"),
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when trusting the project's mise config
+        MiseProvisioner(Container("my-project")).trust(
+            project_dir, _MISE_USER, config_files
+        )
+
+    # then a clear error is raised, and nothing is trusted or recorded
+    assert str(error.value) == "mise config was declined; cannot install its tools"
+    exec_command.assert_not_called()
+    set_digest.assert_not_called()
+
+
+def test_mise_trust_raises_without_asking_when_not_on_a_terminal(
+    tmp_path: Path,
+) -> None:
+    # given a project with mise config that was never trusted
+    project_dir, config_files = _mise_project(tmp_path)
+
+    # and no terminal to ask on
+    with (
+        patch.object(Container, "get_trusted_config_digest", return_value=None),
+        patch.object(Container, "set_trusted_config_digest") as set_digest,
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("ask.provision.sys.stdin.isatty", return_value=False),
+        patch("builtins.input") as input_,
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when trusting the project's mise config
+        MiseProvisioner(Container("my-project")).trust(
+            project_dir, _MISE_USER, config_files
+        )
+
+    # then the error says how to review it, and nothing is asked, trusted or
+    # recorded
+    assert str(error.value) == (
+        "mise config has not been reviewed; "
+        "run `ask converge` from a terminal to review it"
+    )
+    input_.assert_not_called()
+    exec_command.assert_not_called()
+    set_digest.assert_not_called()
+
+
+def test_mise_trust_reports_a_failing_mise_trust(tmp_path: Path) -> None:
+    # given a project with mise config, approved by the user, that mise fails
+    # to trust
+    project_dir, config_files = _mise_project(tmp_path)
+    with (
+        patch.object(Container, "get_trusted_config_digest", return_value=None),
+        patch.object(Container, "set_trusted_config_digest") as set_digest,
+        patch.object(Container, "exec_command", return_value=1),
+        patch("ask.provision.sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="y"),
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when trusting the project's mise config
+        MiseProvisioner(Container("my-project")).trust(
+            project_dir, _MISE_USER, config_files
+        )
+
+    # then the error names the failing command, and nothing is recorded
+    assert str(error.value) == (
+        f"`mise trust {project_dir}/.config/mise/config.toml` failed in "
+        "container 'my-project' with exit status 1"
+    )
+    set_digest.assert_not_called()
+
+
+def test_mise_install_installs_the_tools_as_the_user_in_the_project(
+    tmp_path: Path,
+) -> None:
+    # given a project directory
+    project_dir = tmp_path / "my-project"
+
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        # when installing the project's mise tools
+        MiseProvisioner(Container("my-project")).install(project_dir, _MISE_USER)
+
+    # then mise installs them as the user with their home directory, from the
+    # project directory
+    exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["mise", "install"], env={"HOME": "/home/raniz"}
+    )
+
+
+def test_mise_install_reports_a_failing_mise_install(tmp_path: Path) -> None:
+    # given a project whose tools mise fails to install
+    project_dir = tmp_path / "my-project"
+    with (
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when installing the project's mise tools
+        MiseProvisioner(Container("my-project")).install(project_dir, _MISE_USER)
+
+    # then the error names the failing command
+    assert str(error.value) == (
+        "`mise install` failed in container 'my-project' with exit status 1"
     )

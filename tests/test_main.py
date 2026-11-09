@@ -219,9 +219,7 @@ def test_run_passes_global_flags_to_commands_that_accept_them() -> None:
     command.assert_called_once_with(True, create_missing=True, converge_changed=True)
 
 
-def test_run_does_not_pass_global_flags_to_commands_that_do_not_accept_them() -> (
-    None
-):
+def test_run_does_not_pass_global_flags_to_commands_that_do_not_accept_them() -> None:
     # given a command that accepts neither global flag
     command = Mock()
     bound = inspect.signature(_command_without_global_flags).bind(gui=True)
