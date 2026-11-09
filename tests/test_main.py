@@ -26,6 +26,11 @@ def _app_resolving_to(
         yield
 
 
+@pytest.fixture(autouse=True)
+def _terminal_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLUMNS", "60")
+
+
 def test_run_reports_config_errors_without_a_traceback(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -42,7 +47,10 @@ def test_run_reports_config_errors_without_a_traceback(
     # then the error is printed to stderr and the process exits with status 1
     assert exit_info.value.code == 1
     assert capsys.readouterr().err == (
-        "ask: invalid configuration in /cfg/config.toml\n  shell.name: bad\n"
+        "╭─ Error ──────────────────────────────────────────────────╮\n"
+        "│ Invalid configuration in /cfg/config.toml:               │\n"
+        "│   shell.name: bad                                        │\n"
+        "╰──────────────────────────────────────────────────────────╯\n"
     )
 
 
@@ -61,7 +69,11 @@ def test_run_reports_ask_errors_without_a_traceback(
 
     # then the error is printed to stderr and the process exits with status 1
     assert exit_info.value.code == 1
-    assert capsys.readouterr().err == "ask: something the user can fix\n"
+    assert capsys.readouterr().err == (
+        "╭─ Error ──────────────────────────────────────────────────╮\n"
+        "│ something the user can fix                               │\n"
+        "╰──────────────────────────────────────────────────────────╯\n"
+    )
 
 
 def test_run_reports_unexpected_errors_without_a_traceback(
@@ -81,8 +93,10 @@ def test_run_reports_unexpected_errors_without_a_traceback(
     # traceback, and the process exits with status 1
     assert exit_info.value.code == 1
     assert capsys.readouterr().err == (
-        "ask: unexpected error: RuntimeError: boom\n"
-        "ask: run with --debug or ASK_DEBUG=1 for the full traceback\n"
+        "╭─ Error ──────────────────────────────────────────────────╮\n"
+        "│ Unexpected error: RuntimeError: boom                     │\n"
+        "│ Run with --debug or ASK_DEBUG=1 for the full traceback.  │\n"
+        "╰──────────────────────────────────────────────────────────╯\n"
     )
 
 
@@ -101,7 +115,11 @@ def test_run_reports_interruption_without_a_traceback(
 
     # then the interruption is reported and the process exits with status 130
     assert exit_info.value.code == 130
-    assert capsys.readouterr().err == "ask: interrupted\n"
+    assert capsys.readouterr().err == (
+        "╭─ Error ──────────────────────────────────────────────────╮\n"
+        "│ Interrupted.                                             │\n"
+        "╰──────────────────────────────────────────────────────────╯\n"
+    )
 
 
 @pytest.mark.parametrize(

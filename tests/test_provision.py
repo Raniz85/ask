@@ -688,7 +688,9 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
         with pytest.raises(ProvisioningError) as error:
             aur_builder.ensure_paru()
 
-    assert str(error.value) == "paru build was declined; cannot install AUR packages"
+    assert str(error.value) == (
+        "The paru build was declined. Cannot install AUR packages."
+    )
 
     # and the commit is neither marked as reviewed nor built
     commands = _exec_commands(exec_command)
@@ -702,12 +704,12 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
             "git",
             "`git clone https://aur.archlinux.org/paru-bin.git "
             "/home/aur/.cache/paru/clone/paru-bin` failed in "
-            "container 'my-project' with exit status 128",
+            "container 'my-project' with exit status 128.",
         ),
         (
             "makepkg",
             "`makepkg -si --noconfirm` failed in container 'my-project' "
-            "with exit status 128",
+            "with exit status 128.",
         ),
     ],
 )
@@ -999,7 +1001,7 @@ def test_provisioning_reports_pyinfra_failures(failing_step: str) -> None:
 
     # then the error names the container and pyinfra's reason
     assert str(error.value) == (
-        "provisioning container 'my-project' failed: No hosts remaining!"
+        "Provisioning container 'my-project' failed: No hosts remaining!"
     )
 
 
@@ -1023,7 +1025,8 @@ def test_install_packages_reports_a_failing_paru_install() -> None:
 
     # then the error names the failing command and its exit status
     assert str(error.value) == (
-        "`paru -S --needed yay-bin` failed in container 'my-project' with exit status 1"
+        "`paru -S --needed yay-bin` failed in container 'my-project' "
+        "with exit status 1."
     )
 
 
@@ -1145,7 +1148,9 @@ def test_mise_trust_raises_without_trusting_when_the_user_declines(
         )
 
     # then a clear error is raised, and nothing is trusted or recorded
-    assert str(error.value) == "mise config was declined; cannot install its tools"
+    assert str(error.value) == (
+        "The mise config was declined. Cannot install its tools."
+    )
     exec_command.assert_not_called()
     set_digest.assert_not_called()
 
@@ -1173,8 +1178,8 @@ def test_mise_trust_raises_without_asking_when_not_on_a_terminal(
     # then the error says how to review it, and nothing is asked, trusted or
     # recorded
     assert str(error.value) == (
-        "mise config has not been reviewed; "
-        "run `ask converge` from a terminal to review it"
+        "The mise config has not been reviewed. "
+        "Run `ask converge` from a terminal to review it."
     )
     input_.assert_not_called()
     exec_command.assert_not_called()
@@ -1201,7 +1206,7 @@ def test_mise_trust_reports_a_failing_mise_trust(tmp_path: Path) -> None:
     # then the error names the failing command, and nothing is recorded
     assert str(error.value) == (
         f"`mise trust {project_dir}/.config/mise/config.toml` failed in "
-        "container 'my-project' with exit status 1"
+        "container 'my-project' with exit status 1."
     )
     set_digest.assert_not_called()
 
@@ -1235,5 +1240,5 @@ def test_mise_install_reports_a_failing_mise_install(tmp_path: Path) -> None:
 
     # then the error names the failing command
     assert str(error.value) == (
-        "`mise install` failed in container 'my-project' with exit status 1"
+        "`mise install` failed in container 'my-project' with exit status 1."
     )

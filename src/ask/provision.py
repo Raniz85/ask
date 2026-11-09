@@ -82,7 +82,7 @@ class Provisioner:
             run_ops(state)
         except PyinfraError as error:
             raise ProvisioningError(
-                f"provisioning container {self.container.name!r} failed: {error}"
+                f"Provisioning container {self.container.name!r} failed: {error}"
             ) from error
 
     def provision_user(self, user: ResolvedUser) -> None:
@@ -146,7 +146,7 @@ def _run_checked(
     if returncode != 0:
         raise ProvisioningError(
             f"`{shlex.join(command)}` failed in container "
-            f"{container.name!r} with exit status {returncode}"
+            f"{container.name!r} with exit status {returncode}."
         )
 
 
@@ -272,7 +272,7 @@ class AurBuilder:
         answer = input("Proceed with building paru-bin from the PKGBUILD above? [y/N] ")
         if answer.strip().lower() not in ("y", "yes"):
             raise ProvisioningError(
-                "paru build was declined; cannot install AUR packages"
+                "The paru build was declined. Cannot install AUR packages."
             )
         self._run_as_builder(
             uid, gid, _PARU_BIN_CLONE, ["git", "update-ref", _AUR_SEEN_REF, "HEAD"]
@@ -323,8 +323,8 @@ class MiseProvisioner:
             return
         if not sys.stdin.isatty():
             raise ProvisioningError(
-                "mise config has not been reviewed; "
-                "run `ask converge` from a terminal to review it"
+                "The mise config has not been reviewed. "
+                "Run `ask converge` from a terminal to review it."
             )
 
         for config_file in config_files:
@@ -333,7 +333,7 @@ class MiseProvisioner:
         answer = input("Trust the mise config above and install its tools? [y/N] ")
         if answer.strip().lower() not in ("y", "yes"):
             raise ProvisioningError(
-                "mise config was declined; cannot install its tools"
+                "The mise config was declined. Cannot install its tools."
             )
 
         for config_file in config_files:

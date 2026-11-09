@@ -45,8 +45,8 @@ def create() -> None:
     m = validation.load_manifest(project_dir / "ask.toml", cfg)
     if incus.Container(project_dir.name).snapshot() is not None:
         raise incus.ContainerExistsError(
-            f"container {project_dir.name!r} already exists; "
-            "run `ask converge` to update it"
+            f"Container {project_dir.name!r} already exists. "
+            "Run `ask converge` to update it."
         )
     incus.Container.create(project_dir.name, m.distribution)
     converge()
@@ -157,11 +157,11 @@ def agent(
     if name is None:
         agent_names = manifest.ResolvedManifest(m, cfg.layers).agent_names
         if not agent_names:
-            raise agents.AgentError("no agents configured in ask.toml or its layers")
+            raise agents.AgentError("No agents configured in ask.toml or its layers.")
         name = agent_names[0]
     if name not in agents.known_names():
         raise agents.AgentError(
-            f"unknown agent {name!r} {problems.known(agents.known_names())}"
+            f"Unknown agent {name!r} {problems.known(agents.known_names())}."
         )
     resolved_agent = agents.resolve(name)
     _exec_in_container(
@@ -209,7 +209,7 @@ def _running_container(
             f"No container named {project_dir.name!r} exists. Create it now? [Y/n] "
         ):
             raise incus.ContainerNotFoundError(
-                f"no container named {project_dir.name!r}; run `ask create` first"
+                f"No container named {project_dir.name!r}. Run `ask create` first."
             )
         create()
         return container, None

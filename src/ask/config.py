@@ -31,7 +31,7 @@ class ConfigError(AskError):
         self.problems = problems
 
     def __str__(self) -> str:
-        lines = [f"invalid configuration in {self.path}"]
+        lines = [f"Invalid configuration in {self.path}:"]
         lines += [f"  {problem}" for problem in self.problems]
         return "\n".join(lines)
 
@@ -49,13 +49,13 @@ class TomlSyntaxError(ConfigError):
     def __str__(self) -> str:
         match = _POSITION.match(str(self.error))
         if match is None:
-            return f"invalid TOML in {self.path}: {self.error}"
+            return f"Invalid TOML in {self.path}: {self.error}"
         line = int(match["line"])
         column = int(match["column"])
         source_line = self.path.read_text().splitlines()[line - 1]
         gutter = f"{line:>4}"
         return (
-            f"invalid TOML in {self.path} at line {line}, column {column}: "
+            f"Invalid TOML in {self.path} at line {line}, column {column}: "
             f"{match['message']}\n"
             f"{gutter} | {source_line}\n"
             f"{' ' * len(gutter)} | {' ' * (column - 1)}^"

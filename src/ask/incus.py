@@ -46,8 +46,8 @@ class ContainerExistsError(AskError):
 def _failure_message(error: subprocess.CalledProcessError) -> str:
     message = f"`{shlex.join(error.cmd)}` failed with exit status {error.returncode}"
     if error.stderr:
-        message += f": {error.stderr.strip()}"
-    return message
+        return f"{message}: {error.stderr.strip()}"
+    return f"{message}."
 
 
 def _incus(
@@ -59,7 +59,7 @@ def _incus(
         return subprocess.run(command, check=True)
     except FileNotFoundError as error:
         raise IncusError(
-            "incus command not found; is Incus installed and on PATH?"
+            "The incus command was not found. Is Incus installed and on PATH?"
         ) from error
     except subprocess.CalledProcessError as error:
         raise IncusError(_failure_message(error)) from error

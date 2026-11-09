@@ -384,7 +384,7 @@ def test_read_toml_reports_syntax_errors_with_the_offending_line(
 
     # then the error points at the line and column, with a caret under it
     assert str(error.value) == (
-        f"invalid TOML in {path} at line 2, column 13: Illegal character '\\n'\n"
+        f"Invalid TOML in {path} at line 2, column 13: Illegal character '\\n'\n"
         '   2 | shell = "zsh\n'
         "     |             ^"
     )
@@ -406,7 +406,7 @@ def test_config_error_falls_back_to_the_bare_message_without_a_position(
         read_toml(path)
 
     # then the message is reported as-is, without a snippet
-    assert str(error.value) == f"invalid TOML in {path}: Something unexpected"
+    assert str(error.value) == f"Invalid TOML in {path}: Something unexpected"
 
 
 def test_config_error_lists_every_problem() -> None:
@@ -418,7 +418,7 @@ def test_config_error_lists_every_problem() -> None:
 
     # then each problem is listed on its own indented line under the file
     assert message == (
-        "invalid configuration in /cfg/config.toml\n  shell.name: bad\n  user.uid: bad"
+        "Invalid configuration in /cfg/config.toml:\n  shell.name: bad\n  user.uid: bad"
     )
 
 
@@ -519,7 +519,7 @@ def test_read_toml_reports_files_that_cannot_be_read(tmp_path: Path) -> None:
 
     # then the error names the file and why it cannot be read
     assert str(error.value) == (
-        f"invalid configuration in {path}\n  cannot read file: Is a directory"
+        f"Invalid configuration in {path}:\n  cannot read file: Is a directory"
     )
 
 
@@ -534,5 +534,5 @@ def test_read_toml_reports_files_that_are_not_utf8(tmp_path: Path) -> None:
 
     # then the error names the file and that it is not UTF-8
     assert str(error.value) == (
-        f"invalid configuration in {path}\n  file is not valid UTF-8"
+        f"Invalid configuration in {path}:\n  file is not valid UTF-8"
     )

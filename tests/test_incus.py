@@ -840,7 +840,7 @@ def test_incus_commands_report_a_missing_incus_binary() -> None:
 
     # then the error says incus could not be found
     assert str(error.value) == (
-        "incus command not found; is Incus installed and on PATH?"
+        "The incus command was not found. Is Incus installed and on PATH?"
     )
 
 
@@ -856,7 +856,7 @@ def test_failing_incus_commands_report_the_command_and_exit_status() -> None:
         container.start()
 
     # then the error names the command and its exit status
-    assert str(error.value) == "`incus start my-project` failed with exit status 1"
+    assert str(error.value) == "`incus start my-project` failed with exit status 1."
 
 
 def test_failing_captured_incus_commands_include_the_captured_error_output() -> None:

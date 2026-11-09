@@ -17,8 +17,8 @@ class ManifestNotFoundError(AskError):
 
     def __str__(self) -> str:
         return (
-            f"no {self.path.name} found in {self.path.parent} "
-            f"(ask must be run from a project directory containing {self.path.name})"
+            f"No {self.path.name} found in {self.path.parent}. "
+            f"Run ask from a project directory containing {self.path.name}."
         )
 
 

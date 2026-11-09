@@ -134,7 +134,7 @@ def test_create_rejects_a_container_that_already_exists(tmp_path: Path) -> None:
     # then the error says how to update the container instead, and nothing is
     # launched or converged
     assert str(error.value) == (
-        "container 'my-project' already exists; run `ask converge` to update it"
+        "Container 'my-project' already exists. Run `ask converge` to update it."
     )
     container_create.assert_not_called()
     converge_mock.assert_not_called()
@@ -1350,7 +1350,7 @@ def test_enter_refuses_a_missing_container_when_the_user_declines(
 
     # then nothing is created or run, and the user is told how to create it
     assert str(error.value) == (
-        "no container named 'my-project'; run `ask create` first"
+        "No container named 'my-project'. Run `ask create` first."
     )
     create_mock.assert_not_called()
     container.exec_command.assert_not_called()
@@ -1385,7 +1385,7 @@ def test_enter_refuses_a_missing_container_when_stdin_is_closed(
 
     # then nothing is created or run, and the user is told how to create it
     assert str(error.value) == (
-        "no container named 'my-project'; run `ask create` first"
+        "No container named 'my-project'. Run `ask create` first."
     )
     create_mock.assert_not_called()
     container.exec_command.assert_not_called()
@@ -1452,7 +1452,7 @@ def test_enter_does_not_offer_to_create_a_missing_container_without_a_terminal(
     # then the user is not asked anything, nothing is created, and the user is
     # told how to create it
     assert str(error.value) == (
-        "no container named 'my-project'; run `ask create` first"
+        "No container named 'my-project'. Run `ask create` first."
     )
     input_mock.assert_not_called()
     create_mock.assert_not_called()
@@ -2231,7 +2231,7 @@ def test_agent_raises_when_no_agents_are_configured_and_none_given(
     ):
         agent()
 
-    assert str(error.value) == "no agents configured in ask.toml or its layers"
+    assert str(error.value) == "No agents configured in ask.toml or its layers."
 
 
 def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
@@ -2252,7 +2252,7 @@ def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
         agent("copilot")
 
     assert str(error.value) == (
-        "unknown agent 'copilot' (known: claude, codex, opencode, pi)"
+        "Unknown agent 'copilot' (known: claude, codex, opencode, pi)."
     )
 
 

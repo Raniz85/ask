@@ -219,8 +219,8 @@ def test_load_manifest_reports_a_missing_manifest(tmp_path: Path) -> None:
 
     # then the error says where ask looked and what it needs
     assert str(error.value) == (
-        f"no ask.toml found in {tmp_path} "
-        "(ask must be run from a project directory containing ask.toml)"
+        f"No ask.toml found in {tmp_path}. "
+        "Run ask from a project directory containing ask.toml."
     )
 
 

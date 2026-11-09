@@ -9,6 +9,7 @@ dependencies = [
   "pydantic>=2.14.3",
   "pyinfra>=3.10.0",
   "pyinfrincus>=0.8.1",
+  "rich>=15.0.0",
 ]
 
 [project.scripts]

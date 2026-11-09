@@ -3,6 +3,14 @@ import sys
 from pathlib import Path
 
 ASK = Path(sys.executable).parent / "ask"
+TERMINAL_WIDTH = 200
+
+
+def _error_panel(*lines: str) -> str:
+    top = "╭─ Error " + "─" * (TERMINAL_WIDTH - 10) + "╮\n"
+    rows = "".join(f"│ {line.ljust(TERMINAL_WIDTH - 4)} │\n" for line in lines)
+    bottom = "╰" + "─" * (TERMINAL_WIDTH - 2) + "╯\n"
+    return top + rows + bottom
 
 
 def test_ask_reports_a_missing_manifest_without_a_traceback(tmp_path: Path) -> None:
@@ -18,7 +26,11 @@ def test_ask_reports_a_missing_manifest_without_a_traceback(tmp_path: Path) -> N
     result = subprocess.run(
         [str(ASK), "converge"],
         cwd=project_dir,
-        env={"PATH": "/usr/bin:/bin", "XDG_CONFIG_HOME": str(config_home)},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
         capture_output=True,
         text=True,
     )
@@ -27,8 +39,10 @@ def test_ask_reports_a_missing_manifest_without_a_traceback(tmp_path: Path) -> N
     assert (result.returncode, result.stdout, result.stderr) == (
         1,
         "",
-        f"ask: no ask.toml found in {project_dir} "
-        "(ask must be run from a project directory containing ask.toml)\n",
+        _error_panel(
+            f"No ask.toml found in {project_dir}. "
+            "Run ask from a project directory containing ask.toml."
+        ),
     )
 
 
@@ -52,7 +66,11 @@ def test_ask_reports_a_missing_incus_binary_without_a_traceback(
     result = subprocess.run(
         [str(ASK), "enter"],
         cwd=project_dir,
-        env={"PATH": str(empty_bin), "XDG_CONFIG_HOME": str(config_home)},
+        env={
+            "PATH": str(empty_bin),
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
         capture_output=True,
         text=True,
     )
@@ -61,7 +79,9 @@ def test_ask_reports_a_missing_incus_binary_without_a_traceback(
     assert (result.returncode, result.stdout, result.stderr) == (
         1,
         "",
-        "ask: incus command not found; is Incus installed and on PATH?\n",
+        _error_panel(
+            "The incus command was not found. Is Incus installed and on PATH?"
+        ),
     )
 
 
@@ -89,7 +109,11 @@ def test_ask_does_not_offer_to_create_a_missing_container_without_a_terminal(
     result = subprocess.run(
         [str(ASK), "enter"],
         cwd=project_dir,
-        env={"PATH": str(fake_bin), "XDG_CONFIG_HOME": str(config_home)},
+        env={
+            "PATH": str(fake_bin),
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
         input="y\n",
         capture_output=True,
         text=True,
@@ -100,7 +124,7 @@ def test_ask_does_not_offer_to_create_a_missing_container_without_a_terminal(
     assert (result.returncode, result.stdout, result.stderr) == (
         1,
         "",
-        "ask: no container named 'my-project'; run `ask create` first\n",
+        _error_panel("No container named 'my-project'. Run `ask create` first."),
     )
 
 
@@ -131,7 +155,11 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
     result = subprocess.run(
         [str(ASK), "--create", "exec", "true"],
         cwd=project_dir,
-        env={"PATH": str(fake_bin), "XDG_CONFIG_HOME": str(config_home)},
+        env={
+            "PATH": str(fake_bin),
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
         capture_output=True,
         text=True,
     )
@@ -141,9 +169,11 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
         1,
         "",
         "refused\n"
-        "ask: `incus launch images:archlinux/current my-project "
-        "--config security.nesting=true --config security.privileged=false` "
-        "failed with exit status 1\n",
+        + _error_panel(
+            "`incus launch images:archlinux/current my-project "
+            "--config security.nesting=true --config security.privileged=false` "
+            "failed with exit status 1."
+        ),
     )
 
 
@@ -231,7 +261,11 @@ def test_ask_reports_an_unknown_tool_manager_without_a_traceback(
     result = subprocess.run(
         [str(ASK), "converge"],
         cwd=project_dir,
-        env={"PATH": "/usr/bin:/bin", "XDG_CONFIG_HOME": str(config_home)},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
         capture_output=True,
         text=True,
     )
@@ -241,6 +275,8 @@ def test_ask_reports_an_unknown_tool_manager_without_a_traceback(
     assert (result.returncode, result.stdout, result.stderr) == (
         1,
         "",
-        f"ask: invalid configuration in {project_dir / 'ask.toml'}\n"
-        "  tool_managers.0: unknown tool manager 'asdf' (known: mise)\n",
+        _error_panel(
+            f"Invalid configuration in {project_dir / 'ask.toml'}:",
+            "  tool_managers.0: unknown tool manager 'asdf' (known: mise)",
+        ),
     )

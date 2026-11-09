@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from typing import Annotated, NoReturn
 
 import cyclopts
+from cyclopts.panel import CycloptsPanel
+from rich.console import Console
 
 from ask.cli import agent, converge, create, enter, exec
 from ask.errors import AskError
@@ -31,17 +33,19 @@ def run(
 
 
 def _report(error: BaseException) -> NoReturn:
+    console = Console(stderr=True)
     match error:
         case KeyboardInterrupt():
-            print("ask: interrupted", file=sys.stderr)
+            console.print(CycloptsPanel("Interrupted."))
             sys.exit(130)
         case AskError():
-            print(f"ask: {error}", file=sys.stderr)
+            console.print(CycloptsPanel(str(error)))
         case _:
-            print(
-                f"ask: unexpected error: {type(error).__name__}: {error}\n"
-                "ask: run with --debug or ASK_DEBUG=1 for the full traceback",
-                file=sys.stderr,
+            console.print(
+                CycloptsPanel(
+                    f"Unexpected error: {type(error).__name__}: {error}\n"
+                    "Run with --debug or ASK_DEBUG=1 for the full traceback."
+                )
             )
     sys.exit(1)
 

@@ -20,6 +20,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyinfra" },
     { name = "pyinfrincus" },
+    { name = "rich" },
 ]
 
 [package.dev-dependencies]
@@ -33,6 +34,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "pyinfra", specifier = ">=3.10.0" },
     { name = "pyinfrincus", specifier = ">=0.8.1" },
+    { name = "rich", specifier = ">=15.0.0" },
 ]
 
 [package.metadata.requires-dev]
