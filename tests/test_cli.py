@@ -568,18 +568,17 @@ def test_converge_installs_declared_agent_packages(tmp_path: Path) -> None:
     container.set_managed_packages.assert_called_once_with(["bash", "claude-code"])
 
 
-def test_converge_mounts_agent_state_when_shared_state_is_enabled(
+def test_converge_mounts_the_state_of_configured_agents(
     tmp_path: Path,
 ) -> None:
-    # given a project directory using a layer that declares the claude agent
-    # with shared state enabled, a resolved user, and a host home directory
+    # given a project directory using a layer that declares the claude agent,
+    # a resolved user, and a host home directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[layers.base]\nagents = ["claude"]\nshared_state = true\n'
-        '[user]\nname = "raniz"\nuid = 1000\n'
+        '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -638,49 +637,6 @@ def test_converge_mounts_agent_state_when_shared_state_is_enabled(
             Mount(
                 host_path=home_dir / ".claude" / "settings.json",
                 container_path=Path("/home/raniz/.claude/settings.json"),
-            ),
-        ]
-    )
-
-
-def test_converge_does_not_mount_agent_state_without_shared_state(
-    tmp_path: Path,
-) -> None:
-    # given a project directory using a layer that declares the claude agent
-    # without enabling shared state
-    project_dir = tmp_path / "my-project"
-    project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
-    )
-    home_dir = tmp_path / "home"
-    home_dir.mkdir()
-
-    # when converging from within that project directory
-    with (
-        patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.Path.home", return_value=home_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
-        patch("ask.cli.incus.Container") as container_cls,
-        patch("ask.cli.provision.Provisioner"),
-        patch("ask.cli.provision.AurBuilder"),
-    ):
-        container = container_cls.return_value
-        container.get_managed_packages.return_value = []
-
-        converge()
-
-    # then no agent state is mounted, just the project directory and shell rc
-    # mounts
-    container.converge.assert_called_once_with(
-        [
-            Mount(host_path=project_dir, container_path=project_dir),
-            Mount(
-                host_path=home_dir / ".bashrc",
-                container_path=Path("/home/raniz/.bashrc"),
-                readonly=True,
             ),
         ]
     )
@@ -798,18 +754,16 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
     )
 
 
-def test_converge_fixes_agent_state_mount_ownership_when_shared_state_is_enabled(
+def test_converge_fixes_agent_state_mount_ownership(
     tmp_path: Path,
 ) -> None:
     # given a project directory using a layer that declares the claude agent
-    # with shared state enabled
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[layers.base]\nagents = ["claude"]\nshared_state = true\n'
-        '[user]\nname = "raniz"\nuid = 1000\n'
+        '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()

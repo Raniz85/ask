@@ -45,10 +45,6 @@ agents = [
   # { name: "pi", system_md: true, auth: true, skills: true, config: true },
 ]
 
-# Bind mount Cloude state directories needed to share skills, auth and configuration
-# keeps project-local things like sessions inside the container
-shared_state = true
-
 [layers.python]
 packages.common = [
   "python",

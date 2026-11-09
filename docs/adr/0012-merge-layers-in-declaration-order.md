@@ -22,14 +22,13 @@ earlier ones, and duplicates are merged:
 
 - Packages and bind mounts are combined, each kept once at its first position.
 - Agents are combined by name, each kept once at its first position. Their options are merged,
-  a later layer's value winning for the same option.
-- `shared_state` is optional. For each agent, the last layer that lists the agent and sets
-  `shared_state` decides whether its state is shared; if none sets it, it is not shared.
+  a later layer's value winning for the same option. The merged options alone decide which of
+  the agent's state paths are mounted.
 
 ## Consequences
 
 - A project can override any global layer's setting from `ask.toml`, including turning off
-  shared agent state with `shared_state = false`.
+  mounting an agent's state with its options, e.g. `{ name = "claude", auth = false }`.
 - Each agent is installed and mounted once, however many layers enable it.
 - Layers cannot remove packages or bind mounts added by earlier layers.
 - Options added to layers later need their own merge rule when they are not lists or agents.

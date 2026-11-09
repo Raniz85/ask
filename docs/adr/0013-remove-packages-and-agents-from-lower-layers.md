@@ -20,8 +20,8 @@ agent from the lower layers. Removing something no lower layer adds has no effec
 - Removals only affect lower layers; additions in the same layer are applied after them, so a
   layer listing both `"git"` and `"-git"` installs `git`.
 - Packages are removed by name, whichever distribution key they were listed under.
-- Removing an agent also drops its merged options and `shared_state`; an agent added again by a
-  higher layer starts with neither.
+- Removing an agent also drops its merged options; an agent added again by a higher layer starts
+  without them.
 - Removed agents are validated by their name without the prefix. Options given on a removal
   have no effect and produce a warning.
 

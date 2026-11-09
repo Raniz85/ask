@@ -69,7 +69,7 @@ def converge(*, create_missing: CreateMissing = False) -> None:
 
     mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
     mounts += user_shell.mounts_for(user, cfg.shell.options)
-    mounts += resolved_manifest.shared_state_mounts(user)
+    mounts += resolved_manifest.agent_mounts(user)
 
     provisioner = provision.Provisioner(container)
     aur_builder = provision.AurBuilder(container)

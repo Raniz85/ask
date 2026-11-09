@@ -38,14 +38,12 @@ def test_effective_configuration_contains_everything_that_converge_uses() -> Non
             "bind_mounts": ["/src"],
             "packages": {"arch": ["ripgrep"]},
             "agents": [{"name": "claude", "options": {}}],
-            "shared_state": None,
         },
         "layers": {
             "base": {
                 "bind_mounts": [],
                 "packages": {"arch": ["git"]},
                 "agents": [],
-                "shared_state": None,
             },
         },
         "user": {

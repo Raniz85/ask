@@ -26,7 +26,6 @@ def load(path: Path) -> Manifest:
 class _MergedAgent:
     name: str
     options: dict[str, bool] = field(default_factory=dict)
-    shared_state: bool = False
 
 
 @dataclass
@@ -72,8 +71,6 @@ class ResolvedManifest:
                     continue
                 entry = merged.setdefault(option.name, _MergedAgent(option.name))
                 entry.options.update(option.options)
-                if layer.shared_state is not None:
-                    entry.shared_state = layer.shared_state
         return list(merged.values())
 
     @property
@@ -84,10 +81,9 @@ class ResolvedManifest:
     def agents(self) -> list[Agent]:
         return [agent.resolve(name) for name in self.agent_names]
 
-    def shared_state_mounts(self, user: ResolvedUser) -> list[Mount]:
+    def agent_mounts(self, user: ResolvedUser) -> list[Mount]:
         mounts: list[Mount] = []
         for entry in self._merged_agents():
-            if entry.shared_state:
-                resolved_agent = agent.resolve(entry.name)
-                mounts += resolved_agent.mounts_for(user, entry.options)
+            resolved_agent = agent.resolve(entry.name)
+            mounts += resolved_agent.mounts_for(user, entry.options)
         return mounts

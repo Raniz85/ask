@@ -135,25 +135,36 @@ def test_load_reads_layer_packages(tmp_path: Path) -> None:
 
 
 def test_load_reads_layer_agents(tmp_path: Path) -> None:
-    # given a layer declaring agents to install, with shared state enabled
+    # given a layer declaring agents to install
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[layers.base]\nagents = ["claude"]\nshared_state = true\n')
+    config_path.write_text('[layers.base]\nagents = ["claude"]\n')
 
     # when loading the config
     config = load(config_path)
 
-    # then the layer's agents are read as name-only options, and the
-    # shared_state flag is read
+    # then the layer's agents are read as name-only options
     assert config == Config(
         layers={
             "base": Layer(
                 bind_mounts=[],
                 packages={},
                 agents=[AgentOption(name="claude")],
-                shared_state=True,
             )
         }
     )
+
+
+def test_load_rejects_shared_state_in_a_layer(tmp_path: Path) -> None:
+    # given a layer setting shared_state
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[layers.base]\nagents = ["claude"]\nshared_state = true\n')
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(config_path)
+
+    # then shared_state is reported as an unknown key
+    assert error.value.problems == ["layers.base.shared_state: unknown key"]
 
 
 def test_load_reads_layer_agents_with_full_options(tmp_path: Path) -> None:
@@ -191,22 +202,21 @@ def test_load_reads_layer_agents_with_full_options(tmp_path: Path) -> None:
     )
 
 
-def test_load_defaults_layer_agents_and_shared_state(tmp_path: Path) -> None:
-    # given a layer declaring neither agents nor shared_state
+def test_load_defaults_layer_agents(tmp_path: Path) -> None:
+    # given a layer declaring no agents
     config_path = tmp_path / "config.toml"
     config_path.write_text('[layers.base]\npackages.arch = ["zsh"]\n')
 
     # when loading the config
     config = load(config_path)
 
-    # then the layer has no agents, and shared state is left unset
+    # then the layer has no agents
     assert config == Config(
         layers={
             "base": Layer(
                 bind_mounts=[],
                 packages={"arch": ["zsh"]},
                 agents=[],
-                shared_state=None,
             )
         }
     )

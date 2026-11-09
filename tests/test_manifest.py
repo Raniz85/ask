@@ -114,24 +114,35 @@ def test_load_reads_layers_from_toml(tmp_path: Path) -> None:
     assert manifest.layers == ["base", "python"]
 
 
-def test_load_reads_agents_and_shared_state_from_toml(tmp_path: Path) -> None:
-    # given a manifest file enabling agents, one with options, and shared state
+def test_load_reads_agents_from_toml(tmp_path: Path) -> None:
+    # given a manifest file enabling agents, one with options
     manifest_path = tmp_path / "ask.toml"
     manifest_path.write_text(
         'distribution = "arch"\n'
         'agents = ["claude", { name = "codex", auth = false }]\n'
-        "shared_state = true\n"
     )
 
     # when loading the manifest
     manifest = load(manifest_path)
 
-    # then the agents and shared state are read like in a layer
+    # then the agents are read like in a layer
     assert manifest.agents == [
         AgentOption(name="claude"),
         AgentOption(name="codex", options={"auth": False}),
     ]
-    assert manifest.shared_state is True
+
+
+def test_load_rejects_shared_state(tmp_path: Path) -> None:
+    # given a manifest file setting shared_state
+    manifest_path = tmp_path / "ask.toml"
+    manifest_path.write_text('distribution = "arch"\nshared_state = true\n')
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then shared_state is reported as an unknown key
+    assert error.value.problems == ["shared_state: unknown key"]
 
 
 def test_bind_mounts_applies_layers_before_the_project() -> None:
@@ -384,17 +395,13 @@ def test_agents_resolves_each_configured_agent_name_in_order() -> None:
     assert agents == [claude_agent, other_agent]
 
 
-def test_shared_state_mounts_calls_mounts_for_with_each_agents_options() -> None:
-    # given a manifest declaring one layer with shared state enabled,
-    # declaring an agent with its own options, and another layer without
-    # shared state
+def test_agent_mounts_calls_mounts_for_with_each_agents_options() -> None:
+    # given a manifest declaring two layers, each declaring an agent, one of
+    # them with its own options
     manifest = Manifest(distribution="arch", layers=["base", "python"])
     layers = {
-        "base": Layer(
-            agents=[AgentOption(name="claude", options={"auth": False})],
-            shared_state=True,
-        ),
-        "python": Layer(agents=[AgentOption(name="other")], shared_state=False),
+        "base": Layer(agents=[AgentOption(name="claude", options={"auth": False})]),
+        "python": Layer(agents=[AgentOption(name="other")]),
     }
     resolved = ResolvedManifest(manifest, layers)
     claude_agent = MagicMock()
@@ -402,6 +409,11 @@ def test_shared_state_mounts_calls_mounts_for_with_each_agents_options() -> None
         Mount(host_path=Path("/host/state"), container_path=Path("/container/state"))
     ]
     claude_agent.mounts_for.return_value = claude_mounts
+    other_agent = MagicMock()
+    other_mounts = [
+        Mount(host_path=Path("/host/other"), container_path=Path("/container/other"))
+    ]
+    other_agent.mounts_for.return_value = other_mounts
     user = ResolvedUser(
         name="raniz",
         uid=1000,
@@ -411,25 +423,25 @@ def test_shared_state_mounts_calls_mounts_for_with_each_agents_options() -> None
         extra_groups=[],
     )
 
-    # when resolving the mounts whose state should be shared
-    with patch("ask.manifest.agent.resolve", return_value=claude_agent) as resolve:
-        mounts = resolved.shared_state_mounts(user)
+    # when resolving the agents' mounts
+    with patch(
+        "ask.manifest.agent.resolve", side_effect=[claude_agent, other_agent]
+    ) as resolve:
+        mounts = resolved.agent_mounts(user)
 
-    # then only the agent from the shared-state layer is resolved, its
-    # mounts_for is called with the user and its own options, and the
-    # resulting mounts are returned
-    resolve.assert_called_once_with("claude")
+    # then each agent is resolved, its mounts_for is called with the user and
+    # its own options, and the resulting mounts are returned in order
+    resolve.assert_has_calls([call("claude"), call("other")])
     claude_agent.mounts_for.assert_called_once_with(user, {"auth": False})
-    assert mounts == claude_mounts
+    other_agent.mounts_for.assert_called_once_with(user, {})
+    assert mounts == claude_mounts + other_mounts
 
 
-def test_shared_state_mounts_includes_project_agents_with_shared_state() -> None:
-    # given a manifest with shared state enabled, declaring its own agent with
-    # options, and no layers
+def test_agent_mounts_includes_project_agents() -> None:
+    # given a manifest declaring its own agent with options, and no layers
     manifest = Manifest(
         distribution="arch",
         agents=[AgentOption(name="codex", options={"auth": False})],
-        shared_state=True,
     )
     resolved = ResolvedManifest(manifest, {})
     codex_agent = MagicMock()
@@ -446,9 +458,9 @@ def test_shared_state_mounts_includes_project_agents_with_shared_state() -> None
         extra_groups=[],
     )
 
-    # when resolving the mounts whose state should be shared
+    # when resolving the agents' mounts
     with patch("ask.manifest.agent.resolve", return_value=codex_agent) as resolve:
-        mounts = resolved.shared_state_mounts(user)
+        mounts = resolved.agent_mounts(user)
 
     # then the project's agent is resolved, its mounts_for is called with the
     # user and its own options, and the resulting mounts are returned
@@ -468,10 +480,9 @@ def _user() -> ResolvedUser:
     )
 
 
-def test_shared_state_mounts_merges_agent_options_with_later_layers_winning() -> None:
-    # given a declared layer sharing state for an agent with two options, and a
-    # manifest enabling the same agent, overriding one option and leaving
-    # shared state unset
+def test_agent_mounts_merges_agent_options_with_later_layers_winning() -> None:
+    # given a declared layer enabling an agent with two options, and a manifest
+    # enabling the same agent, overriding one option
     manifest = Manifest(
         distribution="arch",
         agents=[AgentOption(name="claude", options={"auth": True})],
@@ -482,49 +493,26 @@ def test_shared_state_mounts_merges_agent_options_with_later_layers_winning() ->
             agents=[
                 AgentOption(name="claude", options={"auth": False, "skills": False})
             ],
-            shared_state=True,
         )
     }
     resolved = ResolvedManifest(manifest, layers)
     claude_agent = MagicMock()
     claude_agent.mounts_for.return_value = []
 
-    # when resolving the mounts whose state should be shared
+    # when resolving the agents' mounts
     with patch("ask.manifest.agent.resolve", return_value=claude_agent):
-        resolved.shared_state_mounts(_user())
+        resolved.agent_mounts(_user())
 
-    # then the agent's state is still shared, and its mounts are resolved once
-    # with the merged options, the manifest's value winning
+    # then the agent's mounts are resolved once with the merged options, the
+    # manifest's value winning
     claude_agent.mounts_for.assert_called_once_with(
         _user(), {"auth": True, "skills": False}
     )
 
 
-def test_shared_state_mounts_lets_later_layers_turn_sharing_off() -> None:
-    # given a declared layer sharing state for an agent, and a manifest enabling
-    # the same agent with shared state explicitly off
-    manifest = Manifest(
-        distribution="arch",
-        agents=[AgentOption(name="claude")],
-        shared_state=False,
-        layers=["base"],
-    )
-    layers = {"base": Layer(agents=[AgentOption(name="claude")], shared_state=True)}
-    resolved = ResolvedManifest(manifest, layers)
-
-    # when resolving the mounts whose state should be shared
-    with patch("ask.manifest.agent.resolve") as resolve:
-        mounts = resolved.shared_state_mounts(_user())
-
-    # then the agent's state is not shared
-    resolve.assert_not_called()
-    assert mounts == []
-
-
-def test_shared_state_mounts_forgets_options_and_sharing_of_removed_agents() -> None:
-    # given a declared layer sharing state for an agent with an option, a
-    # second layer removing that agent, and a manifest enabling it again
-    # without options or shared state
+def test_agent_mounts_forgets_options_of_removed_agents() -> None:
+    # given a declared layer enabling an agent with an option, a second layer
+    # removing that agent, and a manifest enabling it again without options
     manifest = Manifest(
         distribution="arch",
         agents=[AgentOption(name="claude")],
@@ -533,23 +521,22 @@ def test_shared_state_mounts_forgets_options_and_sharing_of_removed_agents() -> 
     layers = {
         "base": Layer(
             agents=[AgentOption(name="claude", options={"auth": False})],
-            shared_state=True,
         ),
         "no-claude": Layer(agents=[AgentOption(name="-claude")]),
     }
     resolved = ResolvedManifest(manifest, layers)
+    claude_agent = MagicMock()
+    claude_agent.mounts_for.return_value = []
 
-    # when resolving the mounts whose state should be shared
-    with patch("ask.manifest.agent.resolve") as resolve:
-        mounts = resolved.shared_state_mounts(_user())
+    # when resolving the agents' mounts
+    with patch("ask.manifest.agent.resolve", return_value=claude_agent):
+        resolved.agent_mounts(_user())
 
-    # then the re-enabled agent does not inherit the removed agent's shared
-    # state, so nothing is shared
-    resolve.assert_not_called()
-    assert mounts == []
+    # then the re-enabled agent does not inherit the removed agent's options
+    claude_agent.mounts_for.assert_called_once_with(_user(), {})
 
 
-def test_shared_state_mounts_raises_on_unknown_layer() -> None:
+def test_agent_mounts_raises_on_unknown_layer() -> None:
     # given a manifest declaring a layer that isn't defined in the layers mapping
     manifest = Manifest(distribution="arch", layers=["nonexistent"])
     resolved = ResolvedManifest(manifest, {})
@@ -562,10 +549,10 @@ def test_shared_state_mounts_raises_on_unknown_layer() -> None:
         extra_groups=[],
     )
 
-    # when resolving the mounts whose state should be shared
+    # when resolving the agents' mounts
     # then a clear error is raised
     with pytest.raises(ValueError, match="nonexistent"):
-        resolved.shared_state_mounts(user)
+        resolved.agent_mounts(user)
 
 
 def test_load_reports_syntax_errors_as_config_errors(tmp_path: Path) -> None:

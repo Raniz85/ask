@@ -15,8 +15,7 @@ project's environment should be describable by its `ask.toml` alone.
 
 `ask.toml` usually lives in the project's repository, so it may be written by someone other
 than the user running Ask. Several layer options reach outside the container: bind mounts can
-expose any host path, and agents with `shared_state` mount the user's agent credentials and
-configuration.
+expose any host path, and agents mount the user's agent credentials and configuration.
 
 ## Decision
 

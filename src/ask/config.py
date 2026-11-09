@@ -9,7 +9,6 @@ from typing import Annotated
 from pydantic import (
     AfterValidator,
     BeforeValidator,
-    StrictBool,
     StrictInt,
     StrictStr,
     TypeAdapter,
@@ -102,7 +101,6 @@ class Layer:
     agents: list[Annotated[AgentOption, BeforeValidator(_flatten_options)]] = field(
         default_factory=list
     )
-    shared_state: StrictBool | None = None
 
 
 @dataclass
