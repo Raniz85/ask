@@ -153,6 +153,39 @@ def test_converge_ensures_the_targeted_container_is_running(
     provisioner_cls.assert_called_once_with(container)
 
 
+def test_converge_creates_a_missing_container_without_asking_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project directory without a container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when converging from a terminal with missing containers to be created
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+        patch("ask.cli.sys.stdin") as stdin_mock,
+        patch("builtins.input") as input_mock,
+        patch("ask.cli.create") as create_mock,
+    ):
+        stdin_mock.isatty.return_value = True
+        container = container_cls.return_value
+        container.exists.return_value = False
+        container.get_managed_packages.return_value = []
+
+        converge(create_missing=True)
+
+    # then the container is created without asking the user
+    create_mock.assert_called_once_with()
+    input_mock.assert_not_called()
+
+
 def test_converge_applies_resolved_bind_mounts_including_project_dir(
     tmp_path: Path,
 ) -> None:
@@ -997,15 +1030,17 @@ def test_enter_creates_a_missing_container_when_the_user_accepts(
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
-    # when entering the container and accepting the offer to create it
+    # when entering the container from a terminal and accepting the offer to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="y"),
         patch("ask.cli.create") as create_mock,
         pytest.raises(SystemExit),
     ):
+        stdin_mock.isatty.return_value = True
         container = container_cls.return_value
         container.exists.return_value = False
         container.exec_command.return_value = 0
@@ -1029,15 +1064,18 @@ def test_enter_creates_a_missing_container_when_the_user_accepts_the_default(
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
-    # when entering the container and answering the offer with just enter
+    # when entering the container from a terminal and answering the offer with
+    # just enter
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value=""),
         patch("ask.cli.create") as create_mock,
         pytest.raises(SystemExit),
     ):
+        stdin_mock.isatty.return_value = True
         container = container_cls.return_value
         container.exists.return_value = False
         container.exec_command.return_value = 0
@@ -1058,15 +1096,17 @@ def test_enter_refuses_a_missing_container_when_the_user_declines(
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
-    # when entering the container and declining the offer to create it
+    # when entering the container from a terminal and declining the offer to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="n"),
         patch("ask.cli.create") as create_mock,
         pytest.raises(ContainerNotFoundError) as error,
     ):
+        stdin_mock.isatty.return_value = True
         container = container_cls.return_value
         container.exists.return_value = False
 
@@ -1090,15 +1130,18 @@ def test_enter_refuses_a_missing_container_when_stdin_is_closed(
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
-    # when entering the container without an answer being available on stdin
+    # when entering the container from a terminal without an answer being
+    # available on stdin
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", side_effect=EOFError),
         patch("ask.cli.create") as create_mock,
         pytest.raises(ContainerNotFoundError) as error,
     ):
+        stdin_mock.isatty.return_value = True
         container = container_cls.return_value
         container.exists.return_value = False
 
@@ -1112,6 +1155,73 @@ def test_enter_refuses_a_missing_container_when_stdin_is_closed(
     container.exec_command.assert_not_called()
 
 
+def test_enter_creates_a_missing_container_without_asking_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project directory without a container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container from a terminal with missing containers to be created
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+        patch("ask.cli.sys.stdin") as stdin_mock,
+        patch("builtins.input") as input_mock,
+        patch("ask.cli.create") as create_mock,
+    ):
+        stdin_mock.isatty.return_value = True
+        container = container_cls.return_value
+        container.exists.return_value = False
+        container.exec_command.return_value = 0
+
+        enter(create_missing=True)
+
+    # then the container is created without asking the user
+    create_mock.assert_called_once_with()
+    input_mock.assert_not_called()
+
+
+def test_enter_does_not_offer_to_create_a_missing_container_without_a_terminal(
+    tmp_path: Path,
+) -> None:
+    # given a project directory without a container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container with stdin not connected to a terminal
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
+        patch("builtins.input") as input_mock,
+        patch("ask.cli.create") as create_mock,
+        pytest.raises(ContainerNotFoundError) as error,
+    ):
+        stdin_mock.isatty.return_value = False
+        container = container_cls.return_value
+        container.exists.return_value = False
+
+        enter()
+
+    # then the user is not asked anything, nothing is created, and the user is
+    # told how to create it
+    assert str(error.value) == (
+        "no container named 'my-project'; run `ask create` first"
+    )
+    input_mock.assert_not_called()
+    create_mock.assert_not_called()
+
+
 def test_enter_does_not_offer_to_create_an_existing_container(
     tmp_path: Path,
 ) -> None:
@@ -1122,15 +1232,17 @@ def test_enter_does_not_offer_to_create_an_existing_container(
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
-    # when entering the container
+    # when entering the container from a terminal
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input") as input_mock,
         patch("ask.cli.create") as create_mock,
         pytest.raises(SystemExit),
     ):
+        stdin_mock.isatty.return_value = True
         container = container_cls.return_value
         container.exists.return_value = True
         container.exec_command.return_value = 0
@@ -1178,15 +1290,17 @@ def test_exec_creates_a_missing_container_when_the_user_accepts(
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
-    # when executing a command and accepting the offer to create it
+    # when executing a command from a terminal and accepting the offer to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="y"),
         patch("ask.cli.create") as create_mock,
         pytest.raises(SystemExit),
     ):
+        stdin_mock.isatty.return_value = True
         container = container_cls.return_value
         container.exists.return_value = False
         container.exec_command.return_value = 0
@@ -1198,6 +1312,38 @@ def test_exec_creates_a_missing_container_when_the_user_accepts(
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["ls", "-la"]
     )
+
+
+def test_exec_creates_a_missing_container_without_asking_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project directory without a container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when executing a command from a terminal with missing containers to be created
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+        patch("ask.cli.sys.stdin") as stdin_mock,
+        patch("builtins.input") as input_mock,
+        patch("ask.cli.create") as create_mock,
+    ):
+        stdin_mock.isatty.return_value = True
+        container = container_cls.return_value
+        container.exists.return_value = False
+        container.exec_command.return_value = 0
+
+        exec("ls", create_missing=True)
+
+    # then the container is created without asking the user
+    create_mock.assert_called_once_with()
+    input_mock.assert_not_called()
 
 
 def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
@@ -1444,15 +1590,17 @@ def test_agent_creates_a_missing_container_when_the_user_accepts(
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
-    # when launching an agent and accepting the offer to create it
+    # when launching an agent from a terminal and accepting the offer to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="y"),
         patch("ask.cli.create") as create_mock,
         pytest.raises(SystemExit),
     ):
+        stdin_mock.isatty.return_value = True
         container = container_cls.return_value
         container.exists.return_value = False
         container.exec_command.return_value = 0
@@ -1462,6 +1610,38 @@ def test_agent_creates_a_missing_container_when_the_user_accepts(
     # then the container is created, and the agent is run in it afterwards
     create_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["claude"])
+
+
+def test_agent_creates_a_missing_container_without_asking_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project directory without a container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when launching an agent from a terminal with missing containers to be created
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+        patch("ask.cli.sys.stdin") as stdin_mock,
+        patch("builtins.input") as input_mock,
+        patch("ask.cli.create") as create_mock,
+    ):
+        stdin_mock.isatty.return_value = True
+        container = container_cls.return_value
+        container.exists.return_value = False
+        container.exec_command.return_value = 0
+
+        agent("claude", create_missing=True)
+
+    # then the container is created without asking the user
+    create_mock.assert_called_once_with()
+    input_mock.assert_not_called()
 
 
 def test_agent_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:

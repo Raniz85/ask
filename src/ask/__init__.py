@@ -16,9 +16,11 @@ app.command(exec)
 app.command(agent)
 
 
-def run(tokens: Sequence[str], debug: bool) -> None:
+def run(tokens: Sequence[str], debug: bool, create: bool) -> None:
     try:
-        app(tokens)
+        command, bound, ignored = app.parse_args(tokens)
+        injected = {"create_missing": create} if "create_missing" in ignored else {}
+        command(*bound.args, **bound.kwargs, **injected)
     except (Exception, KeyboardInterrupt) as error:
         if debug:
             raise
@@ -50,8 +52,15 @@ def _launcher(
             negative="", help="Show the full traceback when a command fails."
         ),
     ] = False,
+    create: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative="",
+            help="Create the project's container if it does not exist, without asking.",
+        ),
+    ] = False,
 ) -> None:
-    run(tokens, debug=debug or bool(os.environ.get("ASK_DEBUG")))
+    run(tokens, debug=debug or bool(os.environ.get("ASK_DEBUG")), create=create)
 
 
 def main(tokens: Sequence[str] | None = None) -> None:

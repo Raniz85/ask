@@ -65,7 +65,7 @@ def test_ask_reports_a_missing_incus_binary_without_a_traceback(
     )
 
 
-def test_ask_offers_to_create_a_missing_container_and_reports_a_refusal(
+def test_ask_does_not_offer_to_create_a_missing_container_without_a_terminal(
     tmp_path: Path,
 ) -> None:
     # given a project directory with a valid ask.toml
@@ -84,21 +84,62 @@ def test_ask_offers_to_create_a_missing_container_and_reports_a_refusal(
     fake_incus.write_text("#!/bin/sh\nexit 0\n")
     fake_incus.chmod(0o755)
 
-    # when running ask enter from within the project directory, and declining
-    # the offer to create the container
+    # when running ask enter from within the project directory, with "yes"
+    # piped to stdin rather than a terminal
     result = subprocess.run(
         [str(ASK), "enter"],
         cwd=project_dir,
         env={"PATH": str(fake_bin), "XDG_CONFIG_HOME": str(config_home)},
-        input="n\n",
+        input="y\n",
         capture_output=True,
         text=True,
     )
 
-    # then the user is asked, a one-line error is printed and ask exits with
-    # status 1
+    # then the user is not asked anything, a one-line error is printed and ask
+    # exits with status 1
     assert (result.returncode, result.stdout, result.stderr) == (
         1,
-        "No container named 'my-project' exists. Create it now? [Y/n] ",
+        "",
         "ask: no container named 'my-project'; run `ask create` first\n",
+    )
+
+
+def test_ask_creates_a_missing_container_without_asking_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a valid ask.toml
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+
+    # and an empty global configuration directory
+    config_home = tmp_path / "config"
+    config_home.mkdir()
+
+    # and an incus command that knows of no containers and refuses to launch one
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_incus = fake_bin / "incus"
+    fake_incus.write_text(
+        '#!/bin/sh\nif [ "$1" = launch ]; then echo refused >&2; exit 1; fi\n'
+    )
+    fake_incus.chmod(0o755)
+
+    # when running ask --create exec from within the project directory
+    result = subprocess.run(
+        [str(ASK), "--create", "exec", "true"],
+        cwd=project_dir,
+        env={"PATH": str(fake_bin), "XDG_CONFIG_HOME": str(config_home)},
+        capture_output=True,
+        text=True,
+    )
+
+    # then the user is not asked anything, and the container is launched
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1,
+        "",
+        "refused\n"
+        "ask: `incus launch images:archlinux/current my-project "
+        "--config security.nesting=true --config security.privileged=false` "
+        "failed with exit status 1\n",
     )

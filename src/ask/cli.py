@@ -1,5 +1,8 @@
 import sys
 from pathlib import Path
+from typing import Annotated
+
+from cyclopts import Parameter
 
 from ask import (
     agent as agents,
@@ -13,6 +16,8 @@ from ask import (
     validation,
 )
 from ask.module import Module
+
+CreateMissing = Annotated[bool, Parameter(parse=False)]
 
 FAKE_SSH_ENV = {
     "SSH_CLIENT": "127.0.0.1 1 22",
@@ -34,13 +39,12 @@ def create() -> None:
     converge()
 
 
-def converge() -> None:
+def converge(*, create_missing: CreateMissing = False) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
     m = validation.load_manifest(project_dir / "ask.toml", cfg)
     resolved_manifest = manifest.ResolvedManifest(m, cfg.layers)
-    container = incus.Container(project_dir.name)
-    container.ensure_running()
+    container = _running_container(project_dir, create_missing)
     bind_mounts = [project_dir] + resolved_manifest.bind_mounts
     user = config.resolve_user(cfg)
     user_shell = shell.resolve(user.shell)
@@ -75,12 +79,12 @@ def converge() -> None:
     )
 
 
-def enter(gui: bool = False) -> None:
+def enter(gui: bool = False, *, create_missing: CreateMissing = False) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
     validation.load_manifest(project_dir / "ask.toml", cfg)
     user = config.resolve_user(cfg)
-    container = _running_container(project_dir)
+    container = _running_container(project_dir, create_missing)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
             user.uid,
@@ -92,7 +96,12 @@ def enter(gui: bool = False) -> None:
     sys.exit(returncode)
 
 
-def agent(name: str | None = None, *args: str, gui: bool = False) -> None:
+def agent(
+    name: str | None = None,
+    *args: str,
+    gui: bool = False,
+    create_missing: CreateMissing = False,
+) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
     m = validation.load_manifest(project_dir / "ask.toml", cfg)
@@ -109,17 +118,23 @@ def agent(name: str | None = None, *args: str, gui: bool = False) -> None:
             f"unknown agent {name!r} {problems.known(agents.known_names())}"
         )
     resolved_agent = agents.resolve(name)
-    _exec_in_container(project_dir, cfg, [resolved_agent.name, *args], gui)
+    _exec_in_container(
+        project_dir, cfg, [resolved_agent.name, *args], gui, create_missing
+    )
 
 
-def exec(*command: str, gui: bool = False) -> None:
+def exec(
+    *command: str, gui: bool = False, create_missing: CreateMissing = False
+) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
     validation.load_manifest(project_dir / "ask.toml", cfg)
-    _exec_in_container(project_dir, cfg, list(command), gui)
+    _exec_in_container(project_dir, cfg, list(command), gui, create_missing)
 
 
 def _confirm(prompt: str) -> bool:
+    if not sys.stdin.isatty():
+        return False
     try:
         answer = input(prompt)
     except EOFError:
@@ -127,10 +142,10 @@ def _confirm(prompt: str) -> bool:
     return answer.strip().lower() in ("", "y", "yes")
 
 
-def _running_container(project_dir: Path) -> incus.Container:
+def _running_container(project_dir: Path, create_missing: bool) -> incus.Container:
     container = incus.Container(project_dir.name)
     if not container.exists():
-        if not _confirm(
+        if not create_missing and not _confirm(
             f"No container named {project_dir.name!r} exists. Create it now? [Y/n] "
         ):
             raise incus.ContainerNotFoundError(
@@ -142,10 +157,14 @@ def _running_container(project_dir: Path) -> incus.Container:
 
 
 def _exec_in_container(
-    project_dir: Path, cfg: config.Config, command: list[str], gui: bool
+    project_dir: Path,
+    cfg: config.Config,
+    command: list[str],
+    gui: bool,
+    create_missing: bool,
 ) -> None:
     user = config.resolve_user(cfg)
-    container = _running_container(project_dir)
+    container = _running_container(project_dir, create_missing)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         if gui_env:
             returncode = container.exec_command(
