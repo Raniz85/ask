@@ -3,7 +3,7 @@ from pathlib import Path
 from ask import config, manifest
 from ask.agent import known_names as known_agents
 from ask.agent import resolve as resolve_agent
-from ask.config import AgentOption, Config, ConfigError, ShellOption
+from ask.config import AgentOption, Config, ConfigError, Layer, ShellOption
 from ask.incus import known_distributions
 from ask.manifest import Manifest
 from ask.shell import known_names as known_shells
@@ -40,11 +40,17 @@ def _check_agent(location: str, option: AgentOption) -> list[str]:
     return _unknown_options(location, option.name, option.options, known_options)
 
 
+def _check_layer(location: str, layer: Layer) -> list[str]:
+    problems: list[str] = []
+    for index, option in enumerate(layer.agents):
+        problems += _check_agent(f"{location}agents.{index}", option)
+    return problems
+
+
 def check_config(cfg: Config) -> list[str]:
     problems = _check_shell(cfg.shell)
     for layer_name, layer in cfg.layers.items():
-        for index, option in enumerate(layer.agents):
-            problems += _check_agent(f"layers.{layer_name}.agents.{index}", option)
+        problems += _check_layer(f"layers.{layer_name}.", layer)
     return problems
 
 
@@ -69,6 +75,7 @@ def check_manifest(m: Manifest, cfg: Config) -> list[str]:
                 f"layers.{index}: layer {layer_name!r} is not defined in the "
                 f"global config {_known(set(cfg.layers))}"
             )
+    problems += _check_layer("", m)
     return problems
 
 

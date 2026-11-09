@@ -160,6 +160,29 @@ def test_check_manifest_rejects_layers_the_config_does_not_define() -> None:
     ]
 
 
+def test_check_manifest_rejects_unknown_agents_and_their_options() -> None:
+    # given a manifest using an agent ask doesn't support, and a known agent
+    # with an option it doesn't have
+    m = Manifest(
+        distribution="arch",
+        agents=[
+            AgentOption(name="hal"),
+            AgentOption(name="claude", options={"telepathy": True}),
+        ],
+    )
+    cfg = Config(shell=ShellOption(name="bash"))
+
+    # when checking it
+    problems = check_manifest(m, cfg)
+
+    # then both are reported by their position in the manifest's agents
+    assert problems == [
+        "agents.0.name: unknown agent 'hal' (known: claude, codex, opencode, pi)",
+        "agents.1.telepathy: unknown option for claude "
+        "(known: auth, claude_md, config, skills)",
+    ]
+
+
 def test_check_manifest_says_when_the_config_defines_no_layers() -> None:
     # given a manifest using a layer, and a config without any layers
     m = Manifest(distribution="arch", layers=["base"])

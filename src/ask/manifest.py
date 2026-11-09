@@ -5,18 +5,15 @@ from pydantic import StrictStr
 
 from ask import agent
 from ask.agent import Agent
-from ask.config import FORBID_UNKNOWN_KEYS, HomePath, Layer, ResolvedUser, load_as
+from ask.config import Layer, ResolvedUser, load_as
 from ask.incus import Mount
 from ask.module import resolve_packages
 
 
-@dataclass
-class Manifest:
-    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+@dataclass(kw_only=True)
+class Manifest(Layer):
     distribution: StrictStr
-    bind_mounts: list[HomePath] = field(default_factory=list)
     layers: list[StrictStr] = field(default_factory=list)
-    packages: dict[str, list[StrictStr]] = field(default_factory=dict)
 
 
 def load(path: Path) -> Manifest:
@@ -29,7 +26,7 @@ class ResolvedManifest:
     layers: dict[str, Layer]
 
     def _configured_layers(self) -> list[Layer]:
-        result = []
+        result: list[Layer] = [self.manifest]
         for layer_name in self.manifest.layers:
             try:
                 result.append(self.layers[layer_name])
@@ -39,14 +36,14 @@ class ResolvedManifest:
 
     @property
     def bind_mounts(self) -> list[Path]:
-        mounts = list(self.manifest.bind_mounts)
+        mounts: list[Path] = []
         for layer in self._configured_layers():
             mounts += layer.bind_mounts
         return mounts
 
     @property
     def packages(self) -> list[str]:
-        packages = resolve_packages(self.manifest.packages, self.manifest.distribution)
+        packages: list[str] = []
         for layer in self._configured_layers():
             packages += resolve_packages(layer.packages, self.manifest.distribution)
         return packages

@@ -113,6 +113,26 @@ def test_load_reads_layers_from_toml(tmp_path: Path) -> None:
     assert manifest.layers == ["base", "python"]
 
 
+def test_load_reads_agents_and_shared_state_from_toml(tmp_path: Path) -> None:
+    # given a manifest file enabling agents, one with options, and shared state
+    manifest_path = tmp_path / "ask.toml"
+    manifest_path.write_text(
+        'distribution = "arch"\n'
+        'agents = ["claude", { name = "codex", auth = false }]\n'
+        "shared_state = true\n"
+    )
+
+    # when loading the manifest
+    manifest = load(manifest_path)
+
+    # then the agents and shared state are read like in a layer
+    assert manifest.agents == [
+        AgentOption(name="claude"),
+        AgentOption(name="codex", options={"auth": False}),
+    ]
+    assert manifest.shared_state is True
+
+
 def test_bind_mounts_combines_project_and_layer_mounts() -> None:
     # given a manifest with its own bind mount and one declared layer, and the
     # defined layers mapping, defining that layer's bind mount
@@ -201,6 +221,22 @@ def test_agent_names_combines_agents_from_every_declared_layer() -> None:
     assert agent_names == ["claude", "other"]
 
 
+def test_agent_names_combines_project_and_layer_agents() -> None:
+    # given a manifest enabling its own agent and declaring one layer, and the
+    # defined layers mapping, defining that layer's agent
+    manifest = Manifest(
+        distribution="arch", agents=[AgentOption(name="codex")], layers=["base"]
+    )
+    layers = {"base": Layer(agents=[AgentOption(name="claude")])}
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the full set of agent names
+    agent_names = resolved.agent_names
+
+    # then the project-level agent comes first, followed by the layer's
+    assert agent_names == ["codex", "claude"]
+
+
 def test_agent_names_raises_on_unknown_layer() -> None:
     # given a manifest declaring a layer that isn't defined in the layers mapping
     manifest = Manifest(distribution="arch", layers=["nonexistent"])
@@ -272,6 +308,40 @@ def test_shared_state_mounts_calls_mounts_for_with_each_agents_options() -> None
     assert mounts == claude_mounts
 
 
+def test_shared_state_mounts_includes_project_agents_with_shared_state() -> None:
+    # given a manifest with shared state enabled, declaring its own agent with
+    # options, and no layers
+    manifest = Manifest(
+        distribution="arch",
+        agents=[AgentOption(name="codex", options={"auth": False})],
+        shared_state=True,
+    )
+    resolved = ResolvedManifest(manifest, {})
+    codex_agent = MagicMock()
+    codex_mounts = [
+        Mount(host_path=Path("/host/codex"), container_path=Path("/container/codex"))
+    ]
+    codex_agent.mounts_for.return_value = codex_mounts
+    user = ResolvedUser(
+        name="raniz",
+        uid=1000,
+        shell="bash",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
+    )
+
+    # when resolving the mounts whose state should be shared
+    with patch("ask.manifest.agent.resolve", return_value=codex_agent) as resolve:
+        mounts = resolved.shared_state_mounts(user)
+
+    # then the project's agent is resolved, its mounts_for is called with the
+    # user and its own options, and the resulting mounts are returned
+    resolve.assert_called_once_with("codex")
+    codex_agent.mounts_for.assert_called_once_with(user, {"auth": False})
+    assert mounts == codex_mounts
+
+
 def test_shared_state_mounts_raises_on_unknown_layer() -> None:
     # given a manifest declaring a layer that isn't defined in the layers mapping
     manifest = Manifest(distribution="arch", layers=["nonexistent"])
@@ -331,7 +401,7 @@ def test_load_reports_every_wrongly_typed_value(tmp_path: Path) -> None:
 
     # then all of them are reported together
     assert error.value.problems == [
+        "packages.arch.1: Input should be a valid string",
         "distribution: Input should be a valid string",
         "layers: Input should be a valid list",
-        "packages.arch.1: Input should be a valid string",
     ]
