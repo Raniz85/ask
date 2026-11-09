@@ -80,8 +80,7 @@ def enter(gui: bool = False) -> None:
     cfg = validation.load_config(config.default_path())
     validation.load_manifest(project_dir / "ask.toml", cfg)
     user = config.resolve_user(cfg)
-    container = incus.Container(project_dir.name)
-    container.ensure_running()
+    container = _running_container(project_dir)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
             user.uid,
@@ -120,12 +119,33 @@ def exec(*command: str, gui: bool = False) -> None:
     _exec_in_container(project_dir, cfg, list(command), gui)
 
 
+def _confirm(prompt: str) -> bool:
+    try:
+        answer = input(prompt)
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("", "y", "yes")
+
+
+def _running_container(project_dir: Path) -> incus.Container:
+    container = incus.Container(project_dir.name)
+    if not container.exists():
+        if not _confirm(
+            f"No container named {project_dir.name!r} exists. Create it now? [Y/n] "
+        ):
+            raise incus.ContainerNotFoundError(
+                f"no container named {project_dir.name!r}; run `ask create` first"
+            )
+        create()
+    container.ensure_running()
+    return container
+
+
 def _exec_in_container(
     project_dir: Path, cfg: config.Config, command: list[str], gui: bool
 ) -> None:
     user = config.resolve_user(cfg)
-    container = incus.Container(project_dir.name)
-    container.ensure_running()
+    container = _running_container(project_dir)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         if gui_env:
             returncode = container.exec_command(
