@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
   "cyclopts>=5.3.3",
+  "pydantic>=2.14.3",
   "pyinfra>=3.10.0",
   "pyinfrincus>=0.8.1",
 ]

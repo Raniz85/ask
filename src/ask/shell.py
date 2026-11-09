@@ -21,6 +21,9 @@ class Shell:
     def packages_for(self, distribution: str) -> list[str]:
         return list(self.packages)
 
+    def option_keys(self) -> set[str]:
+        return {shell_file.key for shell_file in self.files}
+
     def mounts_for(
         self, user: ResolvedUser, options: dict[str, bool] | None = None
     ) -> list[Mount]:
@@ -119,6 +122,10 @@ _SHELLS: dict[str, Shell] = {
     "elvish": Elvish(),
     "tcsh": Tcsh(),
 }
+
+
+def known_names() -> list[str]:
+    return sorted(_SHELLS)
 
 
 def resolve(name: str) -> Shell:

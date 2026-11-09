@@ -10,6 +10,7 @@ from ask.incus import (
     _diff_devices,
     device_name_for,
     image_for,
+    known_distributions,
     stale_packages,
 )
 
@@ -21,6 +22,15 @@ def test_image_for_known_distribution_returns_image_alias() -> None:
 
     # then the known archlinux image alias is returned
     assert image == "images:archlinux/current"
+
+
+def test_known_distributions_lists_every_distribution_with_an_image() -> None:
+    # given the distributions ask has Incus images for
+    # when listing the known distributions
+    distributions = known_distributions()
+
+    # then every distribution with an image is listed, sorted by name
+    assert distributions == ["arch"]
 
 
 def test_image_for_unknown_distribution_raises() -> None:

@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -6,6 +7,7 @@ import pytest
 from ask.config import (
     AgentOption,
     Config,
+    ConfigError,
     Group,
     Layer,
     ResolvedUser,
@@ -13,6 +15,7 @@ from ask.config import (
     User,
     default_path,
     load,
+    read_toml,
     resolve_user,
 )
 
@@ -84,17 +87,17 @@ def test_load_reads_layer_bind_mounts(
     )
 
 
-def test_load_ignores_unknown_fields_in_layers(tmp_path: Path) -> None:
-    # given a layer declaring a field other than bind_mounts and packages
+def test_load_rejects_unknown_fields_in_layers(tmp_path: Path) -> None:
+    # given a layer declaring a field other than the known layer fields
     config_path = tmp_path / "config.toml"
     config_path.write_text('[layers.base]\nide = "jetbrains-idea"\n')
 
     # when loading the config
-    config = load(config_path)
+    with pytest.raises(ConfigError) as error:
+        load(config_path)
 
-    # then the unknown field is ignored and the layer defaults to no bind mounts
-    # or packages
-    assert config == Config(layers={"base": Layer(bind_mounts=[], packages={})})
+    # then the unknown field is reported by its path
+    assert error.value.problems == ["layers.base.ide: unknown key"]
 
 
 def test_load_reads_layer_packages(tmp_path: Path) -> None:
@@ -342,3 +345,140 @@ def test_resolve_user_defaults_group_to_a_private_group_of_the_declared_user() -
         gid=1000,
         extra_groups=[],
     )
+
+
+def test_read_toml_reports_syntax_errors_with_the_offending_line(
+    tmp_path: Path,
+) -> None:
+    # given a TOML file with an unterminated string on line 2
+    path = tmp_path / "config.toml"
+    path.write_text('a = 1\nshell = "zsh\nb = 2\n')
+
+    # when reading it
+    with pytest.raises(ConfigError) as error:
+        read_toml(path)
+
+    # then the error points at the line and column, with a caret under it
+    assert str(error.value) == (
+        f"invalid TOML in {path} at line 2, column 13: Illegal character '\\n'\n"
+        '   2 | shell = "zsh\n'
+        "     |             ^"
+    )
+
+
+def test_config_error_falls_back_to_the_bare_message_without_a_position(
+    tmp_path: Path,
+) -> None:
+    # given a decode error message that carries no line or column
+    path = tmp_path / "config.toml"
+    path.write_text("")
+    decode_error = tomllib.TOMLDecodeError("Something unexpected")
+
+    # when reading a file that fails with that error
+    with (
+        patch("ask.config.tomllib.load", side_effect=decode_error),
+        pytest.raises(ConfigError) as error,
+    ):
+        read_toml(path)
+
+    # then the message is reported as-is, without a snippet
+    assert str(error.value) == f"invalid TOML in {path}: Something unexpected"
+
+
+def test_config_error_lists_every_problem() -> None:
+    # given a configuration error with two problems
+    error = ConfigError(Path("/cfg/config.toml"), ["shell.name: bad", "user.uid: bad"])
+
+    # when rendering it
+    message = str(error)
+
+    # then each problem is listed on its own indented line under the file
+    assert message == (
+        "invalid configuration in /cfg/config.toml\n  shell.name: bad\n  user.uid: bad"
+    )
+
+
+def test_load_reports_syntax_errors_as_config_errors(tmp_path: Path) -> None:
+    # given a global config file with a syntax error
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("shell = \n")
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(config_path)
+
+    # then the error names the file
+    assert error.value.path == config_path
+
+
+def test_load_rejects_values_of_the_wrong_type(tmp_path: Path) -> None:
+    # given a global config with a non-integer uid
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nuid = "1000"\n')
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(config_path)
+
+    # then the wrongly typed value is reported by its path
+    assert error.value.problems == ["user.uid: Input should be a valid integer"]
+
+
+def test_load_rejects_shell_options_of_the_wrong_type(tmp_path: Path) -> None:
+    # given a shell table with a non-boolean option
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[shell]\nname = "zsh"\nzshrc = "yes"\n')
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(config_path)
+
+    # then the option is reported by the path it has in the TOML file
+    assert error.value.problems == ["shell.zshrc: Input should be a valid boolean"]
+
+
+def test_load_rejects_agent_options_of_the_wrong_type(tmp_path: Path) -> None:
+    # given a layer agent table with a non-boolean option
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[layers.base]\nagents = [{ name = "claude", auth = 1 }]\n')
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(config_path)
+
+    # then the option is reported by the path it has in the TOML file
+    assert error.value.problems == [
+        "layers.base.agents.0.auth: Input should be a valid boolean"
+    ]
+
+
+def test_load_rejects_shell_tables_without_a_name(tmp_path: Path) -> None:
+    # given a shell table that only sets options
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[shell]\nzshrc = true\n")
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(config_path)
+
+    # then the missing name is reported
+    assert error.value.problems == ["shell.name: Field required"]
+
+
+def test_load_reports_every_problem_at_once(tmp_path: Path) -> None:
+    # given a global config with several unrelated problems
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        'shell = 1\n[user]\nuid = "1000"\n[layers.base]\nbind_mount = []\n'
+    )
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(config_path)
+
+    # then all of them are reported together
+    assert error.value.problems == [
+        "shell: Input should be a valid string or table",
+        "user.uid: Input should be a valid integer",
+        "layers.base.bind_mount: unknown key",
+    ]

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from ask.agent import Agent
-from ask.config import AgentOption, Layer, ResolvedUser
+from ask.config import AgentOption, ConfigError, Layer, ResolvedUser
 from ask.incus import Mount
 from ask.manifest import Manifest, ResolvedManifest, load
 
@@ -21,16 +21,17 @@ def test_load_reads_distribution_from_toml(tmp_path: Path) -> None:
     assert manifest == Manifest(distribution="arch")
 
 
-def test_load_ignores_unknown_fields(tmp_path: Path) -> None:
+def test_load_rejects_unknown_fields(tmp_path: Path) -> None:
     # given a manifest file with an unknown field alongside the distribution
     manifest_path = tmp_path / "ask.toml"
     manifest_path.write_text('distribution = "arch"\nide = "jetbrains-idea"\n')
 
     # when loading the manifest
-    manifest = load(manifest_path)
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
 
-    # then the unknown field is ignored and distribution is still read
-    assert manifest == Manifest(distribution="arch")
+    # then the unknown field is reported
+    assert error.value.problems == ["ide: unknown key"]
 
 
 def test_load_defaults_bind_mounts_to_empty_list(tmp_path: Path) -> None:
@@ -288,3 +289,49 @@ def test_shared_state_mounts_raises_on_unknown_layer() -> None:
     # then a clear error is raised
     with pytest.raises(ValueError, match="nonexistent"):
         resolved.shared_state_mounts(user)
+
+
+def test_load_reports_syntax_errors_as_config_errors(tmp_path: Path) -> None:
+    # given a manifest file with a syntax error
+    manifest_path = tmp_path / "ask.toml"
+    manifest_path.write_text("distribution = \n")
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then the error names the file
+    assert error.value.path == manifest_path
+
+
+def test_load_requires_a_distribution(tmp_path: Path) -> None:
+    # given a manifest file without a distribution
+    manifest_path = tmp_path / "ask.toml"
+    manifest_path.write_text('layers = ["base"]\n')
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then the missing distribution is reported against the file
+    assert error.value.path == manifest_path
+    assert error.value.problems == ["distribution: Field required"]
+
+
+def test_load_reports_every_wrongly_typed_value(tmp_path: Path) -> None:
+    # given a manifest file with several wrongly typed values
+    manifest_path = tmp_path / "ask.toml"
+    manifest_path.write_text(
+        'distribution = 1\nlayers = "base"\npackages.arch = ["git", 2]\n'
+    )
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then all of them are reported together
+    assert error.value.problems == [
+        "distribution: Input should be a valid string",
+        "layers: Input should be a valid list",
+        "packages.arch.1: Input should be a valid string",
+    ]

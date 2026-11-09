@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ask.agent import Agent, Claude, Codex, OpenCode, Pi, resolve
+from ask.agent import Agent, Claude, Codex, OpenCode, Pi, known_names, resolve
 from ask.config import ResolvedUser
 from ask.incus import Mount
 
@@ -273,3 +273,34 @@ def test_mounts_for_omits_a_state_path_that_does_not_exist_on_the_host(
             ".claude/settings.json",
         ]
     ]
+
+
+def test_option_keys_are_the_instructions_key_and_the_state_categories() -> None:
+    # given the claude agent
+    claude = Claude()
+
+    # when listing its option keys
+    keys = claude.option_keys()
+
+    # then they are its agent instructions key and the shared state categories
+    assert keys == {"claude_md", "auth", "skills", "config"}
+
+
+def test_option_keys_omit_the_instructions_key_without_an_instructions_path() -> None:
+    # given an agent with no agent instructions file
+    agent = Agent(name="bare")
+
+    # when listing its option keys
+    keys = agent.option_keys()
+
+    # then only the shared state categories are options
+    assert keys == {"auth", "skills", "config"}
+
+
+def test_known_names_lists_every_supported_agent_sorted() -> None:
+    # given the registry of supported agents
+    # when listing the known agent names
+    names = known_names()
+
+    # then every supported agent is listed, sorted by name
+    assert names == ["claude", "codex", "opencode", "pi"]

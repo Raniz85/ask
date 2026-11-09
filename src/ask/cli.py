@@ -9,6 +9,7 @@ from ask import (
     manifest,
     provision,
     shell,
+    validation,
 )
 from ask.module import Module
 
@@ -21,15 +22,16 @@ FAKE_SSH_ENV = {
 
 def create() -> None:
     project_dir = Path.cwd()
-    m = manifest.load(project_dir / "ask.toml")
+    cfg = validation.load_config(config.default_path())
+    m = validation.load_manifest(project_dir / "ask.toml", cfg)
     incus.Container.create(project_dir.name, m.distribution)
     converge()
 
 
 def converge() -> None:
     project_dir = Path.cwd()
-    m = manifest.load(project_dir / "ask.toml")
-    cfg = config.load(config.default_path())
+    cfg = validation.load_config(config.default_path())
+    m = validation.load_manifest(project_dir / "ask.toml", cfg)
     resolved_manifest = manifest.ResolvedManifest(m, cfg.layers)
     container = incus.Container(project_dir.name)
     container.ensure_running()
@@ -69,7 +71,7 @@ def converge() -> None:
 
 def enter(gui: bool = False) -> None:
     project_dir = Path.cwd()
-    cfg = config.load(config.default_path())
+    cfg = validation.load_config(config.default_path())
     user = config.resolve_user(cfg)
     container = incus.Container(project_dir.name)
     container.ensure_running()
@@ -86,8 +88,8 @@ def enter(gui: bool = False) -> None:
 
 def agent(name: str | None = None, *args: str, gui: bool = False) -> None:
     project_dir = Path.cwd()
-    m = manifest.load(project_dir / "ask.toml")
-    cfg = config.load(config.default_path())
+    cfg = validation.load_config(config.default_path())
+    m = validation.load_manifest(project_dir / "ask.toml", cfg)
     if name is not None and name.startswith("-"):
         args = (name, *args)
         name = None
@@ -102,7 +104,7 @@ def agent(name: str | None = None, *args: str, gui: bool = False) -> None:
 
 def exec(*command: str, gui: bool = False) -> None:
     project_dir = Path.cwd()
-    cfg = config.load(config.default_path())
+    cfg = validation.load_config(config.default_path())
     user = config.resolve_user(cfg)
     container = incus.Container(project_dir.name)
     container.ensure_running()

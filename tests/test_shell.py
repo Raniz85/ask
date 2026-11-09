@@ -4,7 +4,17 @@ import pytest
 
 from ask.config import ResolvedUser
 from ask.incus import Mount
-from ask.shell import Bash, Elvish, Fish, Ksh, ShellFile, Tcsh, Zsh, resolve
+from ask.shell import (
+    Bash,
+    Elvish,
+    Fish,
+    Ksh,
+    ShellFile,
+    Tcsh,
+    Zsh,
+    known_names,
+    resolve,
+)
 
 
 def test_bash_has_its_files_and_package() -> None:
@@ -274,3 +284,23 @@ def test_mounts_for_excludes_files_disabled_by_options(
             readonly=True,
         )
     ]
+
+
+def test_option_keys_are_the_keys_of_the_shells_files() -> None:
+    # given the zsh shell
+    zsh = Zsh()
+
+    # when listing its option keys
+    keys = zsh.option_keys()
+
+    # then they are the keys of its configuration files
+    assert keys == {"zshrc", "zprofile", "zshenv"}
+
+
+def test_known_names_lists_every_supported_shell_sorted() -> None:
+    # given the registry of supported shells
+    # when listing the known shell names
+    names = known_names()
+
+    # then every supported shell is listed, sorted by name
+    assert names == ["bash", "elvish", "fish", "ksh", "tcsh", "zsh"]

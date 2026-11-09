@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec
-from ask.config import ResolvedUser
+from ask.config import ConfigError, ResolvedUser
 from ask.incus import Mount
 
 _WAYLAND_MOUNT = Mount(
@@ -19,10 +19,13 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
 
     # when running create from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container.create") as container_create,
         patch("ask.cli.converge") as converge_mock,
     ):
@@ -32,6 +35,59 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
     # distribution, and converge is run to apply the rest of the configuration
     container_create.assert_called_once_with("my-project", "arch")
     converge_mock.assert_called_once_with()
+
+
+def test_create_rejects_an_unknown_distribution_before_launching(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with an ask.toml using an unsupported distribution
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "gentoo"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when running create from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container.create") as container_create,
+        pytest.raises(ConfigError) as error,
+    ):
+        create()
+
+    # then the distribution is reported and no container is launched
+    assert error.value.problems == [
+        "distribution: unknown distribution 'gentoo' (known: arch)"
+    ]
+    container_create.assert_not_called()
+
+
+def test_converge_rejects_undefined_layers_before_touching_the_container(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with an ask.toml using a layer the global
+    # config doesn't define
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["rust"]\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(ConfigError) as error,
+    ):
+        converge()
+
+    # then the layer is reported and the container is never targeted
+    assert error.value.problems == [
+        "layers.0: layer 'rust' is not defined in the global config (known: none)"
+    ]
+    container_cls.assert_not_called()
 
 
 def test_converge_ensures_the_targeted_container_is_running(
@@ -746,6 +802,31 @@ def test_enter_ensures_the_targeted_container_is_running(tmp_path: Path) -> None
     container.ensure_running.assert_called_once_with()
 
 
+def test_enter_rejects_an_unknown_shell_before_touching_the_container(
+    tmp_path: Path,
+) -> None:
+    # given a project directory, and a config declaring an unsupported shell
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('shell = "foosh"\n')
+
+    # when entering the container
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(ConfigError) as error,
+    ):
+        enter()
+
+    # then the shell is reported and the container is never targeted
+    assert error.value.problems == [
+        "shell.name: unknown shell 'foosh' (known: bash, elvish, fish, ksh, tcsh, zsh)"
+    ]
+    container_cls.assert_not_called()
+
+
 def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user and shell
     project_dir = tmp_path / "my-project"
@@ -1008,6 +1089,33 @@ def test_exec_passes_no_env_when_gui_requested_without_a_session(
     )
 
 
+def test_agent_rejects_undefined_layers_before_touching_the_container(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with an ask.toml using a layer the global
+    # config doesn't define
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["rust"]\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when launching an agent without naming one
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(ConfigError) as error,
+    ):
+        agent()
+
+    # then the layer is reported and the container is never targeted
+    assert error.value.problems == [
+        "layers.0: layer 'rust' is not defined in the global config (known: none)"
+    ]
+    container_cls.assert_not_called()
+
+
 def test_agent_launches_the_first_configured_agent_when_none_given(
     tmp_path: Path,
 ) -> None:
@@ -1018,7 +1126,7 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
     (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[layers.base]\nagents = ["claude", "other"]\n'
+        '[layers.base]\nagents = ["claude", "codex"]\n'
         '[user]\nname = "raniz"\nuid = 1000\n'
     )
 
@@ -1036,7 +1144,7 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
 
     # then the first configured agent is executed in the container as the
     # resolved user, in the project directory, and ask exits with its exit
-    # code (the second, unregistered agent name is never resolved)
+    # code
     container.exec_command.assert_called_once_with(1000, 1000, project_dir, ["claude"])
     assert exc_info.value.code == 0
 

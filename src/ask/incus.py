@@ -16,6 +16,10 @@ _MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
 _GUI_SESSIONS_CONFIG_KEY = "user.ask.gui_sessions"
 
 
+def known_distributions() -> list[str]:
+    return sorted(_IMAGE_ALIASES)
+
+
 def image_for(distribution: str) -> str:
     try:
         return _IMAGE_ALIASES[distribution]

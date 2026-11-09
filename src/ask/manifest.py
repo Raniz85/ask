@@ -1,34 +1,26 @@
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic import StrictStr
+
 from ask import agent
 from ask.agent import Agent
-from ask.config import Layer, ResolvedUser
+from ask.config import FORBID_UNKNOWN_KEYS, HomePath, Layer, ResolvedUser, load_as
 from ask.incus import Mount
 from ask.module import resolve_packages
 
 
 @dataclass
 class Manifest:
-    distribution: str
-    bind_mounts: list[Path] = field(default_factory=list)
-    layers: list[str] = field(default_factory=list)
-    packages: dict[str, list[str]] = field(default_factory=dict)
+    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    distribution: StrictStr
+    bind_mounts: list[HomePath] = field(default_factory=list)
+    layers: list[StrictStr] = field(default_factory=list)
+    packages: dict[str, list[StrictStr]] = field(default_factory=dict)
 
 
 def load(path: Path) -> Manifest:
-    with path.open("rb") as f:
-        data = tomllib.load(f)
-    bind_mounts = [Path(p).expanduser() for p in data.get("bind_mounts", [])]
-    layers = list(data.get("layers", []))
-    packages = {distro: list(pkgs) for distro, pkgs in data.get("packages", {}).items()}
-    return Manifest(
-        distribution=data["distribution"],
-        bind_mounts=bind_mounts,
-        layers=layers,
-        packages=packages,
-    )
+    return load_as(path, Manifest)
 
 
 @dataclass

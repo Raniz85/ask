@@ -19,6 +19,12 @@ class Agent:
     def packages_for(self, distribution: str) -> list[str]:
         return resolve_packages(self.packages, distribution)
 
+    def option_keys(self) -> set[str]:
+        keys = {"auth", "skills", "config"}
+        if self.agent_instructions_path is not None:
+            keys.add(self.agent_instructions_key)
+        return keys
+
     def mounts_for(
         self, user: ResolvedUser, options: dict[str, bool] | None = None
     ) -> list[Mount]:
@@ -115,6 +121,10 @@ _AGENTS: dict[str, Agent] = {
     "codex": Codex(),
     "pi": Pi(),
 }
+
+
+def known_names() -> list[str]:
+    return sorted(_AGENTS)
 
 
 def resolve(name: str) -> Agent:

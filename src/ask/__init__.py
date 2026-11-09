@@ -1,6 +1,9 @@
+import sys
+
 import cyclopts
 
 from ask.cli import agent, converge, create, enter, exec
+from ask.config import ConfigError
 
 app = cyclopts.App()
 app.command(create)
@@ -11,4 +14,8 @@ app.command(agent)
 
 
 def main() -> None:
-    app()
+    try:
+        app()
+    except ConfigError as error:
+        print(f"ask: {error}", file=sys.stderr)
+        sys.exit(1)
