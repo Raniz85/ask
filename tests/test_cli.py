@@ -153,15 +153,15 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
         converge()
 
     # then the instance is converged with the project directory plus every resolved
-    # bind mount (project-level and layer-level), alongside the shell rc mount
+    # bind mount (layer-level, then project-level), alongside the shell rc mount
     container.converge.assert_called_once_with(
         [
             Mount(host_path=project_dir, container_path=project_dir),
+            Mount(host_path=Path("/layer/mount"), container_path=Path("/layer/mount")),
             Mount(
                 host_path=Path("/configured/mount"),
                 container_path=Path("/configured/mount"),
             ),
-            Mount(host_path=Path("/layer/mount"), container_path=Path("/layer/mount")),
             Mount(
                 host_path=home_dir / ".bashrc",
                 container_path=Path("/home/raniz/.bashrc"),
@@ -265,11 +265,11 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
 
         converge()
 
-    # then the resolved packages (project-level and layer-level) are
+    # then the resolved packages (layer-level, then project-level) are
     # provisioned for the manifest's distribution, along with the package
     # required by the (default) shell
     provisioner_cls.return_value.provision_packages.assert_called_once_with(
-        "arch", ["project-pkg", "layer-pkg", "bash"]
+        "arch", ["layer-pkg", "project-pkg", "bash"]
     )
 
 

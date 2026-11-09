@@ -185,14 +185,14 @@ def test_load_defaults_layer_agents_and_shared_state(tmp_path: Path) -> None:
     # when loading the config
     config = load(config_path)
 
-    # then the layer has no agents, and shared state defaults to off
+    # then the layer has no agents, and shared state is left unset
     assert config == Config(
         layers={
             "base": Layer(
                 bind_mounts=[],
                 packages={"arch": ["zsh"]},
                 agents=[],
-                shared_state=False,
+                shared_state=None,
             )
         }
     )

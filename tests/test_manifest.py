@@ -133,7 +133,7 @@ def test_load_reads_agents_and_shared_state_from_toml(tmp_path: Path) -> None:
     assert manifest.shared_state is True
 
 
-def test_bind_mounts_combines_project_and_layer_mounts() -> None:
+def test_bind_mounts_applies_layers_before_the_project() -> None:
     # given a manifest with its own bind mount and one declared layer, and the
     # defined layers mapping, defining that layer's bind mount
     manifest = Manifest(
@@ -145,8 +145,27 @@ def test_bind_mounts_combines_project_and_layer_mounts() -> None:
     # when resolving the full set of bind mounts
     mounts = resolved.bind_mounts
 
-    # then the project-level and layer-level mounts are both included
-    assert mounts == [Path("/project/mount"), Path("/layer/mount")]
+    # then the layer-level mounts come first, followed by the project-level ones
+    assert mounts == [Path("/layer/mount"), Path("/project/mount")]
+
+
+def test_bind_mounts_merges_duplicates() -> None:
+    # given a manifest and two declared layers all mounting the same path, and
+    # one layer mounting another path as well
+    manifest = Manifest(
+        distribution="arch", bind_mounts=[Path("/shared")], layers=["base", "python"]
+    )
+    layers = {
+        "base": Layer(bind_mounts=[Path("/shared"), Path("/base")]),
+        "python": Layer(bind_mounts=[Path("/shared")]),
+    }
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the full set of bind mounts
+    mounts = resolved.bind_mounts
+
+    # then each path is mounted once, at its first position
+    assert mounts == [Path("/shared"), Path("/base")]
 
 
 def test_bind_mounts_raises_on_unknown_layer() -> None:
@@ -177,7 +196,7 @@ def test_packages_combines_common_and_distribution_packages() -> None:
     assert packages == ["python", "zsh"]
 
 
-def test_packages_combines_project_and_layer_packages() -> None:
+def test_packages_applies_layers_before_the_project() -> None:
     # given a manifest with its own packages and one declared layer, and the
     # defined layers mapping, defining that layer's packages
     manifest = Manifest(
@@ -189,8 +208,25 @@ def test_packages_combines_project_and_layer_packages() -> None:
     # when resolving the full set of packages
     packages = resolved.packages
 
-    # then the project-level and layer-level packages are both included
-    assert packages == ["project-pkg", "layer-pkg"]
+    # then the layer-level packages come first, followed by the project-level ones
+    assert packages == ["layer-pkg", "project-pkg"]
+
+
+def test_packages_merges_duplicates() -> None:
+    # given a manifest and a declared layer both installing the same package,
+    # once as a common package and once for the manifest's distribution, and
+    # the layer installing another package as well
+    manifest = Manifest(
+        distribution="arch", packages={"arch": ["git"]}, layers=["base"]
+    )
+    layers = {"base": Layer(packages={"common": ["git"], "arch": ["zsh", "git"]})}
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the full set of packages
+    packages = resolved.packages
+
+    # then each package is installed once, at its first position
+    assert packages == ["git", "zsh"]
 
 
 def test_packages_raises_on_unknown_layer() -> None:
@@ -221,7 +257,7 @@ def test_agent_names_combines_agents_from_every_declared_layer() -> None:
     assert agent_names == ["claude", "other"]
 
 
-def test_agent_names_combines_project_and_layer_agents() -> None:
+def test_agent_names_applies_layers_before_the_project() -> None:
     # given a manifest enabling its own agent and declaring one layer, and the
     # defined layers mapping, defining that layer's agent
     manifest = Manifest(
@@ -233,8 +269,26 @@ def test_agent_names_combines_project_and_layer_agents() -> None:
     # when resolving the full set of agent names
     agent_names = resolved.agent_names
 
-    # then the project-level agent comes first, followed by the layer's
-    assert agent_names == ["codex", "claude"]
+    # then the layer's agent comes first, followed by the project-level one
+    assert agent_names == ["claude", "codex"]
+
+
+def test_agent_names_merges_duplicates() -> None:
+    # given a manifest enabling an agent that its declared layer also enables,
+    # alongside another agent
+    manifest = Manifest(
+        distribution="arch", agents=[AgentOption(name="claude")], layers=["base"]
+    )
+    layers = {
+        "base": Layer(agents=[AgentOption(name="claude"), AgentOption(name="codex")])
+    }
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the full set of agent names
+    agent_names = resolved.agent_names
+
+    # then each agent is named once, at its first position
+    assert agent_names == ["claude", "codex"]
 
 
 def test_agent_names_raises_on_unknown_layer() -> None:
@@ -340,6 +394,70 @@ def test_shared_state_mounts_includes_project_agents_with_shared_state() -> None
     resolve.assert_called_once_with("codex")
     codex_agent.mounts_for.assert_called_once_with(user, {"auth": False})
     assert mounts == codex_mounts
+
+
+def _user() -> ResolvedUser:
+    return ResolvedUser(
+        name="raniz",
+        uid=1000,
+        shell="bash",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
+    )
+
+
+def test_shared_state_mounts_merges_agent_options_with_later_layers_winning() -> None:
+    # given a declared layer sharing state for an agent with two options, and a
+    # manifest enabling the same agent, overriding one option and leaving
+    # shared state unset
+    manifest = Manifest(
+        distribution="arch",
+        agents=[AgentOption(name="claude", options={"auth": True})],
+        layers=["base"],
+    )
+    layers = {
+        "base": Layer(
+            agents=[
+                AgentOption(name="claude", options={"auth": False, "skills": False})
+            ],
+            shared_state=True,
+        )
+    }
+    resolved = ResolvedManifest(manifest, layers)
+    claude_agent = MagicMock()
+    claude_agent.mounts_for.return_value = []
+
+    # when resolving the mounts whose state should be shared
+    with patch("ask.manifest.agent.resolve", return_value=claude_agent):
+        resolved.shared_state_mounts(_user())
+
+    # then the agent's state is still shared, and its mounts are resolved once
+    # with the merged options, the manifest's value winning
+    claude_agent.mounts_for.assert_called_once_with(
+        _user(), {"auth": True, "skills": False}
+    )
+
+
+def test_shared_state_mounts_lets_later_layers_turn_sharing_off() -> None:
+    # given a declared layer sharing state for an agent, and a manifest enabling
+    # the same agent with shared state explicitly off
+    manifest = Manifest(
+        distribution="arch",
+        agents=[AgentOption(name="claude")],
+        shared_state=False,
+        layers=["base"],
+    )
+    layers = {"base": Layer(agents=[AgentOption(name="claude")], shared_state=True)}
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the mounts whose state should be shared
+    with patch("ask.manifest.agent.resolve") as resolve:
+        mounts = resolved.shared_state_mounts(_user())
+
+    # then the agent's state is not shared
+    resolve.assert_not_called()
+    assert mounts == []
 
 
 def test_shared_state_mounts_raises_on_unknown_layer() -> None:

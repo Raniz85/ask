@@ -108,7 +108,7 @@ class Layer:
     agents: list[Annotated[AgentOption, BeforeValidator(_flatten_options)]] = field(
         default_factory=list
     )
-    shared_state: StrictBool = False
+    shared_state: StrictBool | None = None
 
 
 @dataclass
