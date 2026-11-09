@@ -229,6 +229,45 @@ def test_packages_merges_duplicates() -> None:
     assert packages == ["git", "zsh"]
 
 
+def test_packages_removes_dash_prefixed_packages_from_lower_layers() -> None:
+    # given a declared layer installing two packages for the manifest's
+    # distribution, and a manifest removing one of them through its common
+    # packages, and removing a package no layer installs
+    manifest = Manifest(
+        distribution="arch",
+        packages={"common": ["-git", "-nonexistent"]},
+        layers=["base"],
+    )
+    layers = {"base": Layer(packages={"arch": ["git", "zsh"]})}
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the full set of packages
+    packages = resolved.packages
+
+    # then the removed package is gone, and the removal of the package no
+    # layer installs has no effect
+    assert packages == ["zsh"]
+
+
+def test_packages_removal_does_not_affect_its_own_layer() -> None:
+    # given a declared layer installing a package, and a manifest both removing
+    # and installing that package
+    manifest = Manifest(
+        distribution="arch",
+        packages={"common": ["-git"], "arch": ["git"]},
+        layers=["base"],
+    )
+    layers = {"base": Layer(packages={"arch": ["git", "zsh"]})}
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the full set of packages
+    packages = resolved.packages
+
+    # then the package is removed from the lower layer, but installed by the
+    # manifest itself
+    assert packages == ["zsh", "git"]
+
+
 def test_packages_raises_on_unknown_layer() -> None:
     # given a manifest declaring a layer that isn't defined in the layers mapping
     manifest = Manifest(distribution="arch", layers=["nonexistent"])
@@ -289,6 +328,27 @@ def test_agent_names_merges_duplicates() -> None:
 
     # then each agent is named once, at its first position
     assert agent_names == ["claude", "codex"]
+
+
+def test_agent_names_removes_dash_prefixed_agents_from_lower_layers() -> None:
+    # given a declared layer enabling two agents, and a manifest removing one of
+    # them and an agent no layer enables
+    manifest = Manifest(
+        distribution="arch",
+        agents=[AgentOption(name="-claude"), AgentOption(name="-pi")],
+        layers=["base"],
+    )
+    layers = {
+        "base": Layer(agents=[AgentOption(name="claude"), AgentOption(name="codex")])
+    }
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the full set of agent names
+    agent_names = resolved.agent_names
+
+    # then the removed agent is gone, and the removal of the agent no layer
+    # enables has no effect
+    assert agent_names == ["codex"]
 
 
 def test_agent_names_raises_on_unknown_layer() -> None:
@@ -456,6 +516,34 @@ def test_shared_state_mounts_lets_later_layers_turn_sharing_off() -> None:
         mounts = resolved.shared_state_mounts(_user())
 
     # then the agent's state is not shared
+    resolve.assert_not_called()
+    assert mounts == []
+
+
+def test_shared_state_mounts_forgets_options_and_sharing_of_removed_agents() -> None:
+    # given a declared layer sharing state for an agent with an option, a
+    # second layer removing that agent, and a manifest enabling it again
+    # without options or shared state
+    manifest = Manifest(
+        distribution="arch",
+        agents=[AgentOption(name="claude")],
+        layers=["base", "no-claude"],
+    )
+    layers = {
+        "base": Layer(
+            agents=[AgentOption(name="claude", options={"auth": False})],
+            shared_state=True,
+        ),
+        "no-claude": Layer(agents=[AgentOption(name="-claude")]),
+    }
+    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the mounts whose state should be shared
+    with patch("ask.manifest.agent.resolve") as resolve:
+        mounts = resolved.shared_state_mounts(_user())
+
+    # then the re-enabled agent does not inherit the removed agent's shared
+    # state, so nothing is shared
     resolve.assert_not_called()
     assert mounts == []
 

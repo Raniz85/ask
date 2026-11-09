@@ -20,6 +20,17 @@ def load(path: Path) -> Manifest:
     return load_as(path, Manifest)
 
 
+REMOVAL_PREFIX = "-"
+
+
+def _is_removal(name: str) -> bool:
+    return name.startswith(REMOVAL_PREFIX)
+
+
+def _removals(names: list[str]) -> set[str]:
+    return {name.removeprefix(REMOVAL_PREFIX) for name in names if _is_removal(name)}
+
+
 @dataclass
 class _MergedAgent:
     name: str
@@ -52,13 +63,22 @@ class ResolvedManifest:
     def packages(self) -> list[str]:
         packages: list[str] = []
         for layer in self._configured_layers():
-            packages += resolve_packages(layer.packages, self.manifest.distribution)
+            layer_packages = resolve_packages(
+                layer.packages, self.manifest.distribution
+            )
+            removed = _removals(layer_packages)
+            packages = [p for p in packages if p not in removed]
+            packages += [p for p in layer_packages if not _is_removal(p)]
         return list(dict.fromkeys(packages))
 
     def _merged_agents(self) -> list[_MergedAgent]:
         merged: dict[str, _MergedAgent] = {}
         for layer in self._configured_layers():
+            for name in _removals([option.name for option in layer.agents]):
+                merged.pop(name, None)
             for option in layer.agents:
+                if _is_removal(option.name):
+                    continue
                 entry = merged.setdefault(option.name, _MergedAgent(option.name))
                 entry.options.update(option.options)
                 if layer.shared_state is not None:

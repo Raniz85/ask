@@ -4,7 +4,14 @@ import pytest
 
 from ask.config import AgentOption, Config, ConfigError, Layer, ShellOption
 from ask.manifest import Manifest
-from ask.validation import check_config, check_manifest, load_config, load_manifest
+from ask.validation import (
+    check_config,
+    check_manifest,
+    config_warnings,
+    load_config,
+    load_manifest,
+    manifest_warnings,
+)
 
 
 def test_check_config_accepts_known_shells_and_agents_with_their_options() -> None:
@@ -183,6 +190,24 @@ def test_check_manifest_rejects_unknown_agents_and_their_options() -> None:
     ]
 
 
+def test_check_manifest_checks_removed_agents_by_their_name() -> None:
+    # given a manifest removing a known agent and an agent ask doesn't support
+    m = Manifest(
+        distribution="arch",
+        agents=[AgentOption(name="-claude"), AgentOption(name="-hal")],
+    )
+    cfg = Config(shell=ShellOption(name="bash"))
+
+    # when checking it
+    problems = check_manifest(m, cfg)
+
+    # then only the unsupported agent is reported, by its name without the
+    # removal prefix
+    assert problems == [
+        "agents.1.name: unknown agent 'hal' (known: claude, codex, opencode, pi)"
+    ]
+
+
 def test_check_manifest_says_when_the_config_defines_no_layers() -> None:
     # given a manifest using a layer, and a config without any layers
     m = Manifest(distribution="arch", layers=["base"])
@@ -225,3 +250,97 @@ def test_load_manifest_returns_valid_manifests(tmp_path: Path) -> None:
 
     # then the manifest is returned
     assert m == Manifest(distribution="arch")
+
+
+def test_config_warnings_reports_options_on_removed_agents() -> None:
+    # given a layer removing one agent with options and one without, and
+    # enabling another agent with options
+    cfg = Config(
+        shell=ShellOption(name="bash"),
+        layers={
+            "base": Layer(
+                agents=[
+                    AgentOption(name="-claude", options={"auth": False}),
+                    AgentOption(name="-codex"),
+                    AgentOption(name="pi", options={"auth": False}),
+                ]
+            )
+        },
+    )
+
+    # when collecting its warnings
+    warnings = config_warnings(cfg)
+
+    # then only the removal with options is reported, by its position
+    assert warnings == [
+        "layers.base.agents.0: options have no effect when removing agent 'claude'"
+    ]
+
+
+def test_manifest_warnings_reports_options_on_removed_agents() -> None:
+    # given a manifest removing an agent with options
+    m = Manifest(
+        distribution="arch",
+        agents=[AgentOption(name="-claude", options={"auth": False})],
+    )
+
+    # when collecting its warnings
+    warnings = manifest_warnings(m)
+
+    # then the removal with options is reported by its position
+    assert warnings == ["agents.0: options have no effect when removing agent 'claude'"]
+
+
+def test_load_config_prints_warnings_against_the_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a global config file removing an agent with options
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[layers.base]\nagents = [{ name = "-claude", auth = false }]\n'
+    )
+
+    # when loading it
+    load_config(config_path)
+
+    # then the warning is printed to stderr against the file
+    assert capsys.readouterr().err == (
+        f"ask: warning in {config_path}\n"
+        "  layers.base.agents.0: options have no effect when removing agent "
+        "'claude'\n"
+    )
+
+
+def test_load_manifest_prints_warnings_against_the_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a manifest file removing an agent with options
+    manifest_path = tmp_path / "ask.toml"
+    manifest_path.write_text(
+        'distribution = "arch"\nagents = [{ name = "-claude", auth = false }]\n'
+    )
+    cfg = Config(shell=ShellOption(name="bash"))
+
+    # when loading it
+    load_manifest(manifest_path, cfg)
+
+    # then the warning is printed to stderr against the file
+    assert capsys.readouterr().err == (
+        f"ask: warning in {manifest_path}\n"
+        "  agents.0: options have no effect when removing agent 'claude'\n"
+    )
+
+
+def test_load_manifest_prints_nothing_without_warnings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a valid manifest file without anything to warn about
+    manifest_path = tmp_path / "ask.toml"
+    manifest_path.write_text('distribution = "arch"\n')
+    cfg = Config(shell=ShellOption(name="bash"))
+
+    # when loading it
+    load_manifest(manifest_path, cfg)
+
+    # then nothing is printed to stderr
+    assert capsys.readouterr().err == ""
