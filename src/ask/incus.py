@@ -112,6 +112,26 @@ def _add_disk_device(container_name: str, device_name: str, mount: Mount) -> Non
     _incus(command)
 
 
+def ensure_storage_volume(pool: str, volume: str) -> None:
+    result = _incus(
+        [
+            "incus",
+            "storage",
+            "volume",
+            "list",
+            pool,
+            "type=custom",
+            "--format",
+            "csv",
+            "--columns",
+            "n",
+        ],
+        capture=True,
+    )
+    if volume not in result.stdout.splitlines():
+        _incus(["incus", "storage", "volume", "create", pool, volume])
+
+
 def _remove_device(container_name: str, device_name: str) -> None:
     _incus(
         ["incus", "config", "device", "remove", container_name, device_name],
@@ -252,6 +272,25 @@ class Container:
     def remove_gui_device(self, mount: Mount) -> None:
         device_name = device_name_for(mount.container_path, prefix="gui")
         _remove_device(self.name, device_name)
+
+    def attach_volume(
+        self, pool: str, volume: str, device_name: str, path: Path
+    ) -> None:
+        if device_name in self._device_names():
+            return
+        _incus(
+            [
+                "incus",
+                "storage",
+                "volume",
+                "attach",
+                pool,
+                volume,
+                self.name,
+                device_name,
+                str(path),
+            ]
+        )
 
     def converge(self, mounts: list[Mount]) -> None:
         desired = {device_name_for(mount.container_path): mount for mount in mounts}

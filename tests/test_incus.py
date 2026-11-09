@@ -11,6 +11,7 @@ from ask.incus import (
     Mount,
     _diff_devices,
     device_name_for,
+    ensure_storage_volume,
     image_for,
     known_distributions,
     stale_packages,
@@ -850,3 +851,92 @@ def test_ensure_running_reports_a_container_that_does_not_exist() -> None:
         "no container named 'my-project'; run `ask create` first"
     )
     start.assert_not_called()
+
+
+def _list_volumes_result(*names: str) -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="".join(f"{n}\n" for n in names)
+    )
+
+
+def test_ensure_storage_volume_creates_a_missing_custom_volume() -> None:
+    # given a storage pool without the named custom volume
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_volumes_result("other-volume")
+
+        # when ensuring the volume exists
+        ensure_storage_volume("default", "ask-paru")
+
+    # then the custom volumes in the pool are listed, and the volume is created
+    assert [c.args[0] for c in run.call_args_list] == [
+        [
+            "incus",
+            "storage",
+            "volume",
+            "list",
+            "default",
+            "type=custom",
+            "--format",
+            "csv",
+            "--columns",
+            "n",
+        ],
+        ["incus", "storage", "volume", "create", "default", "ask-paru"],
+    ]
+
+
+def test_ensure_storage_volume_does_not_recreate_an_existing_volume() -> None:
+    # given a storage pool that already has the named custom volume
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_volumes_result("ask-paru")
+
+        # when ensuring the volume exists
+        ensure_storage_volume("default", "ask-paru")
+
+    # then no "storage volume create" call is made
+    create_calls = [c for c in run.call_args_list if "create" in c.args[0]]
+    assert create_calls == []
+
+
+def test_attach_volume_attaches_the_volume_under_the_given_device_name() -> None:
+    # given a container without the volume's device
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result("root", "eth0")
+
+        # when attaching a custom volume at a path
+        container.attach_volume(
+            "default", "ask-paru", "paru-cache", Path("/home/aur/.cache/paru")
+        )
+
+    # then the volume is attached at that path under the given device name
+    run.assert_called_with(
+        [
+            "incus",
+            "storage",
+            "volume",
+            "attach",
+            "default",
+            "ask-paru",
+            "my-project",
+            "paru-cache",
+            "/home/aur/.cache/paru",
+        ],
+        check=True,
+    )
+
+
+def test_attach_volume_does_not_reattach_an_already_attached_volume() -> None:
+    # given a container that already has the volume's device
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result("root", "paru-cache")
+
+        # when attaching the custom volume again
+        container.attach_volume(
+            "default", "ask-paru", "paru-cache", Path("/home/aur/.cache/paru")
+        )
+
+    # then no "storage volume attach" call is made
+    attach_calls = [c for c in run.call_args_list if "attach" in c.args[0]]
+    assert attach_calls == []

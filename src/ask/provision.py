@@ -131,10 +131,16 @@ class Provisioner:
 
 
 _AUR_BUILD_USER = "aur"
+_AUR_BUILD_ID = 900
 _AUR_SUDOERS_PATH = "/etc/sudoers.d/ask-aur"
 _AUR_BUILD_HOME = Path(f"/home/{_AUR_BUILD_USER}")
+_PARU_CACHE_DIR = _AUR_BUILD_HOME / ".cache" / "paru"
+_PARU_CACHE_POOL = "default"
+_PARU_CACHE_VOLUME = "ask-paru"
+_PARU_CACHE_DEVICE = "paru-cache"
 _PARU_BIN_REPO = "https://aur.archlinux.org/paru-bin.git"
-_PARU_BIN_DIR = "paru-bin"
+_PARU_BIN_CLONE = _PARU_CACHE_DIR / "clone" / "paru-bin"
+_AUR_SEEN_REF = "AUR_SEEN"
 
 
 @dataclass(frozen=True)
@@ -143,11 +149,18 @@ class AurBuilder:
 
     def provision_builder(self) -> None:
         with Provisioner(self.container).session() as state:
-            add_op(state, server.group, group=_AUR_BUILD_USER, system=True)
+            add_op(
+                state,
+                server.group,
+                group=_AUR_BUILD_USER,
+                gid=_AUR_BUILD_ID,
+                system=True,
+            )
             add_op(
                 state,
                 server.user,
                 user=_AUR_BUILD_USER,
+                uid=_AUR_BUILD_ID,
                 group=_AUR_BUILD_USER,
                 system=True,
                 shell="/usr/bin/nologin",
@@ -166,6 +179,21 @@ class AurBuilder:
                 mode="440",
             )
 
+    def share_paru_cache(self) -> None:
+        incus.ensure_storage_volume(_PARU_CACHE_POOL, _PARU_CACHE_VOLUME)
+        self.container.attach_volume(
+            _PARU_CACHE_POOL, _PARU_CACHE_VOLUME, _PARU_CACHE_DEVICE, _PARU_CACHE_DIR
+        )
+        with Provisioner(self.container).session() as state:
+            for directory in (_PARU_CACHE_DIR.parent, _PARU_CACHE_DIR):
+                add_op(
+                    state,
+                    files.directory,
+                    path=str(directory),
+                    user=_AUR_BUILD_USER,
+                    group=_AUR_BUILD_USER,
+                )
+
     def _builder_ids(self) -> tuple[int, int]:
         uid = int(self.container.run_command(["id", "-u", _AUR_BUILD_USER]).stdout)
         gid = int(self.container.run_command(["id", "-g", _AUR_BUILD_USER]).stdout)
@@ -181,6 +209,60 @@ class AurBuilder:
                 f"{self.container.name!r} with exit status {returncode}"
             )
 
+    def _builder_git_ref(self, ref: str) -> str | None:
+        result = self.container.run_command(
+            [
+                "runuser",
+                "-u",
+                _AUR_BUILD_USER,
+                "--",
+                "git",
+                "-C",
+                str(_PARU_BIN_CLONE),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                ref,
+            ]
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def _fetch_paru_bin(self, uid: int, gid: int) -> None:
+        clone_exists = self.container.run_command(
+            ["test", "-d", str(_PARU_BIN_CLONE / ".git")]
+        ).returncode
+        if clone_exists == 0:
+            self._run_as_builder(
+                uid, gid, _PARU_BIN_CLONE, ["git", "pull", "--ff-only"]
+            )
+        else:
+            self._run_as_builder(
+                uid,
+                gid,
+                _AUR_BUILD_HOME,
+                ["git", "clone", _PARU_BIN_REPO, str(_PARU_BIN_CLONE)],
+            )
+
+    def _review_paru_bin(self, uid: int, gid: int) -> None:
+        seen = self._builder_git_ref(_AUR_SEEN_REF)
+        if seen is not None and seen == self._builder_git_ref("HEAD"):
+            return
+
+        if seen is None:
+            review = ["cat", "PKGBUILD"]
+        else:
+            review = ["git", "--no-pager", "diff", _AUR_SEEN_REF, "HEAD"]
+        self._run_as_builder(uid, gid, _PARU_BIN_CLONE, review)
+
+        answer = input("Proceed with building paru-bin from the PKGBUILD above? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            raise ProvisioningError(
+                "paru build was declined; cannot install AUR packages"
+            )
+        self._run_as_builder(
+            uid, gid, _PARU_BIN_CLONE, ["git", "update-ref", _AUR_SEEN_REF, "HEAD"]
+        )
+
     def ensure_paru(self) -> None:
         already_installed = self.container.run_command(
             ["pacman", "-Qq", "paru"]
@@ -189,24 +271,11 @@ class AurBuilder:
             return
 
         uid, gid = self._builder_ids()
-        build_dir = _AUR_BUILD_HOME / _PARU_BIN_DIR
-
-        self._run_as_builder(uid, gid, _AUR_BUILD_HOME, ["rm", "-rf", _PARU_BIN_DIR])
+        self._fetch_paru_bin(uid, gid)
+        self._review_paru_bin(uid, gid)
         self._run_as_builder(
-            uid,
-            gid,
-            _AUR_BUILD_HOME,
-            ["git", "clone", _PARU_BIN_REPO, _PARU_BIN_DIR],
+            uid, gid, _PARU_BIN_CLONE, ["makepkg", "-si", "--noconfirm"]
         )
-        self._run_as_builder(uid, gid, build_dir, ["cat", "PKGBUILD"])
-
-        answer = input("Proceed with building paru-bin from the PKGBUILD above? [y/N] ")
-        if answer.strip().lower() not in ("y", "yes"):
-            raise ProvisioningError(
-                "paru build was declined; cannot install AUR packages"
-            )
-
-        self._run_as_builder(uid, gid, build_dir, ["makepkg", "-si", "--noconfirm"])
 
     def install_packages(self, distribution: str, packages: list[str]) -> None:
         if not packages:
@@ -215,6 +284,7 @@ class AurBuilder:
             raise ValueError(f"AUR packages are not supported on {distribution!r}")
 
         self.provision_builder()
+        self.share_paru_cache()
         self.ensure_paru()
 
         uid, gid = self._builder_ids()

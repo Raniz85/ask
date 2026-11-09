@@ -1,6 +1,7 @@
 import subprocess
 from pathlib import Path
-from unittest.mock import ANY, patch
+from collections.abc import Callable
+from unittest.mock import ANY, MagicMock, call, patch
 
 import io
 from contextlib import redirect_stderr, redirect_stdout
@@ -370,15 +371,17 @@ def test_aur_builder_provision_builder_ensures_a_system_group_and_user() -> None
     ):
         aur_builder.provision_builder()
 
-    # then a system group and user named "aur" are ensured, with a home
-    # directory to build in and no login shell
+    # then a system group and user named "aur" are ensured with fixed ids, so
+    # that files they own on the shared paru volume line up across containers,
+    # with a home directory to build in and no login shell
     add_op.assert_any_call(
-        state_cls.return_value, server.group, group="aur", system=True
+        state_cls.return_value, server.group, group="aur", gid=900, system=True
     )
     add_op.assert_any_call(
         state_cls.return_value,
         server.user,
         user="aur",
+        uid=900,
         group="aur",
         system=True,
         shell="/usr/bin/nologin",
@@ -455,6 +458,58 @@ def test_aur_builder_provision_builder_connects_before_running_operations() -> N
     run_ops.assert_called_once_with(state_cls.return_value)
 
 
+def test_share_paru_cache_attaches_the_shared_volume_at_parus_cache() -> None:
+    # given a container whose aur builder should share paru's state with
+    # other containers
+    aur_builder = AurBuilder(Container("my-project"))
+
+    # when sharing paru's cache
+    with (
+        patch("ask.provision.incus.ensure_storage_volume") as ensure_volume,
+        patch.object(Container, "attach_volume") as attach_volume,
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+    ):
+        aur_builder.share_paru_cache()
+
+    # then the shared custom volume is ensured, and attached at the aur
+    # builder's paru cache directory
+    ensure_volume.assert_called_once_with("default", "ask-paru")
+    attach_volume.assert_called_once_with(
+        "default", "ask-paru", "paru-cache", Path("/home/aur/.cache/paru")
+    )
+
+
+def test_share_paru_cache_makes_the_aur_builder_own_the_cache_directories() -> None:
+    # given a container whose shared paru volume is mounted by incus as root
+    aur_builder = AurBuilder(Container("my-project"))
+
+    # when sharing paru's cache
+    with (
+        patch("ask.provision.incus.ensure_storage_volume"),
+        patch.object(Container, "attach_volume"),
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        aur_builder.share_paru_cache()
+
+    # then the cache directory and the mounted volume are owned by the aur
+    # builder, so paru can write to them
+    directory_calls = [
+        c.kwargs for c in add_op.call_args_list if c.args[1] is files.directory
+    ]
+    assert directory_calls == [
+        {"path": "/home/aur/.cache", "user": "aur", "group": "aur"},
+        {"path": "/home/aur/.cache/paru", "user": "aur", "group": "aur"},
+    ]
+
+
 def _completed(returncode: int, stdout: str = "") -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout)
 
@@ -476,19 +531,81 @@ def test_ensure_paru_does_nothing_when_already_installed() -> None:
     exec_command.assert_not_called()
 
 
-def test_ensure_paru_builds_it_when_missing_and_the_user_approves() -> None:
-    # given a container without paru, and a user who approves the build after
-    # reviewing the PKGBUILD
+_CLONE_PARENT = Path("/home/aur/.cache/paru/clone")
+_CLONE = _CLONE_PARENT / "paru-bin"
+
+
+def _runuser_git(*args: str) -> list[str]:
+    return ["runuser", "-u", "aur", "--", "git", "-C", str(_CLONE), *args]
+
+
+def _container_without_paru(
+    *, clone_exists: bool = False, seen: str | None = None, head: str = "abc123"
+) -> Callable[[list[str]], subprocess.CompletedProcess]:
+    def run_command(command: list[str]) -> subprocess.CompletedProcess:
+        if command == ["pacman", "-Qq", "paru"]:
+            return _completed(1)
+        if command in (["id", "-u", "aur"], ["id", "-g", "aur"]):
+            return _completed(0, "1001\n")
+        if command == ["test", "-d", str(_CLONE / ".git")]:
+            return _completed(0 if clone_exists else 1)
+        if command == _runuser_git("rev-parse", "--verify", "--quiet", "AUR_SEEN"):
+            return _completed(0, f"{seen}\n") if seen else _completed(1)
+        if command == _runuser_git("rev-parse", "--verify", "--quiet", "HEAD"):
+            return _completed(0, f"{head}\n")
+        return _completed(127)
+
+    return run_command
+
+
+def _exec_commands(exec_command: MagicMock) -> list[list[str]]:
+    return [c.args[3] for c in exec_command.call_args_list]
+
+
+def test_ensure_paru_clones_reviews_and_builds_paru_bin_when_approved() -> None:
+    # given a container without paru that has never cloned paru-bin, and a
+    # user who approves the build after reviewing the PKGBUILD
+    aur_builder = AurBuilder(Container("my-project"))
+    with (
+        patch.object(Container, "run_command", side_effect=_container_without_paru()),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("builtins.input", return_value="y"),
+    ):
+        # when ensuring paru is present
+        aur_builder.ensure_paru()
+
+    # then paru-bin is cloned into paru's shared clone directory, its PKGBUILD
+    # is shown, the reviewed commit is marked as seen the way paru does, and
+    # it is built, all as the aur builder user
+    exec_command.assert_has_calls(
+        [
+            call(
+                1001,
+                1001,
+                Path("/home/aur"),
+                [
+                    "git",
+                    "clone",
+                    "https://aur.archlinux.org/paru-bin.git",
+                    str(_CLONE),
+                ],
+            ),
+            call(1001, 1001, _CLONE, ["cat", "PKGBUILD"]),
+            call(1001, 1001, _CLONE, ["git", "update-ref", "AUR_SEEN", "HEAD"]),
+            call(1001, 1001, _CLONE, ["makepkg", "-si", "--noconfirm"]),
+        ]
+    )
+
+
+def test_ensure_paru_updates_an_existing_clone_instead_of_recloning() -> None:
+    # given a container without paru, whose shared paru cache already holds a
+    # paru-bin clone, possibly reviewed from another container
     aur_builder = AurBuilder(Container("my-project"))
     with (
         patch.object(
             Container,
             "run_command",
-            side_effect=[
-                _completed(1),
-                _completed(0, "1001\n"),
-                _completed(0, "1001\n"),
-            ],
+            side_effect=_container_without_paru(clone_exists=True),
         ),
         patch.object(Container, "exec_command", return_value=0) as exec_command,
         patch("builtins.input", return_value="y"),
@@ -496,23 +613,63 @@ def test_ensure_paru_builds_it_when_missing_and_the_user_approves() -> None:
         # when ensuring paru is present
         aur_builder.ensure_paru()
 
-    # then paru-bin is cloned, its PKGBUILD is shown, and it is built as the
-    # aur builder user
-    exec_command.assert_any_call(
-        1001,
-        1001,
-        Path("/home/aur"),
-        ["git", "clone", "https://aur.archlinux.org/paru-bin.git", "paru-bin"],
-    )
-    exec_command.assert_any_call(
-        1001, 1001, Path("/home/aur/paru-bin"), ["cat", "PKGBUILD"]
-    )
-    exec_command.assert_any_call(
-        1001,
-        1001,
-        Path("/home/aur/paru-bin"),
+    # then the existing clone is fast-forwarded, keeping its review marker,
+    # rather than being removed and cloned afresh
+    commands = _exec_commands(exec_command)
+    assert commands[0] == ["git", "pull", "--ff-only"]
+    assert [c for c in commands if c[:2] in (["rm", "-rf"], ["git", "clone"])] == []
+
+
+def test_ensure_paru_builds_without_asking_when_head_was_already_reviewed() -> None:
+    # given a container without paru, whose shared paru-bin clone was already
+    # reviewed at its current commit
+    aur_builder = AurBuilder(Container("my-project"))
+    with (
+        patch.object(
+            Container,
+            "run_command",
+            side_effect=_container_without_paru(
+                clone_exists=True, seen="abc123", head="abc123"
+            ),
+        ),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("builtins.input") as input_,
+    ):
+        # when ensuring paru is present
+        aur_builder.ensure_paru()
+
+    # then the user is not asked again, nothing is shown for review, and
+    # paru-bin is built
+    input_.assert_not_called()
+    assert _exec_commands(exec_command) == [
+        ["git", "pull", "--ff-only"],
         ["makepkg", "-si", "--noconfirm"],
-    )
+    ]
+
+
+def test_ensure_paru_shows_only_the_changes_since_the_last_review() -> None:
+    # given a container without paru, whose shared paru-bin clone was
+    # reviewed at an earlier commit than its current one
+    aur_builder = AurBuilder(Container("my-project"))
+    with (
+        patch.object(
+            Container,
+            "run_command",
+            side_effect=_container_without_paru(
+                clone_exists=True, seen="abc123", head="def456"
+            ),
+        ),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("builtins.input", return_value="y"),
+    ):
+        # when ensuring paru is present
+        aur_builder.ensure_paru()
+
+    # then the diff since the reviewed commit is shown instead of the whole
+    # PKGBUILD
+    commands = _exec_commands(exec_command)
+    assert ["git", "--no-pager", "diff", "AUR_SEEN", "HEAD"] in commands
+    assert ["cat", "PKGBUILD"] not in commands
 
 
 def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
@@ -520,27 +677,58 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
     # reviewing the PKGBUILD
     aur_builder = AurBuilder(Container("my-project"))
     with (
-        patch.object(
-            Container,
-            "run_command",
-            side_effect=[
-                _completed(1),
-                _completed(0, "1001\n"),
-                _completed(0, "1001\n"),
-            ],
-        ),
+        patch.object(Container, "run_command", side_effect=_container_without_paru()),
         patch.object(Container, "exec_command", return_value=0) as exec_command,
         patch("builtins.input", return_value="n"),
     ):
         # when ensuring paru is present
-        # then a clear error is raised, and the package is never built
+        # then a clear error is raised
         with pytest.raises(ProvisioningError) as error:
             aur_builder.ensure_paru()
 
     assert str(error.value) == "paru build was declined; cannot install AUR packages"
 
-    build_calls = [c for c in exec_command.call_args_list if "makepkg" in c.args[3]]
-    assert build_calls == []
+    # and the commit is neither marked as reviewed nor built
+    commands = _exec_commands(exec_command)
+    assert [c for c in commands if c[0] == "makepkg" or "update-ref" in c] == []
+
+
+@pytest.mark.parametrize(
+    ("failing_command", "expected_message"),
+    [
+        (
+            "git",
+            "`git clone https://aur.archlinux.org/paru-bin.git "
+            "/home/aur/.cache/paru/clone/paru-bin` failed in "
+            "container 'my-project' with exit status 128",
+        ),
+        (
+            "makepkg",
+            "`makepkg -si --noconfirm` failed in container 'my-project' "
+            "with exit status 128",
+        ),
+    ],
+)
+def test_ensure_paru_reports_failing_build_steps(
+    failing_command: str, expected_message: str
+) -> None:
+    # given a container without paru where one build step fails
+    aur_builder = AurBuilder(Container("my-project"))
+
+    def exec_command(uid: int, gid: int, cwd: Path, command: list[str]) -> int:
+        return 128 if command[0] == failing_command else 0
+
+    with (
+        patch.object(Container, "run_command", side_effect=_container_without_paru()),
+        patch.object(Container, "exec_command", side_effect=exec_command),
+        patch("builtins.input", return_value="y"),
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when ensuring paru is present
+        aur_builder.ensure_paru()
+
+    # then the error names the failing command and its exit status
+    assert str(error.value) == expected_message
 
 
 def test_install_packages_does_nothing_for_no_packages() -> None:
@@ -548,6 +736,7 @@ def test_install_packages_does_nothing_for_no_packages() -> None:
     aur_builder = AurBuilder(Container("my-project"))
     with (
         patch.object(AurBuilder, "provision_builder") as builder,
+        patch.object(AurBuilder, "share_paru_cache") as cache,
         patch.object(AurBuilder, "ensure_paru") as paru,
         patch.object(Container, "exec_command") as exec_command,
     ):
@@ -556,6 +745,7 @@ def test_install_packages_does_nothing_for_no_packages() -> None:
 
     # then nothing is provisioned at all
     builder.assert_not_called()
+    cache.assert_not_called()
     paru.assert_not_called()
     exec_command.assert_not_called()
 
@@ -573,9 +763,21 @@ def test_install_packages_raises_for_an_unsupported_distribution() -> None:
 def test_install_packages_builds_the_builder_and_paru_then_installs() -> None:
     # given aur packages to install on arch
     aur_builder = AurBuilder(Container("my-project"))
+    calls: list[str] = []
     with (
-        patch.object(AurBuilder, "provision_builder") as builder,
-        patch.object(AurBuilder, "ensure_paru") as paru,
+        patch.object(
+            AurBuilder,
+            "provision_builder",
+            side_effect=lambda: calls.append("provision_builder"),
+        ),
+        patch.object(
+            AurBuilder,
+            "share_paru_cache",
+            side_effect=lambda: calls.append("share_paru_cache"),
+        ),
+        patch.object(
+            AurBuilder, "ensure_paru", side_effect=lambda: calls.append("ensure_paru")
+        ),
         patch.object(
             Container,
             "run_command",
@@ -586,10 +788,10 @@ def test_install_packages_builds_the_builder_and_paru_then_installs() -> None:
         # when installing aur packages
         aur_builder.install_packages("arch", ["yay-bin", "some-other-pkg"])
 
-    # then the builder user and paru are ensured, in that order, before
-    # installing the declared packages as the aur builder user, interactively
-    builder.assert_called_once_with()
-    paru.assert_called_once_with()
+    # then the builder user, the shared paru cache and paru are ensured, in
+    # that order, before installing the declared packages as the aur builder
+    # user, interactively
+    assert calls == ["provision_builder", "share_paru_cache", "ensure_paru"]
     exec_command.assert_called_once_with(
         1001,
         1001,
@@ -799,72 +1001,12 @@ def test_provisioning_reports_pyinfra_failures(failing_step: str) -> None:
     )
 
 
-def _missing_paru_run_command() -> list[subprocess.CompletedProcess]:
-    return [_completed(1), _completed(0, "1001\n"), _completed(0, "1001\n")]
-
-
-def test_ensure_paru_removes_a_leftover_clone_before_cloning() -> None:
-    # given a container without paru, which may hold a clone from an earlier
-    # declined or failed build
-    aur_builder = AurBuilder(Container("my-project"))
-    with (
-        patch.object(Container, "run_command", side_effect=_missing_paru_run_command()),
-        patch.object(Container, "exec_command", return_value=0) as exec_command,
-        patch("builtins.input", return_value="y"),
-    ):
-        # when ensuring paru is present
-        aur_builder.ensure_paru()
-
-    # then any leftover clone is removed before cloning afresh
-    commands = [c.args[3] for c in exec_command.call_args_list]
-    assert commands[:2] == [
-        ["rm", "-rf", "paru-bin"],
-        ["git", "clone", "https://aur.archlinux.org/paru-bin.git", "paru-bin"],
-    ]
-
-
-@pytest.mark.parametrize(
-    ("failing_command", "expected_message"),
-    [
-        (
-            "git",
-            "`git clone https://aur.archlinux.org/paru-bin.git paru-bin` failed in "
-            "container 'my-project' with exit status 128",
-        ),
-        (
-            "makepkg",
-            "`makepkg -si --noconfirm` failed in container 'my-project' "
-            "with exit status 128",
-        ),
-    ],
-)
-def test_ensure_paru_reports_failing_build_steps(
-    failing_command: str, expected_message: str
-) -> None:
-    # given a container without paru where one build step fails
-    aur_builder = AurBuilder(Container("my-project"))
-
-    def exec_command(uid: int, gid: int, cwd: Path, command: list[str]) -> int:
-        return 128 if command[0] == failing_command else 0
-
-    with (
-        patch.object(Container, "run_command", side_effect=_missing_paru_run_command()),
-        patch.object(Container, "exec_command", side_effect=exec_command),
-        patch("builtins.input", return_value="y"),
-        pytest.raises(ProvisioningError) as error,
-    ):
-        # when ensuring paru is present
-        aur_builder.ensure_paru()
-
-    # then the error names the failing command and its exit status
-    assert str(error.value) == expected_message
-
-
 def test_install_packages_reports_a_failing_paru_install() -> None:
     # given aur packages whose installation fails
     aur_builder = AurBuilder(Container("my-project"))
     with (
         patch.object(AurBuilder, "provision_builder"),
+        patch.object(AurBuilder, "share_paru_cache"),
         patch.object(AurBuilder, "ensure_paru"),
         patch.object(
             Container,
