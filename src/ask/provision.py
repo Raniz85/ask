@@ -1,4 +1,5 @@
 import io
+import shlex
 import sys
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -9,13 +10,19 @@ from typing import Any, Iterator
 from pyinfra.api import Config as PyinfraConfig
 from pyinfra.api import Inventory, State
 from pyinfra.api.connect import connect_all
+from pyinfra.api.exceptions import PyinfraError
 from pyinfra.api.operation import add_op
 from pyinfra.api.operations import run_ops
 from pyinfra.api.output import set_echo
 from pyinfra.operations import files, pacman, server
 
 from ask import incus
+from ask.errors import AskError
 from ask.user import ResolvedUser
+
+
+class ProvisioningError(AskError):
+    pass
 
 
 def _echo(message: object = "", *, err: bool = False, **_kwargs: Any) -> None:
@@ -68,9 +75,14 @@ class Provisioner:
         state = State(inventory, PyinfraConfig())
         state.print_output = True
         state.print_input = True
-        connect_all(state)
-        yield state
-        run_ops(state)
+        try:
+            connect_all(state)
+            yield state
+            run_ops(state)
+        except PyinfraError as error:
+            raise ProvisioningError(
+                f"provisioning container {self.container.name!r} failed: {error}"
+            ) from error
 
     def provision_user(self, user: ResolvedUser) -> None:
         with self.session() as state:
@@ -159,6 +171,16 @@ class AurBuilder:
         gid = int(self.container.run_command(["id", "-g", _AUR_BUILD_USER]).stdout)
         return uid, gid
 
+    def _run_as_builder(
+        self, uid: int, gid: int, cwd: Path, command: list[str]
+    ) -> None:
+        returncode = self.container.exec_command(uid, gid, cwd, command)
+        if returncode != 0:
+            raise ProvisioningError(
+                f"`{shlex.join(command)}` failed in container "
+                f"{self.container.name!r} with exit status {returncode}"
+            )
+
     def ensure_paru(self) -> None:
         already_installed = self.container.run_command(
             ["pacman", "-Qq", "paru"]
@@ -169,21 +191,22 @@ class AurBuilder:
         uid, gid = self._builder_ids()
         build_dir = _AUR_BUILD_HOME / _PARU_BIN_DIR
 
-        self.container.exec_command(
+        self._run_as_builder(uid, gid, _AUR_BUILD_HOME, ["rm", "-rf", _PARU_BIN_DIR])
+        self._run_as_builder(
             uid,
             gid,
             _AUR_BUILD_HOME,
             ["git", "clone", _PARU_BIN_REPO, _PARU_BIN_DIR],
         )
-        self.container.exec_command(uid, gid, build_dir, ["cat", "PKGBUILD"])
+        self._run_as_builder(uid, gid, build_dir, ["cat", "PKGBUILD"])
 
         answer = input("Proceed with building paru-bin from the PKGBUILD above? [y/N] ")
         if answer.strip().lower() not in ("y", "yes"):
-            raise RuntimeError("paru build was declined; cannot install AUR packages")
+            raise ProvisioningError(
+                "paru build was declined; cannot install AUR packages"
+            )
 
-        self.container.exec_command(
-            uid, gid, build_dir, ["makepkg", "-si", "--noconfirm"]
-        )
+        self._run_as_builder(uid, gid, build_dir, ["makepkg", "-si", "--noconfirm"])
 
     def install_packages(self, distribution: str, packages: list[str]) -> None:
         if not packages:
@@ -195,6 +218,6 @@ class AurBuilder:
         self.ensure_paru()
 
         uid, gid = self._builder_ids()
-        self.container.exec_command(
+        self._run_as_builder(
             uid, gid, _AUR_BUILD_HOME, ["paru", "-S", "--needed", *packages]
         )

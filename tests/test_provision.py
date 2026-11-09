@@ -6,12 +6,14 @@ import io
 from contextlib import redirect_stderr, redirect_stdout
 
 import pytest
+from pyinfra.api.exceptions import PyinfraError
 from pyinfra.api.output import echo
 from pyinfra.operations import files, pacman, server
 
 from ask.incus import Container
 from ask.provision import (
     AurBuilder,
+    ProvisioningError,
     Provisioner,
     _ancestors_under_home,
     split_aur_packages,
@@ -532,8 +534,10 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
     ):
         # when ensuring paru is present
         # then a clear error is raised, and the package is never built
-        with pytest.raises(RuntimeError, match="declined"):
+        with pytest.raises(ProvisioningError) as error:
             aur_builder.ensure_paru()
+
+    assert str(error.value) == "paru build was declined; cannot install AUR packages"
 
     build_calls = [c for c in exec_command.call_args_list if "makepkg" in c.args[3]]
     assert build_calls == []
@@ -758,3 +762,122 @@ def test_ancestors_under_home_returns_none_when_path_is_outside_home() -> None:
 
     # then nothing is returned, since ownership outside home isn't ours to fix
     assert ancestors == []
+
+
+_USER = ResolvedUser(
+    name="raniz",
+    uid=1000,
+    shell="zsh",
+    group_name="raniz",
+    gid=1000,
+    extra_groups=[],
+)
+
+
+@pytest.mark.parametrize("failing_step", ["connect_all", "run_ops"])
+def test_provisioning_reports_pyinfra_failures(failing_step: str) -> None:
+    # given a provisioner whose pyinfra step fails
+    provisioner = Provisioner(Container("my-project"))
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+        patch(
+            f"ask.provision.{failing_step}",
+            side_effect=PyinfraError("No hosts remaining!"),
+        ),
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when provisioning
+        provisioner.provision_user(_USER)
+
+    # then the error names the container and pyinfra's reason
+    assert str(error.value) == (
+        "provisioning container 'my-project' failed: No hosts remaining!"
+    )
+
+
+def _missing_paru_run_command() -> list[subprocess.CompletedProcess]:
+    return [_completed(1), _completed(0, "1001\n"), _completed(0, "1001\n")]
+
+
+def test_ensure_paru_removes_a_leftover_clone_before_cloning() -> None:
+    # given a container without paru, which may hold a clone from an earlier
+    # declined or failed build
+    aur_builder = AurBuilder(Container("my-project"))
+    with (
+        patch.object(Container, "run_command", side_effect=_missing_paru_run_command()),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("builtins.input", return_value="y"),
+    ):
+        # when ensuring paru is present
+        aur_builder.ensure_paru()
+
+    # then any leftover clone is removed before cloning afresh
+    commands = [c.args[3] for c in exec_command.call_args_list]
+    assert commands[:2] == [
+        ["rm", "-rf", "paru-bin"],
+        ["git", "clone", "https://aur.archlinux.org/paru-bin.git", "paru-bin"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("failing_command", "expected_message"),
+    [
+        (
+            "git",
+            "`git clone https://aur.archlinux.org/paru-bin.git paru-bin` failed in "
+            "container 'my-project' with exit status 128",
+        ),
+        (
+            "makepkg",
+            "`makepkg -si --noconfirm` failed in container 'my-project' "
+            "with exit status 128",
+        ),
+    ],
+)
+def test_ensure_paru_reports_failing_build_steps(
+    failing_command: str, expected_message: str
+) -> None:
+    # given a container without paru where one build step fails
+    aur_builder = AurBuilder(Container("my-project"))
+
+    def exec_command(uid: int, gid: int, cwd: Path, command: list[str]) -> int:
+        return 128 if command[0] == failing_command else 0
+
+    with (
+        patch.object(Container, "run_command", side_effect=_missing_paru_run_command()),
+        patch.object(Container, "exec_command", side_effect=exec_command),
+        patch("builtins.input", return_value="y"),
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when ensuring paru is present
+        aur_builder.ensure_paru()
+
+    # then the error names the failing command and its exit status
+    assert str(error.value) == expected_message
+
+
+def test_install_packages_reports_a_failing_paru_install() -> None:
+    # given aur packages whose installation fails
+    aur_builder = AurBuilder(Container("my-project"))
+    with (
+        patch.object(AurBuilder, "provision_builder"),
+        patch.object(AurBuilder, "ensure_paru"),
+        patch.object(
+            Container,
+            "run_command",
+            side_effect=[_completed(0, "1001\n"), _completed(0, "1001\n")],
+        ),
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when installing them
+        aur_builder.install_packages("arch", ["yay-bin"])
+
+    # then the error names the failing command and its exit status
+    assert str(error.value) == (
+        "`paru -S --needed yay-bin` failed in container 'my-project' with exit status 1"
+    )

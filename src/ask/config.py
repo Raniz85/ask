@@ -18,12 +18,13 @@ from pydantic import (
 from pydantic_core import ErrorDetails, PydanticCustomError
 
 from ask.agent import AgentOption
+from ask.errors import AskError
 from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.shell import ShellOption
 from ask.user import ResolvedUser
 
 
-class ConfigError(Exception):
+class ConfigError(AskError):
     def __init__(self, path: Path, problems: list[str]) -> None:
         super().__init__(path, problems)
         self.path = path
@@ -62,11 +63,15 @@ class TomlSyntaxError(ConfigError):
 
 
 def read_toml(path: Path) -> dict:
-    with path.open("rb") as f:
-        try:
+    try:
+        with path.open("rb") as f:
             return tomllib.load(f)
-        except tomllib.TOMLDecodeError as error:
-            raise TomlSyntaxError(path, error) from None
+    except tomllib.TOMLDecodeError as error:
+        raise TomlSyntaxError(path, error) from None
+    except UnicodeDecodeError:
+        raise ConfigError(path, ["file is not valid UTF-8"]) from None
+    except OSError as error:
+        raise ConfigError(path, [f"cannot read file: {error.strerror}"]) from None
 
 
 _OPTIONS = "options"
@@ -143,7 +148,7 @@ def resolve_user(cfg: Config) -> ResolvedUser:
 
 
 def default_path() -> Path:
-    config_home = os.environ.get("XDG_CONFIG_PATH", str(Path.home() / ".config"))
+    config_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(config_home) / "ask" / "config.toml"
 
 

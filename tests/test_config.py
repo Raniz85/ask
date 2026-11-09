@@ -20,11 +20,11 @@ from ask.shell import ShellOption
 from ask.user import ResolvedUser
 
 
-def test_default_path_uses_xdg_config_path_env_var(
+def test_default_path_uses_xdg_config_home_env_var(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # given XDG_CONFIG_PATH pointing at a custom location
-    monkeypatch.setenv("XDG_CONFIG_PATH", str(tmp_path))
+    # given XDG_CONFIG_HOME pointing at a custom location
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
     # when resolving the default global config path
     path = default_path()
@@ -36,8 +36,22 @@ def test_default_path_uses_xdg_config_path_env_var(
 def test_default_path_falls_back_to_dot_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # given no XDG_CONFIG_PATH set
-    monkeypatch.delenv("XDG_CONFIG_PATH", raising=False)
+    # given no XDG_CONFIG_HOME set
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # when resolving the default global config path
+    path = default_path()
+
+    # then it falls back to ~/.config/ask/config.toml
+    assert path == tmp_path / ".config" / "ask" / "config.toml"
+
+
+def test_default_path_treats_an_empty_xdg_config_home_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given XDG_CONFIG_HOME set to an empty value
+    monkeypatch.setenv("XDG_CONFIG_HOME", "")
     monkeypatch.setenv("HOME", str(tmp_path))
 
     # when resolving the default global config path
@@ -482,3 +496,33 @@ def test_load_reports_every_problem_at_once(tmp_path: Path) -> None:
         "user.uid: Input should be a valid integer",
         "layers.base.bind_mount: unknown key",
     ]
+
+
+def test_read_toml_reports_files_that_cannot_be_read(tmp_path: Path) -> None:
+    # given a configuration path that is a directory rather than a file
+    path = tmp_path / "ask.toml"
+    path.mkdir()
+
+    # when reading it
+    with pytest.raises(ConfigError) as error:
+        read_toml(path)
+
+    # then the error names the file and why it cannot be read
+    assert str(error.value) == (
+        f"invalid configuration in {path}\n  cannot read file: Is a directory"
+    )
+
+
+def test_read_toml_reports_files_that_are_not_utf8(tmp_path: Path) -> None:
+    # given a configuration file with bytes that are not valid UTF-8
+    path = tmp_path / "ask.toml"
+    path.write_bytes(b'distribution = "\xff"\n')
+
+    # when reading it
+    with pytest.raises(ConfigError) as error:
+        read_toml(path)
+
+    # then the error names the file and that it is not UTF-8
+    assert str(error.value) == (
+        f"invalid configuration in {path}\n  file is not valid UTF-8"
+    )

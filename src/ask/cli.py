@@ -7,6 +7,7 @@ from ask import (
     gui as gui_support,
     incus,
     manifest,
+    problems,
     provision,
     shell,
     validation,
@@ -24,6 +25,11 @@ def create() -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
     m = validation.load_manifest(project_dir / "ask.toml", cfg)
+    if incus.Container(project_dir.name).exists():
+        raise incus.ContainerExistsError(
+            f"container {project_dir.name!r} already exists; "
+            "run `ask converge` to update it"
+        )
     incus.Container.create(project_dir.name, m.distribution)
     converge()
 
@@ -96,8 +102,12 @@ def agent(name: str | None = None, *args: str, gui: bool = False) -> None:
     if name is None:
         agent_names = manifest.ResolvedManifest(m, cfg.layers).agent_names
         if not agent_names:
-            raise ValueError("no agents configured")
+            raise agents.AgentError("no agents configured in ask.toml or its layers")
         name = agent_names[0]
+    if name not in agents.known_names():
+        raise agents.AgentError(
+            f"unknown agent {name!r} {problems.known(agents.known_names())}"
+        )
     resolved_agent = agents.resolve(name)
     exec(resolved_agent.name, *args, gui=gui)
 

@@ -3,9 +3,10 @@ from unittest.mock import patch
 
 import pytest
 
+from ask.agent import AgentError
 from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec
 from ask.config import ConfigError
-from ask.incus import Mount
+from ask.incus import ContainerExistsError, Mount
 from ask.user import ResolvedUser
 
 _WAYLAND_MOUNT = Mount(
@@ -28,6 +29,7 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container.create") as container_create,
+        patch("ask.cli.incus.Container.exists", return_value=False),
         patch("ask.cli.converge") as converge_mock,
     ):
         create()
@@ -36,6 +38,35 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
     # distribution, and converge is run to apply the rest of the configuration
     container_create.assert_called_once_with("my-project", "arch")
     converge_mock.assert_called_once_with()
+
+
+def test_create_rejects_a_container_that_already_exists(tmp_path: Path) -> None:
+    # given a project directory with a valid ask.toml
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # and a container for the project that already exists
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container.exists", return_value=True),
+        patch("ask.cli.incus.Container.create") as container_create,
+        patch("ask.cli.converge") as converge_mock,
+        pytest.raises(ContainerExistsError) as error,
+    ):
+        # when running create from within that project directory
+        create()
+
+    # then the error says how to update the container instead, and nothing is
+    # launched or converged
+    assert str(error.value) == (
+        "container 'my-project' already exists; run `ask converge` to update it"
+    )
+    container_create.assert_not_called()
+    converge_mock.assert_not_called()
 
 
 def test_create_rejects_an_unknown_distribution_before_launching(
@@ -128,12 +159,17 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
     # and a config declaring that layer's bind mount
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    configured_mount = tmp_path / "configured-mount"
+    configured_mount.mkdir()
+    layer_mount = tmp_path / "layer-mount"
+    layer_mount.mkdir()
     (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\nbind_mounts = ["/configured/mount"]\nlayers = ["python"]\n'
+        f'distribution = "arch"\nbind_mounts = ["{configured_mount}"]\n'
+        'layers = ["python"]\n'
     )
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[layers.python]\nbind_mounts = ["/layer/mount"]\n'
+        f'[layers.python]\nbind_mounts = ["{layer_mount}"]\n'
         '[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
@@ -158,11 +194,8 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
     container.converge.assert_called_once_with(
         [
             Mount(host_path=project_dir, container_path=project_dir),
-            Mount(host_path=Path("/layer/mount"), container_path=Path("/layer/mount")),
-            Mount(
-                host_path=Path("/configured/mount"),
-                container_path=Path("/configured/mount"),
-            ),
+            Mount(host_path=layer_mount, container_path=layer_mount),
+            Mount(host_path=configured_mount, container_path=configured_mount),
             Mount(
                 host_path=home_dir / ".bashrc",
                 container_path=Path("/home/raniz/.bashrc"),
@@ -1241,9 +1274,11 @@ def test_agent_raises_when_no_agents_are_configured_and_none_given(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        pytest.raises(ValueError, match="no agents configured"),
+        pytest.raises(AgentError) as error,
     ):
         agent()
+
+    assert str(error.value) == "no agents configured in ask.toml or its layers"
 
 
 def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
@@ -1259,9 +1294,13 @@ def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
-        pytest.raises(ValueError, match="copilot"),
+        pytest.raises(AgentError) as error,
     ):
         agent("copilot")
+
+    assert str(error.value) == (
+        "unknown agent 'copilot' (known: claude, codex, opencode, pi)"
+    )
 
 
 def test_agent_forwards_extra_arguments_to_the_agent(tmp_path: Path) -> None:

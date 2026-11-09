@@ -1,7 +1,10 @@
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from ask.errors import AskError
 
 _IMAGE_ALIASES = {
     "arch": "images:archlinux/current",
@@ -14,6 +17,40 @@ _COMMON_CONFIG = {
 
 _MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
 _GUI_SESSIONS_CONFIG_KEY = "user.ask.gui_sessions"
+
+
+class IncusError(AskError):
+    pass
+
+
+class ContainerNotFoundError(AskError):
+    pass
+
+
+class ContainerExistsError(AskError):
+    pass
+
+
+def _failure_message(error: subprocess.CalledProcessError) -> str:
+    message = f"`{shlex.join(error.cmd)}` failed with exit status {error.returncode}"
+    if error.stderr:
+        message += f": {error.stderr.strip()}"
+    return message
+
+
+def _incus(
+    command: list[str], capture: bool = False
+) -> subprocess.CompletedProcess[str]:
+    try:
+        if capture:
+            return subprocess.run(command, check=True, capture_output=True, text=True)
+        return subprocess.run(command, check=True)
+    except FileNotFoundError as error:
+        raise IncusError(
+            "incus command not found; is Incus installed and on PATH?"
+        ) from error
+    except subprocess.CalledProcessError as error:
+        raise IncusError(_failure_message(error)) from error
 
 
 def known_distributions() -> list[str]:
@@ -72,13 +109,12 @@ def _add_disk_device(container_name: str, device_name: str, mount: Mount) -> Non
     ]
     if mount.readonly:
         command.append("readonly=true")
-    subprocess.run(command, check=True)
+    _incus(command)
 
 
 def _remove_device(container_name: str, device_name: str) -> None:
-    subprocess.run(
+    _incus(
         ["incus", "config", "device", "remove", container_name, device_name],
-        check=True,
     )
 
 
@@ -91,23 +127,36 @@ class Container:
         command = ["incus", "launch", image_for(distribution), name]
         for key, value in _COMMON_CONFIG.items():
             command += ["--config", f"{key}={value}"]
-        subprocess.run(command, check=True)
+        _incus(command)
         return Container(name)
 
-    def is_running(self) -> bool:
-        result = subprocess.run(
-            ["incus", "list", self.name, "--format", "csv", "-c", "s"],
-            check=True,
-            capture_output=True,
-            text=True,
+    def status(self) -> str | None:
+        result = _incus(
+            ["incus", "list", self.name, "--format", "csv", "-c", "ns"],
+            capture=True,
         )
-        return result.stdout.strip() == "RUNNING"
+        for line in result.stdout.splitlines():
+            name, _, status = line.partition(",")
+            if name == self.name:
+                return status
+        return None
+
+    def exists(self) -> bool:
+        return self.status() is not None
+
+    def is_running(self) -> bool:
+        return self.status() == "RUNNING"
 
     def start(self) -> None:
-        subprocess.run(["incus", "start", self.name], check=True)
+        _incus(["incus", "start", self.name])
 
     def ensure_running(self) -> None:
-        if not self.is_running():
+        status = self.status()
+        if status is None:
+            raise ContainerNotFoundError(
+                f"no container named {self.name!r}; run `ask create` first"
+            )
+        if status != "RUNNING":
             self.start()
 
     def run_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -149,11 +198,9 @@ class Container:
         return result.returncode
 
     def _device_names(self) -> set[str]:
-        result = subprocess.run(
+        result = _incus(
             ["incus", "config", "device", "list", self.name],
-            check=True,
-            capture_output=True,
-            text=True,
+            capture=True,
         )
         return set(result.stdout.splitlines())
 
@@ -161,17 +208,15 @@ class Container:
         return {d for d in self._device_names() if d.startswith("bind-")}
 
     def get_managed_packages(self) -> list[str]:
-        result = subprocess.run(
+        result = _incus(
             ["incus", "config", "get", self.name, _MANAGED_PACKAGES_CONFIG_KEY],
-            check=True,
-            capture_output=True,
-            text=True,
+            capture=True,
         )
         value = result.stdout.strip()
         return value.split(",") if value else []
 
     def set_managed_packages(self, packages: list[str]) -> None:
-        subprocess.run(
+        _incus(
             [
                 "incus",
                 "config",
@@ -179,21 +224,18 @@ class Container:
                 self.name,
                 f"{_MANAGED_PACKAGES_CONFIG_KEY}={','.join(packages)}",
             ],
-            check=True,
         )
 
     def get_gui_session_count(self) -> int:
-        result = subprocess.run(
+        result = _incus(
             ["incus", "config", "get", self.name, _GUI_SESSIONS_CONFIG_KEY],
-            check=True,
-            capture_output=True,
-            text=True,
+            capture=True,
         )
         value = result.stdout.strip()
         return int(value) if value else 0
 
     def set_gui_session_count(self, count: int) -> None:
-        subprocess.run(
+        _incus(
             [
                 "incus",
                 "config",
@@ -201,7 +243,6 @@ class Container:
                 self.name,
                 f"{_GUI_SESSIONS_CONFIG_KEY}={count}",
             ],
-            check=True,
         )
 
     def add_gui_device(self, mount: Mount) -> None:

@@ -10,6 +10,7 @@ from ask.validation import (
     check_manifest,
     config_warnings,
     load_config,
+    ManifestNotFoundError,
     load_manifest,
     manifest_warnings,
 )
@@ -206,3 +207,55 @@ def test_load_manifest_prints_nothing_without_warnings(
 
     # then nothing is printed to stderr
     assert capsys.readouterr().err == ""
+
+
+def test_load_manifest_reports_a_missing_manifest(tmp_path: Path) -> None:
+    # given a project directory without an ask.toml
+    path = tmp_path / "ask.toml"
+
+    # when loading the manifest
+    with pytest.raises(ManifestNotFoundError) as error:
+        load_manifest(path, Config())
+
+    # then the error says where ask looked and what it needs
+    assert str(error.value) == (
+        f"no ask.toml found in {tmp_path} "
+        "(ask must be run from a project directory containing ask.toml)"
+    )
+
+
+def test_check_manifest_reports_missing_bind_mount_sources(tmp_path: Path) -> None:
+    # given a manifest bind mounting a path that exists and one that does not
+    missing = tmp_path / "missing"
+    m = Manifest(distribution="arch", bind_mounts=[tmp_path, missing])
+
+    # when checking it
+    problems = check_manifest(m, Config())
+
+    # then only the missing path is reported, at its position in the manifest
+    assert problems == [f"bind_mounts.1: path {missing} does not exist"]
+
+
+def test_check_manifest_reports_missing_bind_mount_sources_from_used_layers(
+    tmp_path: Path,
+) -> None:
+    # given a manifest using a layer that bind mounts a missing path
+    missing = tmp_path / "missing"
+    m = Manifest(distribution="arch", layers=["base"])
+
+    # and a global config defining that layer and an unused layer with the
+    # same missing path
+    cfg = Config(
+        layers={
+            "base": Layer(bind_mounts=[tmp_path, missing]),
+            "unused": Layer(bind_mounts=[missing]),
+        }
+    )
+
+    # when checking the manifest
+    problems = check_manifest(m, cfg)
+
+    # then the missing path is reported once, against the used layer
+    assert problems == [
+        f"layers.0: bind mount {missing} from layer 'base' does not exist"
+    ]

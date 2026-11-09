@@ -6,6 +6,8 @@ import pytest
 
 from ask.incus import (
     Container,
+    ContainerNotFoundError,
+    IncusError,
     Mount,
     _diff_devices,
     device_name_for,
@@ -589,7 +591,7 @@ def test_is_running_returns_true_for_a_running_container() -> None:
     container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="RUNNING\n"
+            args=[], returncode=0, stdout="my-project,RUNNING\n"
         )
 
         # when checking whether it is running
@@ -597,12 +599,6 @@ def test_is_running_returns_true_for_a_running_container() -> None:
 
     # then it is reported as running
     assert result is True
-    run.assert_called_once_with(
-        ["incus", "list", "my-project", "--format", "csv", "-c", "s"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
 
 
 def test_is_running_returns_false_for_a_stopped_container() -> None:
@@ -610,7 +606,7 @@ def test_is_running_returns_false_for_a_stopped_container() -> None:
     container = Container("my-project")
     with patch("ask.incus.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="STOPPED\n"
+            args=[], returncode=0, stdout="my-project,STOPPED\n"
         )
 
         # when checking whether it is running
@@ -635,7 +631,7 @@ def test_ensure_running_starts_a_container_that_is_not_already_running() -> None
     # given a container that is not currently running
     container = Container("my-project")
     with (
-        patch.object(Container, "is_running", return_value=False),
+        patch.object(Container, "status", return_value="STOPPED"),
         patch.object(Container, "start") as start,
     ):
         # when ensuring it is running
@@ -649,7 +645,7 @@ def test_ensure_running_does_not_start_an_already_running_container() -> None:
     # given a container that is already running
     container = Container("my-project")
     with (
-        patch.object(Container, "is_running", return_value=True),
+        patch.object(Container, "status", return_value="RUNNING"),
         patch.object(Container, "start") as start,
     ):
         # when ensuring it is running
@@ -730,3 +726,127 @@ def test_run_command_does_not_raise_on_a_non_zero_exit() -> None:
 
     # then the non-zero exit is returned rather than raised
     assert result.returncode == 1
+
+
+def test_incus_commands_report_a_missing_incus_binary() -> None:
+    # given a system without the incus command
+    container = Container("my-project")
+    with (
+        patch("ask.incus.subprocess.run", side_effect=FileNotFoundError("incus")),
+        pytest.raises(IncusError) as error,
+    ):
+        # when running an incus command
+        container.start()
+
+    # then the error says incus could not be found
+    assert str(error.value) == (
+        "incus command not found; is Incus installed and on PATH?"
+    )
+
+
+def test_failing_incus_commands_report_the_command_and_exit_status() -> None:
+    # given an incus command that fails, with its output shown on the terminal
+    container = Container("my-project")
+    failure = subprocess.CalledProcessError(1, ["incus", "start", "my-project"])
+    with (
+        patch("ask.incus.subprocess.run", side_effect=failure),
+        pytest.raises(IncusError) as error,
+    ):
+        # when running it
+        container.start()
+
+    # then the error names the command and its exit status
+    assert str(error.value) == "`incus start my-project` failed with exit status 1"
+
+
+def test_failing_captured_incus_commands_include_the_captured_error_output() -> None:
+    # given an incus command whose output is captured that fails
+    container = Container("my-project")
+    failure = subprocess.CalledProcessError(
+        1,
+        ["incus", "config", "get", "my-project", "user.ask.packages"],
+        stderr="Error: Instance not found\n",
+    )
+    with (
+        patch("ask.incus.subprocess.run", side_effect=failure),
+        pytest.raises(IncusError) as error,
+    ):
+        # when running it
+        container.get_managed_packages()
+
+    # then the error names the command and its exit status, followed by what
+    # incus printed on stderr
+    assert str(error.value) == (
+        "`incus config get my-project user.ask.packages` failed with exit status 1"
+        ": Error: Instance not found"
+    )
+
+
+def test_status_returns_the_state_of_the_exactly_named_container() -> None:
+    # given incus lists the container along with one whose name shares its prefix
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="my-project-2,RUNNING\nmy-project,STOPPED\n"
+        )
+
+        # when getting its status
+        status = container.status()
+
+    # then the state of the container with exactly that name is returned
+    assert status == "STOPPED"
+    run.assert_called_once_with(
+        ["incus", "list", "my-project", "--format", "csv", "-c", "ns"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_status_returns_none_for_a_container_that_does_not_exist() -> None:
+    # given incus only lists a container whose name shares the prefix
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="my-project-2,RUNNING\n"
+        )
+
+        # when getting its status
+        status = container.status()
+
+    # then there is no status
+    assert status is None
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"), [("STOPPED", True), ("RUNNING", True), (None, False)]
+)
+def test_exists_reports_whether_the_container_has_a_status(
+    status: str | None, expected: bool
+) -> None:
+    # given a container with the given status
+    container = Container("my-project")
+    with patch.object(Container, "status", return_value=status):
+        # when checking whether it exists
+        result = container.exists()
+
+    # then it exists exactly when it has a status
+    assert result is expected
+
+
+def test_ensure_running_reports_a_container_that_does_not_exist() -> None:
+    # given a container that has not been created
+    container = Container("my-project")
+    with (
+        patch.object(Container, "status", return_value=None),
+        patch.object(Container, "start") as start,
+        pytest.raises(ContainerNotFoundError) as error,
+    ):
+        # when ensuring it is running
+        container.ensure_running()
+
+    # then the error says how to create it, and nothing is started
+    assert str(error.value) == (
+        "no container named 'my-project'; run `ask create` first"
+    )
+    start.assert_not_called()

@@ -3,10 +3,23 @@ from pathlib import Path
 
 from ask import config, manifest
 from ask.config import Config, ConfigError, Layer
+from ask.errors import AskError
 from ask.incus import known_distributions
 from ask.manifest import Manifest
 from ask.problems import known
 from ask.removal import REMOVAL_PREFIX
+
+
+class ManifestNotFoundError(AskError):
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.path = path
+
+    def __str__(self) -> str:
+        return (
+            f"no {self.path.name} found in {self.path.parent} "
+            f"(ask must be run from a project directory containing {self.path.name})"
+        )
 
 
 def _layer_warnings(location: str, layer: Layer) -> list[str]:
@@ -51,6 +64,18 @@ def check_manifest(m: Manifest, cfg: Config) -> list[str]:
                 f"layers.{index}: layer {layer_name!r} is not defined in the "
                 f"global config {known(set(cfg.layers))}"
             )
+            continue
+        problems += [
+            f"layers.{index}: bind mount {path} from layer {layer_name!r} "
+            "does not exist"
+            for path in cfg.layers[layer_name].bind_mounts
+            if not path.exists()
+        ]
+    problems += [
+        f"bind_mounts.{index}: path {path} does not exist"
+        for index, path in enumerate(m.bind_mounts)
+        if not path.exists()
+    ]
     return problems
 
 
@@ -59,6 +84,8 @@ def manifest_warnings(m: Manifest) -> list[str]:
 
 
 def load_manifest(path: Path, cfg: Config) -> Manifest:
+    if not path.exists():
+        raise ManifestNotFoundError(path)
     m = manifest.load(path)
     problems = check_manifest(m, cfg)
     if problems:

@@ -4,12 +4,17 @@ from typing import Annotated
 
 from pydantic import AfterValidator, StrictBool, StrictStr, ValidationInfo
 
+from ask.errors import AskError
 from ask.incus import Mount
 from ask.module import resolve_packages
 from ask.problems import unknown_name, unknown_options
 from ask.removal import unprefixed
 from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.user import ResolvedUser
+
+
+class AgentError(AskError):
+    pass
 
 
 @dataclass(frozen=True)
