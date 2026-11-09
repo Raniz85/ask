@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -815,6 +816,7 @@ def test_enter_ensures_the_targeted_container_is_running(tmp_path: Path) -> None
     # given a project directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -842,6 +844,7 @@ def test_enter_rejects_an_unknown_shell_before_touching_the_container(
     # given a project directory, and a config declaring an unsupported shell
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('shell = "foosh"\n')
 
@@ -865,6 +868,7 @@ def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user and shell
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -893,6 +897,7 @@ def test_enter_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -917,6 +922,7 @@ def test_enter_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) ->
     # wayland session
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -953,6 +959,7 @@ def test_enter_does_not_forward_anything_when_gui_requested_without_a_session(
     # wayland session on the host
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -984,6 +991,7 @@ def test_exec_ensures_the_targeted_container_is_running(tmp_path: Path) -> None:
     # given a project directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -1009,6 +1017,7 @@ def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -1037,6 +1046,7 @@ def test_exec_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -1061,6 +1071,7 @@ def test_exec_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> 
     # wayland session
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -1096,6 +1107,7 @@ def test_exec_passes_no_env_when_gui_requested_without_a_session(
     # wayland session on the host
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
 
@@ -1392,4 +1404,61 @@ def test_agent_treats_a_dash_prefixed_name_as_an_argument_to_the_default_agent(
     # then the default agent is executed with all arguments, in order
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["claude", "--resume", "--verbose"]
+    )
+
+
+@pytest.mark.parametrize(
+    "command", [lambda: enter(), lambda: exec("true")], ids=["enter", "exec"]
+)
+def test_commands_reject_an_invalid_manifest_before_touching_the_container(
+    tmp_path: Path, command: Callable[[], None]
+) -> None:
+    # given a project directory with an ask.toml containing an unknown key
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\nflayers = []\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("")
+
+    # when running the command from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(ConfigError) as error,
+    ):
+        command()
+
+    # then the problem is reported and the container is never targeted
+    assert error.value.problems == ["flayers: unknown key"]
+    container_cls.assert_not_called()
+
+
+def test_agent_prints_manifest_warnings_once(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a project directory with an ask.toml that produces a warning
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(
+        'distribution = "arch"\n'
+        'agents = ["claude", { name = "-codex", auth = false }]\n'
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when launching an agent
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container_cls.return_value.exec_command.return_value = 0
+        agent()
+
+    # then the warning is printed exactly once
+    assert capsys.readouterr().err == (
+        f"ask: warning in {project_dir / 'ask.toml'}\n"
+        "  agents.1: options have no effect when removing agent 'codex'\n"
     )

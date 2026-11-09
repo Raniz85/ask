@@ -1,0 +1,2 @@
+class AskError(Exception):
+    pass

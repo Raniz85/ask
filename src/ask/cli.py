@@ -78,6 +78,7 @@ def converge() -> None:
 def enter(gui: bool = False) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
+    validation.load_manifest(project_dir / "ask.toml", cfg)
     user = config.resolve_user(cfg)
     container = incus.Container(project_dir.name)
     container.ensure_running()
@@ -109,22 +110,29 @@ def agent(name: str | None = None, *args: str, gui: bool = False) -> None:
             f"unknown agent {name!r} {problems.known(agents.known_names())}"
         )
     resolved_agent = agents.resolve(name)
-    exec(resolved_agent.name, *args, gui=gui)
+    _exec_in_container(project_dir, cfg, [resolved_agent.name, *args], gui)
 
 
 def exec(*command: str, gui: bool = False) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
+    validation.load_manifest(project_dir / "ask.toml", cfg)
+    _exec_in_container(project_dir, cfg, list(command), gui)
+
+
+def _exec_in_container(
+    project_dir: Path, cfg: config.Config, command: list[str], gui: bool
+) -> None:
     user = config.resolve_user(cfg)
     container = incus.Container(project_dir.name)
     container.ensure_running()
     with gui_support.session(container, user, enabled=gui) as gui_env:
         if gui_env:
             returncode = container.exec_command(
-                user.uid, user.gid, project_dir, list(command), env=gui_env
+                user.uid, user.gid, project_dir, command, env=gui_env
             )
         else:
             returncode = container.exec_command(
-                user.uid, user.gid, project_dir, list(command)
+                user.uid, user.gid, project_dir, command
             )
     sys.exit(returncode)
