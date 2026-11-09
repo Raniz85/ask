@@ -15,7 +15,7 @@ from pyinfra.api.output import set_echo
 from pyinfra.operations import files, pacman, server
 
 from ask import incus
-from ask.config import ResolvedUser
+from ask.user import ResolvedUser
 
 
 def _echo(message: object = "", *, err: bool = False, **_kwargs: Any) -> None:

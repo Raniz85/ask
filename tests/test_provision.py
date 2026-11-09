@@ -9,7 +9,6 @@ import pytest
 from pyinfra.api.output import echo
 from pyinfra.operations import files, pacman, server
 
-from ask.config import ResolvedUser
 from ask.incus import Container
 from ask.provision import (
     AurBuilder,
@@ -17,6 +16,7 @@ from ask.provision import (
     _ancestors_under_home,
     split_aur_packages,
 )
+from ask.user import ResolvedUser
 
 
 def test_provision_user_targets_the_container_via_the_incus_connector() -> None:

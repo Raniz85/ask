@@ -4,8 +4,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from ask.config import ResolvedUser
 from ask.incus import Container, Mount
+from ask.user import ResolvedUser
 
 
 def wayland_mount(user: ResolvedUser) -> Mount | None:

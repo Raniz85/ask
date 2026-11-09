@@ -1,8 +1,13 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Annotated
 
-from ask.config import ResolvedUser
+from pydantic import AfterValidator, StrictBool, StrictStr, ValidationInfo
+
 from ask.incus import Mount
+from ask.problems import unknown_name, unknown_options
+from ask.schema import FORBID_UNKNOWN_KEYS
+from ask.user import ResolvedUser
 
 
 @dataclass(frozen=True)
@@ -133,3 +138,29 @@ def resolve(name: str) -> Shell:
         return _SHELLS[name]
     except KeyError:
         raise ValueError(f"no known shell named {name!r}") from None
+
+
+def _check_name(name: str) -> str:
+    if name not in _SHELLS:
+        raise unknown_name("shell", name, known_names())
+    return name
+
+
+def _check_options(options: dict[str, bool], info: ValidationInfo) -> dict[str, bool]:
+    name = info.data.get("name")
+    if name not in _SHELLS:
+        return options
+    option_keys = _SHELLS[name].option_keys()
+    unknown = sorted(key for key in options if key not in option_keys)
+    if unknown:
+        raise unknown_options("shell", name, unknown, option_keys)
+    return options
+
+
+@dataclass
+class ShellOption:
+    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    name: Annotated[StrictStr, AfterValidator(_check_name)]
+    options: Annotated[dict[str, StrictBool], AfterValidator(_check_options)] = field(
+        default_factory=dict
+    )

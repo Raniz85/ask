@@ -1,9 +1,15 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Annotated
 
-from ask.config import ResolvedUser
+from pydantic import AfterValidator, StrictBool, StrictStr, ValidationInfo
+
 from ask.incus import Mount
 from ask.module import resolve_packages
+from ask.problems import unknown_name, unknown_options
+from ask.removal import unprefixed
+from ask.schema import FORBID_UNKNOWN_KEYS
+from ask.user import ResolvedUser
 
 
 @dataclass(frozen=True)
@@ -132,3 +138,29 @@ def resolve(name: str) -> Agent:
         return _AGENTS[name]
     except KeyError:
         raise ValueError(f"no known agent named {name!r}") from None
+
+
+def _check_name(name: str) -> str:
+    if unprefixed(name) not in _AGENTS:
+        raise unknown_name("agent", unprefixed(name), known_names())
+    return name
+
+
+def _check_options(options: dict[str, bool], info: ValidationInfo) -> dict[str, bool]:
+    name = unprefixed(info.data.get("name", ""))
+    if name not in _AGENTS:
+        return options
+    option_keys = _AGENTS[name].option_keys()
+    unknown = sorted(key for key in options if key not in option_keys)
+    if unknown:
+        raise unknown_options("agent", name, unknown, option_keys)
+    return options
+
+
+@dataclass
+class AgentOption:
+    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    name: Annotated[StrictStr, AfterValidator(_check_name)]
+    options: Annotated[dict[str, StrictBool], AfterValidator(_check_options)] = field(
+        default_factory=dict
+    )

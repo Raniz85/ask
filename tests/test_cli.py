@@ -4,8 +4,9 @@ from unittest.mock import patch
 import pytest
 
 from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec
-from ask.config import ConfigError, ResolvedUser
+from ask.config import ConfigError
 from ask.incus import Mount
+from ask.user import ResolvedUser
 
 _WAYLAND_MOUNT = Mount(
     host_path=Path("/run/user/1000/wayland-0"),

@@ -9,7 +9,6 @@ from typing import Annotated
 from pydantic import (
     AfterValidator,
     BeforeValidator,
-    ConfigDict,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -17,6 +16,11 @@ from pydantic import (
     ValidationError,
 )
 from pydantic_core import ErrorDetails, PydanticCustomError
+
+from ask.agent import AgentOption
+from ask.schema import FORBID_UNKNOWN_KEYS
+from ask.shell import ShellOption
+from ask.user import ResolvedUser
 
 
 class ConfigError(Exception):
@@ -65,7 +69,6 @@ def read_toml(path: Path) -> dict:
             raise TomlSyntaxError(path, error) from None
 
 
-FORBID_UNKNOWN_KEYS = ConfigDict(extra="forbid")
 _OPTIONS = "options"
 
 
@@ -84,20 +87,6 @@ def _flatten_options(value: object) -> object:
 
 
 HomePath = Annotated[Path, AfterValidator(Path.expanduser)]
-
-
-@dataclass
-class AgentOption:
-    __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    name: StrictStr
-    options: dict[str, StrictBool] = field(default_factory=dict)
-
-
-@dataclass
-class ShellOption:
-    __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    name: StrictStr
-    options: dict[str, StrictBool] = field(default_factory=dict)
 
 
 @dataclass
@@ -135,16 +124,6 @@ class Config:
     )
     user: User = field(default_factory=User)
     layers: dict[str, Layer] = field(default_factory=dict)
-
-
-@dataclass
-class ResolvedUser:
-    name: str
-    uid: int
-    shell: str
-    group_name: str
-    gid: int
-    extra_groups: list[str]
 
 
 def resolve_user(cfg: Config) -> ResolvedUser:

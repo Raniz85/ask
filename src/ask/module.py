@@ -1,7 +1,7 @@
 from typing import Protocol, runtime_checkable
 
-from ask.config import ResolvedUser
 from ask.incus import Mount
+from ask.user import ResolvedUser
 
 
 def resolve_packages(packages: dict[str, list[str]], distribution: str) -> list[str]:

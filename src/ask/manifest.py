@@ -5,9 +5,11 @@ from pydantic import StrictStr
 
 from ask import agent
 from ask.agent import Agent
-from ask.config import Layer, ResolvedUser, load_as
+from ask.config import Layer, load_as
 from ask.incus import Mount
 from ask.module import resolve_packages
+from ask.removal import is_removal, removals
+from ask.user import ResolvedUser
 
 
 @dataclass(kw_only=True)
@@ -18,17 +20,6 @@ class Manifest(Layer):
 
 def load(path: Path) -> Manifest:
     return load_as(path, Manifest)
-
-
-REMOVAL_PREFIX = "-"
-
-
-def _is_removal(name: str) -> bool:
-    return name.startswith(REMOVAL_PREFIX)
-
-
-def _removals(names: list[str]) -> set[str]:
-    return {name.removeprefix(REMOVAL_PREFIX) for name in names if _is_removal(name)}
 
 
 @dataclass
@@ -66,18 +57,18 @@ class ResolvedManifest:
             layer_packages = resolve_packages(
                 layer.packages, self.manifest.distribution
             )
-            removed = _removals(layer_packages)
+            removed = removals(layer_packages)
             packages = [p for p in packages if p not in removed]
-            packages += [p for p in layer_packages if not _is_removal(p)]
+            packages += [p for p in layer_packages if not is_removal(p)]
         return list(dict.fromkeys(packages))
 
     def _merged_agents(self) -> list[_MergedAgent]:
         merged: dict[str, _MergedAgent] = {}
         for layer in self._configured_layers():
-            for name in _removals([option.name for option in layer.agents]):
+            for name in removals([option.name for option in layer.agents]):
                 merged.pop(name, None)
             for option in layer.agents:
-                if _is_removal(option.name):
+                if is_removal(option.name):
                     continue
                 entry = merged.setdefault(option.name, _MergedAgent(option.name))
                 entry.options.update(option.options)

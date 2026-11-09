@@ -4,20 +4,20 @@ from unittest.mock import patch
 
 import pytest
 
+from ask.agent import AgentOption
 from ask.config import (
-    AgentOption,
     Config,
     ConfigError,
     Group,
     Layer,
-    ResolvedUser,
-    ShellOption,
     User,
     default_path,
     load,
     read_toml,
     resolve_user,
 )
+from ask.shell import ShellOption
+from ask.user import ResolvedUser
 
 
 def test_default_path_uses_xdg_config_path_env_var(

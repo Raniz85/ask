@@ -3,9 +3,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ask.config import ResolvedUser
 from ask.gui import acquire, env, release, session, wayland_mount
 from ask.incus import Container, Mount
+from ask.user import ResolvedUser
 
 _USER = ResolvedUser(
     name="raniz",

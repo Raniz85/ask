@@ -3,10 +3,11 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from ask.agent import Agent
-from ask.config import AgentOption, ConfigError, Layer, ResolvedUser
+from ask.agent import Agent, AgentOption
+from ask.config import ConfigError, Layer
 from ask.incus import Mount
 from ask.manifest import Manifest, ResolvedManifest, load
+from ask.user import ResolvedUser
 
 
 def test_load_reads_distribution_from_toml(tmp_path: Path) -> None:
