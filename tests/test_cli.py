@@ -352,6 +352,49 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
     )
 
 
+def test_converge_mounts_the_shell_files_enabled_by_its_options(
+    tmp_path: Path,
+) -> None:
+    # given a project directory, a config declaring zsh as the shell with its
+    # rc file disabled and zprofile enabled, and a host home directory
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[shell]\nname = "zsh"\nzshrc = false\nzprofile = true\n'
+        '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.Path.home", return_value=home_dir),
+        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then only zprofile is mounted read-only, alongside the project directory
+    container.converge.assert_called_once_with(
+        [
+            Mount(host_path=project_dir, container_path=project_dir),
+            Mount(
+                host_path=home_dir / ".zprofile",
+                container_path=Path("/home/raniz/.zprofile"),
+                readonly=True,
+            ),
+        ]
+    )
+
+
 def test_converge_installs_declared_agent_packages(tmp_path: Path) -> None:
     # given a project directory using a layer that declares the claude agent
     project_dir = tmp_path / "my-project"

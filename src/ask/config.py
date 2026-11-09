@@ -12,6 +12,12 @@ class AgentOption:
 
 
 @dataclass
+class ShellOption:
+    name: str = "bash"
+    options: dict[str, bool] = field(default_factory=dict)
+
+
+@dataclass
 class Layer:
     bind_mounts: list[Path] = field(default_factory=list)
     packages: dict[str, list[str]] = field(default_factory=dict)
@@ -35,7 +41,7 @@ class User:
 
 @dataclass
 class Config:
-    shell: str = "bash"
+    shell: ShellOption = field(default_factory=ShellOption)
     user: User = field(default_factory=User)
     layers: dict[str, Layer] = field(default_factory=dict)
 
@@ -59,7 +65,7 @@ def resolve_user(cfg: Config) -> ResolvedUser:
     return ResolvedUser(
         name=name,
         uid=uid,
-        shell=cfg.shell,
+        shell=cfg.shell.name,
         group_name=group_name,
         gid=gid,
         extra_groups=cfg.user.extra_groups,
@@ -72,6 +78,14 @@ def _parse_agent(entry: str | dict) -> AgentOption:
     name = entry["name"]
     options = {key: value for key, value in entry.items() if key != "name"}
     return AgentOption(name=name, options=options)
+
+
+def _parse_shell(entry: str | dict) -> ShellOption:
+    if isinstance(entry, str):
+        return ShellOption(name=entry)
+    name = entry["name"]
+    options = {key: value for key, value in entry.items() if key != "name"}
+    return ShellOption(name=name, options=options)
 
 
 def default_path() -> Path:
@@ -108,4 +122,6 @@ def load(path: Path) -> Config:
         group=Group(name=group_data.get("name"), gid=group_data.get("gid")),
     )
 
-    return Config(shell=data.get("shell", "bash"), user=user, layers=layers)
+    return Config(
+        shell=_parse_shell(data.get("shell", "bash")), user=user, layers=layers
+    )

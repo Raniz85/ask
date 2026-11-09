@@ -6,63 +6,108 @@ from ask.incus import Mount
 
 
 @dataclass(frozen=True)
+class ShellFile:
+    key: str
+    path: str
+    enabled_by_default: bool = False
+
+
+@dataclass(frozen=True)
 class Shell:
     name: str
-    rc_filename: str
+    files: list[ShellFile] = field(default_factory=list)
     packages: list[str] = field(default_factory=list)
 
     def packages_for(self, distribution: str) -> list[str]:
         return list(self.packages)
 
-    def mounts_for(self, user: ResolvedUser) -> list[Mount]:
+    def mounts_for(
+        self, user: ResolvedUser, options: dict[str, bool] | None = None
+    ) -> list[Mount]:
+        options = options or {}
         return [
             Mount(
-                host_path=Path.home() / self.rc_filename,
-                container_path=Path(f"/home/{user.name}") / self.rc_filename,
+                host_path=Path.home() / shell_file.path,
+                container_path=Path(f"/home/{user.name}") / shell_file.path,
                 readonly=True,
             )
+            for shell_file in self.files
+            if options.get(shell_file.key, shell_file.enabled_by_default)
         ]
 
 
 @dataclass(frozen=True)
 class Bash(Shell):
     name: str = "bash"
-    rc_filename: str = ".bashrc"
+    files: list[ShellFile] = field(
+        default_factory=lambda: [
+            ShellFile("bashrc", ".bashrc", enabled_by_default=True),
+            ShellFile("bash_profile", ".bash_profile"),
+            ShellFile("profile", ".profile"),
+        ]
+    )
     packages: list[str] = field(default_factory=lambda: ["bash"])
 
 
 @dataclass(frozen=True)
 class Zsh(Shell):
     name: str = "zsh"
-    rc_filename: str = ".zshrc"
+    files: list[ShellFile] = field(
+        default_factory=lambda: [
+            ShellFile("zshrc", ".zshrc", enabled_by_default=True),
+            ShellFile("zprofile", ".zprofile"),
+            ShellFile("zshenv", ".zshenv"),
+        ]
+    )
     packages: list[str] = field(default_factory=lambda: ["zsh"])
 
 
 @dataclass(frozen=True)
 class Fish(Shell):
     name: str = "fish"
-    rc_filename: str = ".config/fish/config.fish"
+    files: list[ShellFile] = field(
+        default_factory=lambda: [
+            ShellFile("config", ".config/fish/config.fish", enabled_by_default=True),
+            ShellFile("functions", ".config/fish/functions"),
+            ShellFile("conf_d", ".config/fish/conf.d"),
+        ]
+    )
     packages: list[str] = field(default_factory=lambda: ["fish"])
 
 
 @dataclass(frozen=True)
 class Ksh(Shell):
     name: str = "ksh"
-    rc_filename: str = ".kshrc"
+    files: list[ShellFile] = field(
+        default_factory=lambda: [
+            ShellFile("kshrc", ".kshrc", enabled_by_default=True),
+            ShellFile("profile", ".profile"),
+        ]
+    )
     packages: list[str] = field(default_factory=lambda: ["ksh"])
 
 
 @dataclass(frozen=True)
 class Elvish(Shell):
     name: str = "elvish"
-    rc_filename: str = ".config/elvish/rc.elv"
+    files: list[ShellFile] = field(
+        default_factory=lambda: [
+            ShellFile("rc", ".config/elvish/rc.elv", enabled_by_default=True),
+            ShellFile("lib", ".config/elvish/lib"),
+        ]
+    )
     packages: list[str] = field(default_factory=lambda: ["elvish"])
 
 
 @dataclass(frozen=True)
 class Tcsh(Shell):
     name: str = "tcsh"
-    rc_filename: str = ".tcshrc"
+    files: list[ShellFile] = field(
+        default_factory=lambda: [
+            ShellFile("tcshrc", ".tcshrc", enabled_by_default=True),
+            ShellFile("login", ".login"),
+        ]
+    )
     packages: list[str] = field(default_factory=lambda: ["tcsh"])
 
 

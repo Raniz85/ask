@@ -4,72 +4,93 @@ import pytest
 
 from ask.config import ResolvedUser
 from ask.incus import Mount
-from ask.shell import Bash, Elvish, Fish, Ksh, Tcsh, Zsh, resolve
+from ask.shell import Bash, Elvish, Fish, Ksh, ShellFile, Tcsh, Zsh, resolve
 
 
-def test_bash_has_its_rc_filename_and_package() -> None:
+def test_bash_has_its_files_and_package() -> None:
     # given the bash shell
     # when inspecting its properties
     bash = Bash()
 
-    # then its name, rc filename and required package are as expected
+    # then its name, files and required package are as expected
     assert bash.name == "bash"
-    assert bash.rc_filename == ".bashrc"
+    assert bash.files == [
+        ShellFile("bashrc", ".bashrc", enabled_by_default=True),
+        ShellFile("bash_profile", ".bash_profile"),
+        ShellFile("profile", ".profile"),
+    ]
     assert bash.packages == ["bash"]
 
 
-def test_zsh_has_its_rc_filename_and_package() -> None:
+def test_zsh_has_its_files_and_package() -> None:
     # given the zsh shell
     # when inspecting its properties
     zsh = Zsh()
 
-    # then its name, rc filename and required package are as expected
+    # then its name, files and required package are as expected
     assert zsh.name == "zsh"
-    assert zsh.rc_filename == ".zshrc"
+    assert zsh.files == [
+        ShellFile("zshrc", ".zshrc", enabled_by_default=True),
+        ShellFile("zprofile", ".zprofile"),
+        ShellFile("zshenv", ".zshenv"),
+    ]
     assert zsh.packages == ["zsh"]
 
 
-def test_fish_has_its_rc_filename_and_package() -> None:
+def test_fish_has_its_files_and_package() -> None:
     # given the fish shell
     # when inspecting its properties
     fish = Fish()
 
-    # then its name, rc filename and required package are as expected
+    # then its name, files and required package are as expected
     assert fish.name == "fish"
-    assert fish.rc_filename == ".config/fish/config.fish"
+    assert fish.files == [
+        ShellFile("config", ".config/fish/config.fish", enabled_by_default=True),
+        ShellFile("functions", ".config/fish/functions"),
+        ShellFile("conf_d", ".config/fish/conf.d"),
+    ]
     assert fish.packages == ["fish"]
 
 
-def test_ksh_has_its_rc_filename_and_package() -> None:
+def test_ksh_has_its_files_and_package() -> None:
     # given the ksh shell
     # when inspecting its properties
     ksh = Ksh()
 
-    # then its name, rc filename and required package are as expected
+    # then its name, files and required package are as expected
     assert ksh.name == "ksh"
-    assert ksh.rc_filename == ".kshrc"
+    assert ksh.files == [
+        ShellFile("kshrc", ".kshrc", enabled_by_default=True),
+        ShellFile("profile", ".profile"),
+    ]
     assert ksh.packages == ["ksh"]
 
 
-def test_elvish_has_its_rc_filename_and_package() -> None:
+def test_elvish_has_its_files_and_package() -> None:
     # given the elvish shell
     # when inspecting its properties
     elvish = Elvish()
 
-    # then its name, rc filename and required package are as expected
+    # then its name, files and required package are as expected
     assert elvish.name == "elvish"
-    assert elvish.rc_filename == ".config/elvish/rc.elv"
+    assert elvish.files == [
+        ShellFile("rc", ".config/elvish/rc.elv", enabled_by_default=True),
+        ShellFile("lib", ".config/elvish/lib"),
+    ]
     assert elvish.packages == ["elvish"]
 
 
-def test_tcsh_has_its_rc_filename_and_package() -> None:
+def test_tcsh_has_its_files_and_package() -> None:
     # given the tcsh shell
     # when inspecting its properties
     tcsh = Tcsh()
 
-    # then its name, rc filename and required package are as expected
+    # then its name, files and required package are as expected
     assert tcsh.name == "tcsh"
-    assert tcsh.rc_filename == ".tcshrc"
+    assert tcsh.files == [
+        ShellFile("tcshrc", ".tcshrc", enabled_by_default=True),
+        ShellFile("login", ".login"),
+    ]
     assert tcsh.packages == ["tcsh"]
 
 
@@ -187,6 +208,69 @@ def test_mounts_for_returns_the_nested_rc_file_mount_readonly(
         Mount(
             host_path=tmp_path / ".config/fish/config.fish",
             container_path=Path("/home/raniz/.config/fish/config.fish"),
+            readonly=True,
+        )
+    ]
+
+
+def _user(shell: str) -> ResolvedUser:
+    return ResolvedUser(
+        name="raniz",
+        uid=1000,
+        shell=shell,
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
+    )
+
+
+def test_mounts_for_includes_files_enabled_by_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # given the zsh shell, a host home directory, and a resolved user
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    zsh = Zsh()
+    user = _user("zsh")
+
+    # when resolving its mounts with zprofile and zshenv enabled
+    mounts = zsh.mounts_for(user, {"zprofile": True, "zshenv": True})
+
+    # then the default rc file and the enabled files are all mounted read-only
+    assert mounts == [
+        Mount(
+            host_path=tmp_path / ".zshrc",
+            container_path=Path("/home/raniz/.zshrc"),
+            readonly=True,
+        ),
+        Mount(
+            host_path=tmp_path / ".zprofile",
+            container_path=Path("/home/raniz/.zprofile"),
+            readonly=True,
+        ),
+        Mount(
+            host_path=tmp_path / ".zshenv",
+            container_path=Path("/home/raniz/.zshenv"),
+            readonly=True,
+        ),
+    ]
+
+
+def test_mounts_for_excludes_files_disabled_by_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # given the zsh shell, a host home directory, and a resolved user
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    zsh = Zsh()
+    user = _user("zsh")
+
+    # when resolving its mounts with the default rc file disabled
+    mounts = zsh.mounts_for(user, {"zshrc": False, "zprofile": True})
+
+    # then only the explicitly enabled file is mounted
+    assert mounts == [
+        Mount(
+            host_path=tmp_path / ".zprofile",
+            container_path=Path("/home/raniz/.zprofile"),
             readonly=True,
         )
     ]

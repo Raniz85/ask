@@ -1,6 +1,21 @@
 # The shell to use, defaults to bash if unset
 shell = "zsh"
 
+# Or with full options (defaults shown)
+# [shell]
+# name = "zsh"
+# zshrc = true
+# zprofile = false
+# zshenv = false
+#
+# Available options per shell (defaults shown)
+# bash:   bashrc = true, bash_profile = false, profile = false
+# zsh:    zshrc = true, zprofile = false, zshenv = false
+# fish:   config = true, functions = false, conf_d = false
+# ksh:    kshrc = true, profile = false
+# elvish: rc = true, lib = false
+# tcsh:   tcshrc = true, login = false
+
 # Optional user definition, mirrors the calling user if unset
 # [user]
 # name = "raniz"
@@ -14,7 +29,6 @@ shell = "zsh"
 
 [layers.base]
 packages.arch = [
-  "zsh",
   "neovim",
   "starship",
   "dprint",

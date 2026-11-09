@@ -9,6 +9,7 @@ from ask.config import (
     Group,
     Layer,
     ResolvedUser,
+    ShellOption,
     User,
     default_path,
     load,
@@ -202,8 +203,8 @@ def test_load_defaults_shell_to_bash(tmp_path: Path) -> None:
     # when loading the config
     config = load(config_path)
 
-    # then shell defaults to bash
-    assert config.shell == "bash"
+    # then shell defaults to bash with default options
+    assert config.shell == ShellOption(name="bash", options={})
 
 
 def test_load_reads_shell_from_toml(tmp_path: Path) -> None:
@@ -214,8 +215,22 @@ def test_load_reads_shell_from_toml(tmp_path: Path) -> None:
     # when loading the config
     config = load(config_path)
 
-    # then the declared shell is read
-    assert config.shell == "zsh"
+    # then the declared shell is read with default options
+    assert config.shell == ShellOption(name="zsh", options={})
+
+
+def test_load_reads_shell_options_from_toml(tmp_path: Path) -> None:
+    # given a config file declaring a shell table with file options
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[shell]\nname = "zsh"\nzshrc = false\nzprofile = true\n')
+
+    # when loading the config
+    config = load(config_path)
+
+    # then the shell name and its file options are read
+    assert config.shell == ShellOption(
+        name="zsh", options={"zshrc": False, "zprofile": True}
+    )
 
 
 def test_load_defaults_user_to_unset(tmp_path: Path) -> None:
@@ -264,7 +279,7 @@ def _mock_pwent(name: str, uid: int):
 
 def test_resolve_user_mirrors_the_calling_user_when_fully_unset() -> None:
     # given a config with no user declared, and a calling host user
-    cfg = Config(shell="zsh", user=User())
+    cfg = Config(shell=ShellOption(name="zsh"), user=User())
 
     # when resolving the user
     with _mock_pwent("hostuser", 1234):
@@ -285,7 +300,7 @@ def test_resolve_user_mirrors_the_calling_user_when_fully_unset() -> None:
 def test_resolve_user_uses_declared_fields_over_the_calling_user() -> None:
     # given a config declaring a full user and group
     cfg = Config(
-        shell="bash",
+        shell=ShellOption(name="bash"),
         user=User(
             name="raniz",
             uid=1000,
@@ -311,7 +326,7 @@ def test_resolve_user_uses_declared_fields_over_the_calling_user() -> None:
 
 def test_resolve_user_defaults_group_to_a_private_group_of_the_declared_user() -> None:
     # given a config declaring a user but no group
-    cfg = Config(shell="bash", user=User(name="raniz", uid=1000))
+    cfg = Config(shell=ShellOption(name="bash"), user=User(name="raniz", uid=1000))
 
     # when resolving the user
     with _mock_pwent("hostuser", 1234):

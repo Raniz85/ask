@@ -44,7 +44,7 @@ def converge() -> None:
     official_packages, aur_packages = provision.split_aur_packages(packages)
 
     mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
-    mounts += user_shell.mounts_for(user)
+    mounts += user_shell.mounts_for(user, cfg.shell.options)
     mounts += resolved_manifest.shared_state_mounts(user)
 
     provisioner = provision.Provisioner(container)
