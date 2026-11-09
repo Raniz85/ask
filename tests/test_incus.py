@@ -1,4 +1,6 @@
 import subprocess
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -7,6 +9,8 @@ import pytest
 from ask.incus import (
     Container,
     ContainerNotFoundError,
+    ConvergedState,
+    Fingerprint,
     IncusError,
     Mount,
     _diff_devices,
@@ -434,6 +438,89 @@ def test_converge_leaves_a_gui_device_alone() -> None:
     # reconciliation only ever sees "bind-" prefixed devices
     remove_calls = [c for c in run.call_args_list if "remove" in c.args[0]]
     assert remove_calls == []
+
+
+def _config_values(
+    values: dict[str, str],
+) -> Callable[..., subprocess.CompletedProcess]:
+    def run(command: list[str], **_: object) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(
+            args=command, returncode=0, stdout=values.get(command[-1], "") + "\n"
+        )
+
+    return run
+
+
+def test_get_converged_fingerprint_returns_none_when_never_converged() -> None:
+    # given a container without any recorded convergence
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run", side_effect=_config_values({})):
+        # when reading the fingerprint of the last convergence
+        fingerprint = container.get_converged_fingerprint()
+
+    # then there is none
+    assert fingerprint is None
+
+
+def test_get_converged_fingerprint_returns_none_when_partially_recorded() -> None:
+    # given a container with only the version of the last convergence recorded
+    container = Container("my-project")
+    values = {"user.ask.converged.version": "0.1.0"}
+    with patch("ask.incus.subprocess.run", side_effect=_config_values(values)):
+        # when reading the fingerprint of the last convergence
+        fingerprint = container.get_converged_fingerprint()
+
+    # then there is none
+    assert fingerprint is None
+
+
+def test_get_converged_fingerprint_returns_the_recorded_version_and_hash() -> None:
+    # given a container with a recorded convergence
+    container = Container("my-project")
+    values = {
+        "user.ask.converged.version": "0.1.0",
+        "user.ask.converged.hash": "abc123",
+    }
+    with patch(
+        "ask.incus.subprocess.run", side_effect=_config_values(values)
+    ) as run:
+        # when reading the fingerprint of the last convergence
+        fingerprint = container.get_converged_fingerprint()
+
+    # then the recorded version and hash are returned, read from their config keys
+    assert fingerprint == Fingerprint(version="0.1.0", config_hash="abc123")
+    assert [call.args[0] for call in run.call_args_list] == [
+        ["incus", "config", "get", "my-project", "user.ask.converged.version"],
+        ["incus", "config", "get", "my-project", "user.ask.converged.hash"],
+    ]
+
+
+def test_set_converged_state_stores_every_part_of_the_state_at_once() -> None:
+    # given the state of a convergence
+    container = Container("my-project")
+    state = ConvergedState(
+        fingerprint=Fingerprint(version="0.1.0", config_hash="abc123"),
+        configuration='{"distribution":"arch"}',
+        at=datetime(2026, 11, 9, 12, 30, tzinfo=UTC),
+    )
+    with patch("ask.incus.subprocess.run") as run:
+        # when storing it
+        container.set_converged_state(state)
+
+    # then every part is stored under its own config key in a single call
+    run.assert_called_once_with(
+        [
+            "incus",
+            "config",
+            "set",
+            "my-project",
+            "user.ask.converged.version=0.1.0",
+            "user.ask.converged.hash=abc123",
+            'user.ask.converged.configuration={"distribution":"arch"}',
+            "user.ask.converged.at=2026-11-09T12:30:00+00:00",
+        ],
+        check=True,
+    )
 
 
 def test_get_gui_session_count_returns_zero_when_unset() -> None:

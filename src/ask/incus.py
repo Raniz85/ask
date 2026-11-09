@@ -2,6 +2,7 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from ask.errors import AskError
@@ -17,6 +18,10 @@ _COMMON_CONFIG = {
 
 _MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
 _GUI_SESSIONS_CONFIG_KEY = "user.ask.gui_sessions"
+_CONVERGED_VERSION_CONFIG_KEY = "user.ask.converged.version"
+_CONVERGED_HASH_CONFIG_KEY = "user.ask.converged.hash"
+_CONVERGED_CONFIGURATION_CONFIG_KEY = "user.ask.converged.configuration"
+_CONVERGED_AT_CONFIG_KEY = "user.ask.converged.at"
 
 
 class IncusError(AskError):
@@ -76,6 +81,19 @@ class Mount:
     host_path: Path
     container_path: Path
     readonly: bool = False
+
+
+@dataclass(frozen=True)
+class Fingerprint:
+    version: str
+    config_hash: str
+
+
+@dataclass(frozen=True)
+class ConvergedState:
+    fingerprint: Fingerprint
+    configuration: str
+    at: datetime
 
 
 def _diff_devices(
@@ -243,6 +261,31 @@ class Container:
                 "set",
                 self.name,
                 f"{_MANAGED_PACKAGES_CONFIG_KEY}={','.join(packages)}",
+            ],
+        )
+
+    def _get_config(self, key: str) -> str:
+        result = _incus(["incus", "config", "get", self.name, key], capture=True)
+        return result.stdout.strip()
+
+    def get_converged_fingerprint(self) -> Fingerprint | None:
+        version = self._get_config(_CONVERGED_VERSION_CONFIG_KEY)
+        config_hash = self._get_config(_CONVERGED_HASH_CONFIG_KEY)
+        if not version or not config_hash:
+            return None
+        return Fingerprint(version=version, config_hash=config_hash)
+
+    def set_converged_state(self, state: ConvergedState) -> None:
+        _incus(
+            [
+                "incus",
+                "config",
+                "set",
+                self.name,
+                f"{_CONVERGED_VERSION_CONFIG_KEY}={state.fingerprint.version}",
+                f"{_CONVERGED_HASH_CONFIG_KEY}={state.fingerprint.config_hash}",
+                f"{_CONVERGED_CONFIGURATION_CONFIG_KEY}={state.configuration}",
+                f"{_CONVERGED_AT_CONFIG_KEY}={state.at.isoformat()}",
             ],
         )
 
