@@ -40,14 +40,19 @@ shell = "zsh"
 # The base layer, this layer always exists and is always applied as the lowest layer
 [layers.base]
 packages = [
+  "openssh-server",
   "neovim",
   "starship",
   "dprint",
   "aur:antigen",
 ]
 
-# Agent definitions, `ask agent` will launch the first agent in the list
-# to launch another agent call `ask agent <name>`
+# SystemD Services to enable
+services."sshd.service" = "enabled"
+services."man-db.timer" = "enabled"
+
+# Agent definitions, `ask agent` will launch the first agent in the list.
+# To launch another agent call `ask agent <name>`
 agents = [
   # Can be the name of the agent, which sets default options
   "claude",

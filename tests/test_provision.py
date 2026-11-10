@@ -9,7 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 import pytest
 from pyinfra.api.exceptions import PyinfraError
 from pyinfra.api.output import echo
-from pyinfra.operations import files, pacman, server
+from pyinfra.operations import files, pacman, server, systemd
 
 from ask.incus import Container
 from ask.tool_manager import config_digest
@@ -79,6 +79,135 @@ def test_provision_user_connects_before_running_operations() -> None:
     run_ops.assert_called_once_with(state_cls.return_value)
 
 
+def test_provision_services_enabled(tmp_path: Path) -> None:
+    # given a provisioner and services to enable
+    provisioner = Provisioner(Container("my-project"))
+    services = {"sshd.service": "enabled"}
+
+    # when provisioning those services
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_services(services)
+
+    # then the systemd operation is called with enabled=True and running=True
+    state_cls.return_value.print_output = True
+    state_cls.return_value.print_input = True
+    add_op.assert_called_once_with(
+        state_cls.return_value,
+        systemd.service,
+        service="sshd.service",
+        enabled=True,
+        running=True,
+    )
+
+
+def test_provision_services_disabled(tmp_path: Path) -> None:
+    # given a provisioner and services to disable
+    provisioner = Provisioner(Container("my-project"))
+    services = {"sshd.service": "disabled"}
+
+    # when provisioning those services
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_services(services)
+
+    # then the systemd operation is called with enabled=False and running=False
+    state_cls.return_value.print_output = True
+    state_cls.return_value.print_input = True
+    add_op.assert_called_once_with(
+        state_cls.return_value,
+        systemd.service,
+        service="sshd.service",
+        enabled=False,
+        running=False,
+    )
+
+
+def test_provision_services_masked(tmp_path: Path) -> None:
+    # given a provisioner and services to mask
+    provisioner = Provisioner(Container("my-project"))
+    services = {"sshd.service": "masked"}
+
+    # when provisioning those services
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_services(services)
+
+    # then the systemd operation is called with masked=True and running=False
+    state_cls.return_value.print_output = True
+    state_cls.return_value.print_input = True
+    add_op.assert_called_once_with(
+        state_cls.return_value,
+        systemd.service,
+        service="sshd.service",
+        masked=True,
+        running=False,
+    )
+
+
+def test_provision_services_multiple(tmp_path: Path) -> None:
+    # given a provisioner and multiple services
+    provisioner = Provisioner(Container("my-project"))
+    services = {
+        "sshd.service": "enabled",
+        "man-db.timer": "disabled",
+        "cronie.service": "masked",
+    }
+
+    # when provisioning those services
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_services(services)
+
+    # then the systemd operations are called with the correct parameters
+    state_cls.return_value.print_output = True
+    state_cls.return_value.print_input = True
+    calls = [
+        call(
+            state_cls.return_value,
+            systemd.service,
+            service="sshd.service",
+            enabled=True,
+            running=True,
+        ),
+        call(
+            state_cls.return_value,
+            systemd.service,
+            service="man-db.timer",
+            enabled=False,
+            running=False,
+        ),
+        call(
+            state_cls.return_value,
+            systemd.service,
+            service="cronie.service",
+            masked=True,
+            running=False,
+        ),
+    ]
+    add_op.assert_has_calls(calls, any_order=True)
+
+
 def test_provision_user_enables_output_printing() -> None:
     # given a resolved user, and a provisioner
     user = ResolvedUser(
@@ -90,8 +219,6 @@ def test_provision_user_enables_output_printing() -> None:
         extra_groups=[],
     )
     provisioner = Provisioner(Container("my-project"))
-
-    # when provisioning that user
     with (
         patch("ask.provision.Inventory"),
         patch("ask.provision.State") as state_cls,

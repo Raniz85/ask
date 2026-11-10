@@ -9,4 +9,3 @@ packages = [
 
 scripts.test = "uv run pytest"
 scripts.lint = "uv run ruff check"
-

@@ -5,8 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
+from pydantic_core import PydanticCustomError
+
 from ask.agent import AgentOption
 from ask.config import (
+    ALLOWED_SERVICE_STATES,
     Config,
     ConfigError,
     Flavor,

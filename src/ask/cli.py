@@ -113,6 +113,11 @@ def converge(
     provisioner.provision_packages(distribution, official_packages)
     aur_builder.install_packages(distribution, aur_packages)
 
+    # Provision systemd services
+    services = resolved.services
+    if services:
+        provisioner.provision_services(services)
+
     resolved_packages = official_packages + aur_packages
     stale = incus.stale_packages(container.get_managed_packages(), resolved_packages)
     if stale:

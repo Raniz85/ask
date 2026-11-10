@@ -4,11 +4,15 @@ shell = "zsh"
 
 [layers.base]
 packages = [
+  "openssh",
   "neovim",
   "starship",
   "dprint",
   "aur:antigen",
 ]
+
+services."sshd.service" = "enabled"
+services."man-db.timer" = "enabled"
 
 agents = [
   "claude",

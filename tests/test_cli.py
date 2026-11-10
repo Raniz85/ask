@@ -421,6 +421,39 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
     )
 
 
+def test_converge_provisions_services_from_layers(tmp_path: Path) -> None:
+    # given a project with services configured
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + '[layers.base]\nservices."sshd.service" = "enabled"\nservices."man-db.timer" = "disabled"\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the resolved services are provisioned
+    provisioner_cls.return_value.provision_services.assert_called_once_with(
+        {
+            "sshd.service": "enabled",
+            "man-db.timer": "disabled",
+        }
+    )
+
+
 def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> None:
     # given a project directory with no packages of its own, and a config
     # declaring zsh as the shell

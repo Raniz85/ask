@@ -25,6 +25,9 @@ from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.shell import ShellOption
 from ask.user import ResolvedUser
 
+# Allowed systemd service states (persistent configuration states only)
+ALLOWED_SERVICE_STATES = {"enabled", "disabled", "masked"}
+
 
 class ConfigError(AskError):
     def __init__(self, path: Path, problems: list[str]) -> None:

@@ -14,7 +14,7 @@ from pyinfra.api.exceptions import PyinfraError
 from pyinfra.api.operation import add_op
 from pyinfra.api.operations import run_ops
 from pyinfra.api.output import set_echo
-from pyinfra.operations import files, pacman, server
+from pyinfra.operations import files, pacman, server, systemd
 
 from ask import incus
 from ask.errors import AskError
@@ -129,6 +129,34 @@ class Provisioner:
                     user=user.name,
                     group=user.group_name,
                 )
+
+    def provision_services(self, services: dict[str, str]) -> None:
+        with self.session() as state:
+            for service, state_desired in services.items():
+                if state_desired == "enabled":
+                    add_op(
+                        state,
+                        systemd.service,
+                        service=service,
+                        enabled=True,
+                        running=True,
+                    )
+                elif state_desired == "disabled":
+                    add_op(
+                        state,
+                        systemd.service,
+                        service=service,
+                        enabled=False,
+                        running=False,
+                    )
+                elif state_desired == "masked":
+                    add_op(
+                        state,
+                        systemd.service,
+                        service=service,
+                        masked=True,
+                        running=False,
+                    )
 
 
 def _run_checked(
