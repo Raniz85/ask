@@ -15,6 +15,7 @@ from ask import (
     problems,
     provision,
     shell,
+    slug,
     validation,
 )
 from ask.module import Module
@@ -65,12 +66,13 @@ def _resolve_project(project_dir: Path) -> manifest.ResolvedManifest:
 def create() -> None:
     project_dir = Path.cwd()
     resolved = _resolve_project(project_dir)
-    if incus.Container(project_dir.name).snapshot() is not None:
+    container_name = slug.slugify(project_dir.name)
+    if incus.Container(container_name).snapshot() is not None:
         raise incus.ContainerExistsError(
-            f"Container {project_dir.name!r} already exists. "
+            f"Container {container_name!r} already exists. "
             "Run `ask converge` to update it."
         )
-    incus.Container.create(project_dir.name, resolved.flavor.distribution)
+    incus.Container.create(container_name, resolved.flavor.distribution)
     converge()
 
 
@@ -81,6 +83,7 @@ def converge(
     project_dir = Path.cwd()
     resolved = _resolve_project(project_dir)
     distribution = resolved.flavor.distribution
+    container_name = slug.slugify(project_dir.name)
     container, _ = _running_container(project_dir, create_missing)
     bind_mounts = [project_dir] + resolved.bind_mounts
     user = config.resolve_user(resolved.flavor)
@@ -243,14 +246,15 @@ def _confirm(prompt: str) -> bool:
 def _running_container(
     project_dir: Path, create_missing: bool
 ) -> tuple[incus.Container, incus.InstanceSnapshot | None]:
-    container = incus.Container(project_dir.name)
+    container_name = slug.slugify(project_dir.name)
+    container = incus.Container(container_name)
     snapshot = container.snapshot()
     if snapshot is None:
         if not create_missing and not _confirm(
-            f"No container named {project_dir.name!r} exists. Create it now? [Y/n] "
+            f"No container named {container_name!r} exists. Create it now? [Y/n] "
         ):
             raise incus.ContainerNotFoundError(
-                f"No container named {project_dir.name!r}. Run `ask create` first."
+                f"No container named {container_name!r}. Run `ask create` first."
             )
         create()
         return container, None
