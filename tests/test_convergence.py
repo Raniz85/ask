@@ -3,116 +3,126 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ask.agent import AgentOption
-from ask.config import Config, Layer, User
+from ask.config import Flavor, Layer, LayerWhen, User
 from ask.convergence import effective_configuration, fingerprint
 from ask.incus import Fingerprint
-from ask.manifest import Manifest
+from ask.manifest import Manifest, ResolvedManifest
 from ask.shell import ShellOption
 
 
 def test_effective_configuration_contains_everything_that_converge_uses(
     tmp_path: Path,
 ) -> None:
-    # given a manifest using a layer from the global config
+    # given a manifest
     m = Manifest(
-        distribution="arch",
-        layers=["base"],
+        packages=["ripgrep"],
         bind_mounts=[Path("/src")],
-        packages={"arch": ["ripgrep"]},
-        agents=[AgentOption(name="claude")],
-        tool_managers=["-mise"],
+        tool_managers=["mise"],
     )
 
-    # and a global config defining that layer, a user and a shell
-    cfg = Config(
+    # and a flavour with a user, a shell and a base layer
+    flavor = Flavor(
+        distribution="arch",
         shell=ShellOption(name="zsh"),
         user=User(name="raniz", uid=1000),
-        layers={"base": Layer(packages={"arch": ["git"]})},
+        layers={"base": Layer(packages=["git"], agents=[AgentOption(name="claude")])},
     )
 
     # when building the effective configuration
-    configuration = effective_configuration(m, cfg, tmp_path)
+    configuration = effective_configuration(ResolvedManifest(m, flavor, tmp_path))
 
-    # then it holds the manifest, the layer it uses, and the user and shell
+    # then it holds the flavour's distribution, shell and user, the layers that
+    # apply, in order, and the manifest
     assert json.loads(configuration) == {
-        "manifest": {
+        "flavor": {
             "distribution": "arch",
-            "layers": ["base"],
-            "bind_mounts": ["/src"],
-            "packages": {"arch": ["ripgrep"]},
-            "agents": [{"name": "claude", "options": {}}],
-            "tool_managers": ["-mise"],
-        },
-        "layers": {
-            "base": {
-                "bind_mounts": [],
-                "packages": {"arch": ["git"]},
-                "agents": [],
-                "tool_managers": [],
+            "shell": {"name": "zsh", "options": {}},
+            "user": {
+                "name": "raniz",
+                "uid": 1000,
+                "extra_groups": [],
+                "group": {"name": None, "gid": None},
             },
         },
-        "user": {
-            "name": "raniz",
-            "uid": 1000,
-            "extra_groups": [],
-            "group": {"name": None, "gid": None},
+        "layers": [
+            {
+                "name": "base",
+                "bind_mounts": [],
+                "packages": ["git"],
+                "agents": [{"name": "claude", "options": {}}],
+                "order": 0,
+                "when": None,
+            },
+        ],
+        "manifest": {
+            "packages": ["ripgrep"],
+            "bind_mounts": ["/src"],
+            "tool_managers": ["mise"],
         },
-        "shell": {"name": "zsh", "options": {}},
         "tool_manager_configs": {},
     }
 
 
-def test_effective_configuration_ignores_layers_the_manifest_does_not_use(
+def test_effective_configuration_ignores_layers_that_do_not_apply(
     tmp_path: Path,
 ) -> None:
-    # given a manifest using one layer
-    m = Manifest(distribution="arch", layers=["base"])
-
-    # and global configs that differ only in a layer the manifest does not use
-    base = Layer(packages={"arch": ["git"]})
-    cfg = Config(layers={"base": base})
-    cfg_with_unused_layer = Config(
-        layers={"base": base, "unused": Layer(packages={"arch": ["emacs"]})}
+    # given flavours that differ only in a layer that does not apply to the
+    # project
+    base = Layer(packages=["git"])
+    flavor = Flavor(distribution="arch", layers={"base": base})
+    flavor_with_unapplied_layer = Flavor(
+        distribution="arch",
+        layers={
+            "base": base,
+            "python": Layer(
+                packages=["python"], when=LayerWhen(files=["pyproject.toml"])
+            ),
+        },
     )
 
     # when building the effective configuration for both
     configurations = (
-        effective_configuration(m, cfg, tmp_path),
-        effective_configuration(m, cfg_with_unused_layer, tmp_path),
+        effective_configuration(ResolvedManifest(Manifest(), flavor, tmp_path)),
+        effective_configuration(
+            ResolvedManifest(Manifest(), flavor_with_unapplied_layer, tmp_path)
+        ),
     )
 
     # then they are identical
     assert configurations[0] == configurations[1]
 
 
-def test_effective_configuration_does_not_depend_on_table_key_order(
+def test_effective_configuration_changes_when_a_layer_starts_to_apply(
     tmp_path: Path,
 ) -> None:
-    # given manifests that declare the same packages in a different table order
-    m = Manifest(distribution="arch", packages={"arch": ["git"], "debian": ["vim"]})
-    reordered = Manifest(
-        distribution="arch", packages={"debian": ["vim"], "arch": ["git"]}
+    # given a flavour with a layer applying to projects with a pyproject.toml
+    flavor = Flavor(
+        distribution="arch",
+        layers={"python": Layer(when=LayerWhen(files=["pyproject.toml"]))},
     )
+    resolved = ResolvedManifest(Manifest(), flavor, tmp_path)
+    before = effective_configuration(resolved)
 
-    # when building the effective configuration for both
-    configurations = (
-        effective_configuration(m, Config(), tmp_path),
-        effective_configuration(reordered, Config(), tmp_path),
-    )
+    # and the project gaining a pyproject.toml
+    (tmp_path / "pyproject.toml").write_text("")
 
-    # then they are identical
-    assert configurations[0] == configurations[1]
+    # when building the effective configuration again
+    after = effective_configuration(resolved)
+
+    # then it is different
+    assert before != after
 
 
 def test_effective_configuration_contains_the_projects_mise_config(
     tmp_path: Path,
 ) -> None:
-    # given a project with a mise.toml
+    # given a project with a mise.toml, whose manifest opts into mise
     (tmp_path / "mise.toml").write_text('[tools]\nerlang = "29.1.1"\n')
+    m = Manifest(tool_managers=["mise"])
 
     # when building the effective configuration
     configuration = effective_configuration(
-        Manifest(distribution="arch"), Config(), tmp_path
+        ResolvedManifest(m, Flavor(distribution="arch"), tmp_path)
     )
 
     # then it holds the contents of the mise config, by file
@@ -121,15 +131,16 @@ def test_effective_configuration_contains_the_projects_mise_config(
     }
 
 
-def test_effective_configuration_leaves_out_config_of_opted_out_tool_managers(
+def test_effective_configuration_leaves_out_config_of_tool_managers_not_opted_into(
     tmp_path: Path,
 ) -> None:
-    # given a project with a mise.toml, whose manifest opts out of mise
+    # given a project with a mise.toml, whose manifest does not opt into mise
     (tmp_path / "mise.toml").write_text('[tools]\nerlang = "29.1.1"\n')
-    m = Manifest(distribution="arch", tool_managers=["-mise"])
 
     # when building the effective configuration
-    configuration = effective_configuration(m, Config(), tmp_path)
+    configuration = effective_configuration(
+        ResolvedManifest(Manifest(), Flavor(distribution="arch"), tmp_path)
+    )
 
     # then the mise config is not part of it
     assert json.loads(configuration)["tool_manager_configs"] == {}

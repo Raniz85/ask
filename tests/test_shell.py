@@ -310,14 +310,14 @@ def test_known_names_lists_every_supported_shell_sorted() -> None:
 
 def _load_problems(tmp_path: Path, toml: str) -> list[str]:
     config_path = tmp_path / "config.toml"
-    config_path.write_text(toml)
+    config_path.write_text('[flavors.arch]\ndistribution = "arch"\n' + toml)
     with pytest.raises(ConfigError) as error:
         config.load(config_path)
     return error.value.problems
 
 
 def test_loading_a_config_rejects_unknown_shells(tmp_path: Path) -> None:
-    # given a config using a shell ask doesn't support
+    # given a flavour using a shell ask doesn't support
     toml = 'shell = "foosh"\n'
 
     # when loading it
@@ -325,37 +325,37 @@ def test_loading_a_config_rejects_unknown_shells(tmp_path: Path) -> None:
 
     # then the shell is reported along with the supported ones
     assert problems == [
-        "shell.name: unknown shell 'foosh' (known: bash, elvish, fish, ksh, tcsh, zsh)"
+        "flavors.arch.shell.name: unknown shell 'foosh' (known: bash, elvish, fish, ksh, tcsh, zsh)"
     ]
 
 
 def test_loading_a_config_rejects_an_option_the_shell_does_not_have(
     tmp_path: Path,
 ) -> None:
-    # given a config enabling a bash option for zsh
-    toml = '[shell]\nname = "zsh"\nbashrc = true\n'
+    # given a flavour enabling a bash option for zsh
+    toml = '[flavors.arch.shell]\nname = "zsh"\nbashrc = true\n'
 
     # when loading it
     problems = _load_problems(tmp_path, toml)
 
     # then the option is reported along with the ones zsh supports
     assert problems == [
-        "shell: unknown option 'bashrc' for zsh (known: zprofile, zshenv, zshrc)"
+        "flavors.arch.shell: unknown option 'bashrc' for zsh (known: zprofile, zshenv, zshrc)"
     ]
 
 
 def test_loading_a_config_rejects_every_option_the_shell_does_not_have(
     tmp_path: Path,
 ) -> None:
-    # given a config enabling two bash options for zsh
-    toml = '[shell]\nname = "zsh"\nbashrc = true\nbash_profile = false\n'
+    # given a flavour enabling two bash options for zsh
+    toml = '[flavors.arch.shell]\nname = "zsh"\nbashrc = true\nbash_profile = false\n'
 
     # when loading it
     problems = _load_problems(tmp_path, toml)
 
     # then both options are reported in one problem
     assert problems == [
-        "shell: unknown options 'bash_profile', 'bashrc' for zsh "
+        "flavors.arch.shell: unknown options 'bash_profile', 'bashrc' for zsh "
         "(known: zprofile, zshenv, zshrc)"
     ]
 
@@ -363,13 +363,13 @@ def test_loading_a_config_rejects_every_option_the_shell_does_not_have(
 def test_loading_a_config_with_an_unknown_shell_does_not_check_its_options(
     tmp_path: Path,
 ) -> None:
-    # given a config using an unknown shell with options
-    toml = '[shell]\nname = "foosh"\nzshrc = true\n'
+    # given a flavour using an unknown shell with options
+    toml = '[flavors.arch.shell]\nname = "foosh"\nzshrc = true\n'
 
     # when loading it
     problems = _load_problems(tmp_path, toml)
 
     # then only the shell itself is reported
     assert problems == [
-        "shell.name: unknown shell 'foosh' (known: bash, elvish, fish, ksh, tcsh, zsh)"
+        "flavors.arch.shell.name: unknown shell 'foosh' (known: bash, elvish, fish, ksh, tcsh, zsh)"
     ]

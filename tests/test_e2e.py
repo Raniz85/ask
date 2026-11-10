@@ -6,6 +6,15 @@ ASK = Path(sys.executable).parent / "ask"
 TERMINAL_WIDTH = 200
 
 
+def _config_home_with_a_default_flavor(tmp_path: Path) -> Path:
+    config_home = tmp_path / "config"
+    (config_home / "ask").mkdir(parents=True)
+    (config_home / "ask" / "config.toml").write_text(
+        '[flavors.arch]\ndistribution = "arch"\ndefault = true\n'
+    )
+    return config_home
+
+
 def _error_panel(*lines: str) -> str:
     top = "╭─ Error " + "─" * (TERMINAL_WIDTH - 10) + "╮\n"
     rows = "".join(f"│ {line.ljust(TERMINAL_WIDTH - 4)} │\n" for line in lines)
@@ -52,11 +61,10 @@ def test_ask_reports_a_missing_incus_binary_without_a_traceback(
     # given a project directory with a valid ask.toml
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
 
-    # and an empty global configuration directory
-    config_home = tmp_path / "config"
-    config_home.mkdir()
+    # and a global configuration with a default flavour
+    config_home = _config_home_with_a_default_flavor(tmp_path)
 
     # and a PATH on which there is no incus command
     empty_bin = tmp_path / "bin"
@@ -91,11 +99,10 @@ def test_ask_does_not_offer_to_create_a_missing_container_without_a_terminal(
     # given a project directory with a valid ask.toml
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
 
-    # and an empty global configuration directory
-    config_home = tmp_path / "config"
-    config_home.mkdir()
+    # and a global configuration with a default flavour
+    config_home = _config_home_with_a_default_flavor(tmp_path)
 
     # and an incus command that knows of no containers
     fake_bin = tmp_path / "bin"
@@ -134,11 +141,10 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
     # given a project directory with a valid ask.toml
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
 
-    # and an empty global configuration directory
-    config_home = tmp_path / "config"
-    config_home.mkdir()
+    # and a global configuration with a default flavour
+    config_home = _config_home_with_a_default_flavor(tmp_path)
 
     # and an incus command that knows of no containers and refuses to launch one
     fake_bin = tmp_path / "bin"
@@ -180,9 +186,8 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
 def _project_with_an_unconverged_container(tmp_path: Path) -> tuple[Path, dict]:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
-    config_home = tmp_path / "config"
-    config_home.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_home = _config_home_with_a_default_flavor(tmp_path)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_incus = fake_bin / "incus"
@@ -245,13 +250,11 @@ def test_ask_does_not_warn_about_a_changed_configuration_when_told_not_to_conver
 def test_ask_reports_an_unknown_tool_manager_without_a_traceback(
     tmp_path: Path,
 ) -> None:
-    # given a project directory whose ask.toml opts out of a tool manager ask
+    # given a project directory whose ask.toml opts into a tool manager ask
     # doesn't support
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\ntool_managers = ["-asdf"]\n'
-    )
+    (project_dir / "ask.toml").write_text('tool_managers = ["asdf"]\n')
 
     # and an empty global configuration directory
     config_home = tmp_path / "config"
@@ -278,6 +281,45 @@ def test_ask_reports_an_unknown_tool_manager_without_a_traceback(
         _error_panel(
             f"Invalid configuration in {project_dir / 'ask.toml'}:",
             "  tool_managers.0: unknown tool manager 'asdf' (known: mise)",
+        ),
+    )
+
+
+def test_ask_reports_a_project_no_flavor_applies_to_without_a_traceback(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a valid ask.toml
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+
+    # and a global configuration whose only flavour applies to another path
+    config_home = tmp_path / "config"
+    (config_home / "ask").mkdir(parents=True)
+    (config_home / "ask" / "config.toml").write_text(
+        '[flavors.debian]\ndistribution = "arch"\nwhen.path = ["/elsewhere"]\n'
+    )
+
+    # when running ask converge from within the project directory
+    result = subprocess.run(
+        [str(ASK), "converge"],
+        cwd=project_dir,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
+        capture_output=True,
+        text=True,
+    )
+
+    # then the missing flavour is reported, and ask exits with status 1
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1,
+        "",
+        _error_panel(
+            f"No flavour applies to {project_dir}. Add a flavour whose when.path "
+            "matches it, or mark one with default = true."
         ),
     )
 

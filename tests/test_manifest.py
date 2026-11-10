@@ -4,48 +4,39 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from ask.agent import Agent, AgentOption
-from ask.config import ConfigError, Layer
+from ask.config import ConfigError, Flavor, Layer, LayerWhen
 from ask.incus import Mount
 from ask.manifest import Manifest, ResolvedManifest, load
 from ask.tool_manager import Mise
 from ask.user import ResolvedUser
 
 
-def test_load_reads_distribution_from_toml(tmp_path: Path) -> None:
-    # given a manifest file declaring a distribution
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('distribution = "arch"\n')
+def _manifest_file(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "ask.toml"
+    path.write_text(text)
+    return path
+
+
+def test_load_defaults_an_empty_manifest(tmp_path: Path) -> None:
+    # given an empty manifest file
+    manifest_path = _manifest_file(tmp_path, "")
 
     # when loading the manifest
     manifest = load(manifest_path)
 
-    # then the distribution is available on the result
-    assert manifest == Manifest(distribution="arch")
+    # then it has no packages, bind mounts or tool managers
+    assert manifest == Manifest(packages=[], bind_mounts=[], tool_managers=[])
 
 
-def test_load_rejects_unknown_fields(tmp_path: Path) -> None:
-    # given a manifest file with an unknown field alongside the distribution
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('distribution = "arch"\nide = "jetbrains-idea"\n')
-
-    # when loading the manifest
-    with pytest.raises(ConfigError) as error:
-        load(manifest_path)
-
-    # then the unknown field is reported
-    assert error.value.problems == ["ide: unknown key"]
-
-
-def test_load_defaults_bind_mounts_to_empty_list(tmp_path: Path) -> None:
-    # given a manifest file with no bind_mounts declared
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('distribution = "arch"\n')
+def test_load_reads_packages_from_toml(tmp_path: Path) -> None:
+    # given a manifest file declaring packages
+    manifest_path = _manifest_file(tmp_path, 'packages = ["uv", "python"]\n')
 
     # when loading the manifest
     manifest = load(manifest_path)
 
-    # then bind_mounts defaults to an empty list
-    assert manifest.bind_mounts == []
+    # then the packages are read as a plain list, in order
+    assert manifest == Manifest(packages=["uv", "python"])
 
 
 def test_load_reads_bind_mounts_from_toml(
@@ -53,106 +44,232 @@ def test_load_reads_bind_mounts_from_toml(
 ) -> None:
     # given a manifest file declaring bind_mounts, one using a home-relative path
     monkeypatch.setenv("HOME", str(tmp_path))
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text(
-        'distribution = "arch"\nbind_mounts = ["~/foo", "/abs/path"]\n'
-    )
+    manifest_path = _manifest_file(tmp_path, 'bind_mounts = ["~/foo", "/abs/path"]\n')
 
     # when loading the manifest
     manifest = load(manifest_path)
 
     # then each path is read, with "~" expanded against the home directory
-    assert manifest.bind_mounts == [tmp_path / "foo", Path("/abs/path")]
+    assert manifest == Manifest(bind_mounts=[tmp_path / "foo", Path("/abs/path")])
 
 
-def test_load_defaults_packages_to_empty_dict(tmp_path: Path) -> None:
-    # given a manifest file with no packages declared
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('distribution = "arch"\n')
+def test_load_reads_tool_managers_from_toml(tmp_path: Path) -> None:
+    # given a manifest file opting into mise
+    manifest_path = _manifest_file(tmp_path, 'tool_managers = ["mise"]\n')
 
     # when loading the manifest
     manifest = load(manifest_path)
 
-    # then packages defaults to an empty dict
-    assert manifest.packages == {}
+    # then the tool manager is read
+    assert manifest == Manifest(tool_managers=["mise"])
 
 
-def test_load_reads_packages_from_toml(tmp_path: Path) -> None:
-    # given a manifest file declaring packages for multiple distributions
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text(
-        'distribution = "arch"\npackages.common = ["python"]\npackages.arch = ["zsh"]\n'
+def test_load_rejects_keys_that_belong_to_flavors_and_layers(tmp_path: Path) -> None:
+    # given a manifest file declaring keys that only flavours and their layers have
+    manifest_path = _manifest_file(
+        tmp_path,
+        'distribution = "arch"\nlayers = ["base"]\nagents = ["claude"]\norder = 1\n',
     )
-
-    # when loading the manifest
-    manifest = load(manifest_path)
-
-    # then the declared packages are read, keyed by distribution
-    assert manifest.packages == {"common": ["python"], "arch": ["zsh"]}
-
-
-def test_load_defaults_layers_to_empty_list(tmp_path: Path) -> None:
-    # given a manifest file with no layers declared
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('distribution = "arch"\n')
-
-    # when loading the manifest
-    manifest = load(manifest_path)
-
-    # then layers defaults to an empty list
-    assert manifest.layers == []
-
-
-def test_load_reads_layers_from_toml(tmp_path: Path) -> None:
-    # given a manifest file declaring layers
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('distribution = "arch"\nlayers = ["base", "python"]\n')
-
-    # when loading the manifest
-    manifest = load(manifest_path)
-
-    # then the declared layer names are read, in order
-    assert manifest.layers == ["base", "python"]
-
-
-def test_load_reads_agents_from_toml(tmp_path: Path) -> None:
-    # given a manifest file enabling agents, one with options
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text(
-        'distribution = "arch"\nagents = ["claude", { name = "codex", auth = false }]\n'
-    )
-
-    # when loading the manifest
-    manifest = load(manifest_path)
-
-    # then the agents are read like in a layer
-    assert manifest.agents == [
-        AgentOption(name="claude"),
-        AgentOption(name="codex", options={"auth": False}),
-    ]
-
-
-def test_load_rejects_shared_state(tmp_path: Path) -> None:
-    # given a manifest file setting shared_state
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('distribution = "arch"\nshared_state = true\n')
 
     # when loading the manifest
     with pytest.raises(ConfigError) as error:
         load(manifest_path)
 
-    # then shared_state is reported as an unknown key
-    assert error.value.problems == ["shared_state: unknown key"]
+    # then each of them is reported as an unknown key
+    assert error.value.problems == [
+        "distribution: unknown key",
+        "layers: unknown key",
+        "agents: unknown key",
+        "order: unknown key",
+    ]
+
+
+def test_load_rejects_packages_keyed_by_distribution(tmp_path: Path) -> None:
+    # given a manifest file declaring packages per distribution
+    manifest_path = _manifest_file(tmp_path, 'packages.arch = ["zsh"]\n')
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then the packages are reported as not being a list
+    assert error.value.problems == ["packages: Input should be a valid list"]
+
+
+def test_load_reports_syntax_errors_as_config_errors(tmp_path: Path) -> None:
+    # given a manifest file with a syntax error
+    manifest_path = _manifest_file(tmp_path, "packages = \n")
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then the error names the file
+    assert error.value.path == manifest_path
+
+
+def test_load_reports_every_wrongly_typed_value(tmp_path: Path) -> None:
+    # given a manifest file with several wrongly typed values
+    manifest_path = _manifest_file(
+        tmp_path, 'packages = ["git", 2]\nbind_mounts = "~/foo"\ntool_managers = 1\n'
+    )
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then all of them are reported together
+    assert error.value.problems == [
+        "packages.1: Input should be a valid string",
+        "bind_mounts: Input should be a valid list",
+        "tool_managers: Input should be a valid list",
+    ]
+
+
+def test_load_rejects_removing_tool_managers(tmp_path: Path) -> None:
+    # given a manifest file removing a tool manager with the "-" prefix
+    manifest_path = _manifest_file(tmp_path, 'tool_managers = ["-mise"]\n')
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then the removal is reported, since there is nothing to remove it from
+    assert error.value.problems == [
+        (
+            "tool_managers.0: tool managers are only enabled by ask.toml and "
+            "cannot be removed with '-'"
+        )
+    ]
+
+
+def test_load_rejects_unknown_tool_managers(tmp_path: Path) -> None:
+    # given a manifest file opting into a tool manager ask doesn't support
+    manifest_path = _manifest_file(tmp_path, 'tool_managers = ["mise", "asdf"]\n')
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then the unsupported one is reported along with the supported ones
+    assert error.value.problems == [
+        "tool_managers.1: unknown tool manager 'asdf' (known: mise)"
+    ]
+
+
+_NO_PROJECT_FILES = Path("/nonexistent-project")
+
+
+def _resolved(
+    layers: dict[str, Layer],
+    manifest: Manifest | None = None,
+    project_dir: Path = _NO_PROJECT_FILES,
+) -> ResolvedManifest:
+    flavor = Flavor(distribution="arch", layers=layers)
+    return ResolvedManifest(manifest or Manifest(), flavor, project_dir)
+
+
+def test_layer_names_applies_the_base_layer_first() -> None:
+    # given a flavour declaring an unconditional layer with a lower order before
+    # its base layer
+    resolved = _resolved({"python": Layer(order=-5), "base": Layer()})
+
+    # when resolving the names of the applied layers
+    layer_names = resolved.layer_names
+
+    # then the base layer comes first
+    assert layer_names == ["base", "python"]
+
+
+def test_layer_names_applies_layers_whose_files_exist_in_the_project(
+    tmp_path: Path,
+) -> None:
+    # given a project containing a pyproject.toml
+    (tmp_path / "pyproject.toml").write_text("")
+
+    # and a flavour with a layer applying to either of two files, one of them
+    # being pyproject.toml
+    resolved = _resolved(
+        {"python": Layer(when=LayerWhen(files=["setup.py", "pyproject.toml"]))},
+        project_dir=tmp_path,
+    )
+
+    # when resolving the names of the applied layers
+    layer_names = resolved.layer_names
+
+    # then the layer is applied
+    assert layer_names == ["python"]
+
+
+def test_layer_names_skips_layers_whose_files_do_not_exist_in_the_project(
+    tmp_path: Path,
+) -> None:
+    # given a project containing only a Cargo.toml
+    (tmp_path / "Cargo.toml").write_text("")
+
+    # and a flavour with a base layer and a layer applying to pyproject.toml
+    resolved = _resolved(
+        {
+            "base": Layer(),
+            "python": Layer(when=LayerWhen(files=["pyproject.toml"])),
+        },
+        project_dir=tmp_path,
+    )
+
+    # when resolving the names of the applied layers
+    layer_names = resolved.layer_names
+
+    # then only the base layer is applied
+    assert layer_names == ["base"]
+
+
+def test_layer_names_only_matches_files_directly_in_the_project(
+    tmp_path: Path,
+) -> None:
+    # given a project containing pyproject.toml only in a subdirectory
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "pyproject.toml").write_text("")
+
+    # and a flavour with a layer applying to pyproject.toml
+    resolved = _resolved(
+        {"python": Layer(when=LayerWhen(files=["pyproject.toml"]))},
+        project_dir=tmp_path,
+    )
+
+    # when resolving the names of the applied layers
+    layer_names = resolved.layer_names
+
+    # then the layer is not applied
+    assert layer_names == []
+
+
+def test_layer_names_orders_layers_by_order_keeping_declaration_order_for_ties() -> (
+    None
+):
+    # given a flavour declaring unconditional layers with and without an order
+    resolved = _resolved(
+        {
+            "late": Layer(order=10),
+            "first": Layer(),
+            "second": Layer(),
+            "early": Layer(order=-1),
+        }
+    )
+
+    # when resolving the names of the applied layers
+    layer_names = resolved.layer_names
+
+    # then they are sorted by order, layers with the same order keeping the
+    # order they were declared in
+    assert layer_names == ["early", "first", "second", "late"]
 
 
 def test_bind_mounts_applies_layers_before_the_project() -> None:
-    # given a manifest with its own bind mount and one declared layer, and the
-    # defined layers mapping, defining that layer's bind mount
-    manifest = Manifest(
-        distribution="arch", bind_mounts=[Path("/project/mount")], layers=["python"]
+    # given a manifest with its own bind mount, and a flavour layer with another
+    manifest = Manifest(bind_mounts=[Path("/project/mount")])
+    resolved = _resolved(
+        {"python": Layer(bind_mounts=[Path("/layer/mount")])}, manifest
     )
-    layers = {"python": Layer(bind_mounts=[Path("/layer/mount")])}
-    resolved = ResolvedManifest(manifest, layers)
 
     # when resolving the full set of bind mounts
     mounts = resolved.bind_mounts
@@ -162,16 +279,16 @@ def test_bind_mounts_applies_layers_before_the_project() -> None:
 
 
 def test_bind_mounts_merges_duplicates() -> None:
-    # given a manifest and two declared layers all mounting the same path, and
-    # one layer mounting another path as well
-    manifest = Manifest(
-        distribution="arch", bind_mounts=[Path("/shared")], layers=["base", "python"]
+    # given a manifest and two layers all mounting the same path, and one layer
+    # mounting another path as well
+    manifest = Manifest(bind_mounts=[Path("/shared")])
+    resolved = _resolved(
+        {
+            "base": Layer(bind_mounts=[Path("/shared"), Path("/base")]),
+            "python": Layer(bind_mounts=[Path("/shared")]),
+        },
+        manifest,
     )
-    layers = {
-        "base": Layer(bind_mounts=[Path("/shared"), Path("/base")]),
-        "python": Layer(bind_mounts=[Path("/shared")]),
-    }
-    resolved = ResolvedManifest(manifest, layers)
 
     # when resolving the full set of bind mounts
     mounts = resolved.bind_mounts
@@ -180,42 +297,31 @@ def test_bind_mounts_merges_duplicates() -> None:
     assert mounts == [Path("/shared"), Path("/base")]
 
 
-def test_bind_mounts_raises_on_unknown_layer() -> None:
-    # given a manifest declaring a layer that isn't defined in the layers mapping
-    manifest = Manifest(distribution="arch", layers=["nonexistent"])
-    resolved = ResolvedManifest(manifest, {})
+def test_bind_mounts_leaves_out_layers_that_are_not_applied(tmp_path: Path) -> None:
+    # given a flavour with a base layer and a layer applying to a file the
+    # project doesn't contain, both mounting a path
+    resolved = _resolved(
+        {
+            "base": Layer(bind_mounts=[Path("/base")]),
+            "python": Layer(
+                bind_mounts=[Path("/python")],
+                when=LayerWhen(files=["pyproject.toml"]),
+            ),
+        },
+        project_dir=tmp_path,
+    )
 
     # when resolving the full set of bind mounts
-    # then a clear error is raised
-    with pytest.raises(ValueError, match="nonexistent"):
-        resolved.bind_mounts
+    mounts = resolved.bind_mounts
 
-
-def test_packages_combines_common_and_distribution_packages() -> None:
-    # given a manifest targeting arch, declaring common and per-distribution
-    # packages
-    manifest = Manifest(
-        distribution="arch",
-        packages={"common": ["python"], "arch": ["zsh"], "debian": ["other"]},
-    )
-    resolved = ResolvedManifest(manifest, {})
-
-    # when resolving the full set of packages
-    packages = resolved.packages
-
-    # then the common packages and the packages for the manifest's own
-    # distribution are included, and other distributions' packages are not
-    assert packages == ["python", "zsh"]
+    # then only the applied layer's path is mounted
+    assert mounts == [Path("/base")]
 
 
 def test_packages_applies_layers_before_the_project() -> None:
-    # given a manifest with its own packages and one declared layer, and the
-    # defined layers mapping, defining that layer's packages
-    manifest = Manifest(
-        distribution="arch", packages={"arch": ["project-pkg"]}, layers=["python"]
-    )
-    layers = {"python": Layer(packages={"arch": ["layer-pkg"]})}
-    resolved = ResolvedManifest(manifest, layers)
+    # given a manifest with its own package, and a flavour layer with another
+    manifest = Manifest(packages=["project-pkg"])
+    resolved = _resolved({"python": Layer(packages=["layer-pkg"])}, manifest)
 
     # when resolving the full set of packages
     packages = resolved.packages
@@ -224,15 +330,29 @@ def test_packages_applies_layers_before_the_project() -> None:
     assert packages == ["layer-pkg", "project-pkg"]
 
 
-def test_packages_merges_duplicates() -> None:
-    # given a manifest and a declared layer both installing the same package,
-    # once as a common package and once for the manifest's distribution, and
-    # the layer installing another package as well
-    manifest = Manifest(
-        distribution="arch", packages={"arch": ["git"]}, layers=["base"]
+def test_packages_applies_layers_in_their_order() -> None:
+    # given a flavour with a base layer and two layers with different orders,
+    # each installing a package
+    resolved = _resolved(
+        {
+            "late": Layer(order=10, packages=["late-pkg"]),
+            "early": Layer(packages=["early-pkg"]),
+            "base": Layer(packages=["base-pkg"]),
+        }
     )
-    layers = {"base": Layer(packages={"common": ["git"], "arch": ["zsh", "git"]})}
-    resolved = ResolvedManifest(manifest, layers)
+
+    # when resolving the full set of packages
+    packages = resolved.packages
+
+    # then the packages follow the order the layers are applied in
+    assert packages == ["base-pkg", "early-pkg", "late-pkg"]
+
+
+def test_packages_merges_duplicates() -> None:
+    # given a manifest and a layer both installing the same package, and the
+    # layer installing another package as well
+    manifest = Manifest(packages=["git"])
+    resolved = _resolved({"base": Layer(packages=["git", "zsh", "git"])}, manifest)
 
     # when resolving the full set of packages
     packages = resolved.packages
@@ -242,16 +362,10 @@ def test_packages_merges_duplicates() -> None:
 
 
 def test_packages_removes_dash_prefixed_packages_from_lower_layers() -> None:
-    # given a declared layer installing two packages for the manifest's
-    # distribution, and a manifest removing one of them through its common
-    # packages, and removing a package no layer installs
-    manifest = Manifest(
-        distribution="arch",
-        packages={"common": ["-git", "-nonexistent"]},
-        layers=["base"],
-    )
-    layers = {"base": Layer(packages={"arch": ["git", "zsh"]})}
-    resolved = ResolvedManifest(manifest, layers)
+    # given a layer installing two packages, and a manifest removing one of them
+    # and a package no layer installs
+    manifest = Manifest(packages=["-git", "-nonexistent"])
+    resolved = _resolved({"base": Layer(packages=["git", "zsh"])}, manifest)
 
     # when resolving the full set of packages
     packages = resolved.packages
@@ -262,15 +376,10 @@ def test_packages_removes_dash_prefixed_packages_from_lower_layers() -> None:
 
 
 def test_packages_removal_does_not_affect_its_own_layer() -> None:
-    # given a declared layer installing a package, and a manifest both removing
-    # and installing that package
-    manifest = Manifest(
-        distribution="arch",
-        packages={"common": ["-git"], "arch": ["git"]},
-        layers=["base"],
-    )
-    layers = {"base": Layer(packages={"arch": ["git", "zsh"]})}
-    resolved = ResolvedManifest(manifest, layers)
+    # given a layer installing a package, and a manifest both removing and
+    # installing that package
+    manifest = Manifest(packages=["-git", "git"])
+    resolved = _resolved({"base": Layer(packages=["git", "zsh"])}, manifest)
 
     # when resolving the full set of packages
     packages = resolved.packages
@@ -280,60 +389,34 @@ def test_packages_removal_does_not_affect_its_own_layer() -> None:
     assert packages == ["zsh", "git"]
 
 
-def test_packages_raises_on_unknown_layer() -> None:
-    # given a manifest declaring a layer that isn't defined in the layers mapping
-    manifest = Manifest(distribution="arch", layers=["nonexistent"])
-    resolved = ResolvedManifest(manifest, {})
-
-    # when resolving the full set of packages
-    # then a clear error is raised
-    with pytest.raises(ValueError, match="nonexistent"):
-        resolved.packages
-
-
-def test_agent_names_combines_agents_from_every_declared_layer() -> None:
-    # given a manifest declaring two layers, each enabling an agent
-    manifest = Manifest(distribution="arch", layers=["base", "python"])
-    layers = {
-        "base": Layer(agents=[AgentOption(name="claude")]),
-        "python": Layer(agents=[AgentOption(name="other")]),
-    }
-    resolved = ResolvedManifest(manifest, layers)
+def test_agent_names_combines_agents_from_every_applied_layer() -> None:
+    # given a flavour with two layers, each enabling an agent
+    resolved = _resolved(
+        {
+            "base": Layer(agents=[AgentOption(name="claude")]),
+            "python": Layer(agents=[AgentOption(name="other")]),
+        }
+    )
 
     # when resolving the full set of agent names
     agent_names = resolved.agent_names
 
-    # then the agent names from both layers are included, without being
-    # resolved to actual agents
+    # then the agent names from both layers are included, in the order the
+    # layers are applied, without being resolved to actual agents
     assert agent_names == ["claude", "other"]
 
 
-def test_agent_names_applies_layers_before_the_project() -> None:
-    # given a manifest enabling its own agent and declaring one layer, and the
-    # defined layers mapping, defining that layer's agent
-    manifest = Manifest(
-        distribution="arch", agents=[AgentOption(name="codex")], layers=["base"]
-    )
-    layers = {"base": Layer(agents=[AgentOption(name="claude")])}
-    resolved = ResolvedManifest(manifest, layers)
-
-    # when resolving the full set of agent names
-    agent_names = resolved.agent_names
-
-    # then the layer's agent comes first, followed by the project-level one
-    assert agent_names == ["claude", "codex"]
-
-
 def test_agent_names_merges_duplicates() -> None:
-    # given a manifest enabling an agent that its declared layer also enables,
-    # alongside another agent
-    manifest = Manifest(
-        distribution="arch", agents=[AgentOption(name="claude")], layers=["base"]
+    # given two layers enabling the same agent, the second one alongside
+    # another agent
+    resolved = _resolved(
+        {
+            "base": Layer(agents=[AgentOption(name="claude")]),
+            "python": Layer(
+                agents=[AgentOption(name="codex"), AgentOption(name="claude")]
+            ),
+        }
     )
-    layers = {
-        "base": Layer(agents=[AgentOption(name="claude"), AgentOption(name="codex")])
-    }
-    resolved = ResolvedManifest(manifest, layers)
 
     # when resolving the full set of agent names
     agent_names = resolved.agent_names
@@ -343,17 +426,18 @@ def test_agent_names_merges_duplicates() -> None:
 
 
 def test_agent_names_removes_dash_prefixed_agents_from_lower_layers() -> None:
-    # given a declared layer enabling two agents, and a manifest removing one of
-    # them and an agent no layer enables
-    manifest = Manifest(
-        distribution="arch",
-        agents=[AgentOption(name="-claude"), AgentOption(name="-pi")],
-        layers=["base"],
+    # given a layer enabling two agents, and a later layer removing one of them
+    # and an agent no layer enables
+    resolved = _resolved(
+        {
+            "base": Layer(
+                agents=[AgentOption(name="claude"), AgentOption(name="codex")]
+            ),
+            "python": Layer(
+                agents=[AgentOption(name="-claude"), AgentOption(name="-pi")]
+            ),
+        }
     )
-    layers = {
-        "base": Layer(agents=[AgentOption(name="claude"), AgentOption(name="codex")])
-    }
-    resolved = ResolvedManifest(manifest, layers)
 
     # when resolving the full set of agent names
     agent_names = resolved.agent_names
@@ -363,25 +447,14 @@ def test_agent_names_removes_dash_prefixed_agents_from_lower_layers() -> None:
     assert agent_names == ["codex"]
 
 
-def test_agent_names_raises_on_unknown_layer() -> None:
-    # given a manifest declaring a layer that isn't defined in the layers mapping
-    manifest = Manifest(distribution="arch", layers=["nonexistent"])
-    resolved = ResolvedManifest(manifest, {})
-
-    # when resolving the full set of agent names
-    # then a clear error is raised
-    with pytest.raises(ValueError, match="nonexistent"):
-        resolved.agent_names
-
-
 def test_agents_resolves_each_configured_agent_name_in_order() -> None:
-    # given a manifest declaring two layers, each enabling an agent
-    manifest = Manifest(distribution="arch", layers=["base", "python"])
-    layers = {
-        "base": Layer(agents=[AgentOption(name="claude")]),
-        "python": Layer(agents=[AgentOption(name="other")]),
-    }
-    resolved = ResolvedManifest(manifest, layers)
+    # given a flavour with two layers, each enabling an agent
+    resolved = _resolved(
+        {
+            "base": Layer(agents=[AgentOption(name="claude")]),
+            "python": Layer(agents=[AgentOption(name="other")]),
+        }
+    )
     claude_agent = Agent(name="claude")
     other_agent = Agent(name="other")
 
@@ -395,80 +468,6 @@ def test_agents_resolves_each_configured_agent_name_in_order() -> None:
     assert agents == [claude_agent, other_agent]
 
 
-def test_agent_mounts_calls_mounts_for_with_each_agents_options() -> None:
-    # given a manifest declaring two layers, each declaring an agent, one of
-    # them with its own options
-    manifest = Manifest(distribution="arch", layers=["base", "python"])
-    layers = {
-        "base": Layer(agents=[AgentOption(name="claude", options={"auth": False})]),
-        "python": Layer(agents=[AgentOption(name="other")]),
-    }
-    resolved = ResolvedManifest(manifest, layers)
-    claude_agent = MagicMock()
-    claude_mounts = [
-        Mount(host_path=Path("/host/state"), container_path=Path("/container/state"))
-    ]
-    claude_agent.mounts_for.return_value = claude_mounts
-    other_agent = MagicMock()
-    other_mounts = [
-        Mount(host_path=Path("/host/other"), container_path=Path("/container/other"))
-    ]
-    other_agent.mounts_for.return_value = other_mounts
-    user = ResolvedUser(
-        name="raniz",
-        uid=1000,
-        shell="bash",
-        group_name="raniz",
-        gid=1000,
-        extra_groups=[],
-    )
-
-    # when resolving the agents' mounts
-    with patch(
-        "ask.manifest.agent.resolve", side_effect=[claude_agent, other_agent]
-    ) as resolve:
-        mounts = resolved.agent_mounts(user)
-
-    # then each agent is resolved, its mounts_for is called with the user and
-    # its own options, and the resulting mounts are returned in order
-    resolve.assert_has_calls([call("claude"), call("other")])
-    claude_agent.mounts_for.assert_called_once_with(user, {"auth": False})
-    other_agent.mounts_for.assert_called_once_with(user, {})
-    assert mounts == claude_mounts + other_mounts
-
-
-def test_agent_mounts_includes_project_agents() -> None:
-    # given a manifest declaring its own agent with options, and no layers
-    manifest = Manifest(
-        distribution="arch",
-        agents=[AgentOption(name="codex", options={"auth": False})],
-    )
-    resolved = ResolvedManifest(manifest, {})
-    codex_agent = MagicMock()
-    codex_mounts = [
-        Mount(host_path=Path("/host/codex"), container_path=Path("/container/codex"))
-    ]
-    codex_agent.mounts_for.return_value = codex_mounts
-    user = ResolvedUser(
-        name="raniz",
-        uid=1000,
-        shell="bash",
-        group_name="raniz",
-        gid=1000,
-        extra_groups=[],
-    )
-
-    # when resolving the agents' mounts
-    with patch("ask.manifest.agent.resolve", return_value=codex_agent) as resolve:
-        mounts = resolved.agent_mounts(user)
-
-    # then the project's agent is resolved, its mounts_for is called with the
-    # user and its own options, and the resulting mounts are returned
-    resolve.assert_called_once_with("codex")
-    codex_agent.mounts_for.assert_called_once_with(user, {"auth": False})
-    assert mounts == codex_mounts
-
-
 def _user() -> ResolvedUser:
     return ResolvedUser(
         name="raniz",
@@ -480,22 +479,55 @@ def _user() -> ResolvedUser:
     )
 
 
-def test_agent_mounts_merges_agent_options_with_later_layers_winning() -> None:
-    # given a declared layer enabling an agent with two options, and a manifest
-    # enabling the same agent, overriding one option
-    manifest = Manifest(
-        distribution="arch",
-        agents=[AgentOption(name="claude", options={"auth": True})],
-        layers=["base"],
+def test_agent_mounts_calls_mounts_for_with_each_agents_options() -> None:
+    # given a flavour with two layers, each declaring an agent, one of them
+    # with its own options
+    resolved = _resolved(
+        {
+            "base": Layer(agents=[AgentOption(name="claude", options={"auth": False})]),
+            "python": Layer(agents=[AgentOption(name="other")]),
+        }
     )
-    layers = {
-        "base": Layer(
-            agents=[
-                AgentOption(name="claude", options={"auth": False, "skills": False})
-            ],
-        )
-    }
-    resolved = ResolvedManifest(manifest, layers)
+    claude_agent = MagicMock()
+    claude_mounts = [
+        Mount(host_path=Path("/host/state"), container_path=Path("/container/state"))
+    ]
+    claude_agent.mounts_for.return_value = claude_mounts
+    other_agent = MagicMock()
+    other_mounts = [
+        Mount(host_path=Path("/host/other"), container_path=Path("/container/other"))
+    ]
+    other_agent.mounts_for.return_value = other_mounts
+
+    # when resolving the agents' mounts
+    with patch(
+        "ask.manifest.agent.resolve", side_effect=[claude_agent, other_agent]
+    ) as resolve:
+        mounts = resolved.agent_mounts(_user())
+
+    # then each agent is resolved, its mounts_for is called with the user and
+    # its own options, and the resulting mounts are returned in order
+    resolve.assert_has_calls([call("claude"), call("other")])
+    claude_agent.mounts_for.assert_called_once_with(_user(), {"auth": False})
+    other_agent.mounts_for.assert_called_once_with(_user(), {})
+    assert mounts == claude_mounts + other_mounts
+
+
+def test_agent_mounts_merges_agent_options_with_later_layers_winning() -> None:
+    # given a layer enabling an agent with two options, and a later layer
+    # enabling the same agent, overriding one option
+    resolved = _resolved(
+        {
+            "base": Layer(
+                agents=[
+                    AgentOption(name="claude", options={"auth": False, "skills": False})
+                ],
+            ),
+            "python": Layer(
+                agents=[AgentOption(name="claude", options={"auth": True})]
+            ),
+        }
+    )
     claude_agent = MagicMock()
     claude_agent.mounts_for.return_value = []
 
@@ -504,27 +536,22 @@ def test_agent_mounts_merges_agent_options_with_later_layers_winning() -> None:
         resolved.agent_mounts(_user())
 
     # then the agent's mounts are resolved once with the merged options, the
-    # manifest's value winning
+    # later layer's value winning
     claude_agent.mounts_for.assert_called_once_with(
         _user(), {"auth": True, "skills": False}
     )
 
 
 def test_agent_mounts_forgets_options_of_removed_agents() -> None:
-    # given a declared layer enabling an agent with an option, a second layer
-    # removing that agent, and a manifest enabling it again without options
-    manifest = Manifest(
-        distribution="arch",
-        agents=[AgentOption(name="claude")],
-        layers=["base", "no-claude"],
+    # given a layer enabling an agent with an option, a second layer removing
+    # that agent, and a third layer enabling it again without options
+    resolved = _resolved(
+        {
+            "base": Layer(agents=[AgentOption(name="claude", options={"auth": False})]),
+            "no-claude": Layer(agents=[AgentOption(name="-claude")]),
+            "claude-again": Layer(agents=[AgentOption(name="claude")]),
+        }
     )
-    layers = {
-        "base": Layer(
-            agents=[AgentOption(name="claude", options={"auth": False})],
-        ),
-        "no-claude": Layer(agents=[AgentOption(name="-claude")]),
-    }
-    resolved = ResolvedManifest(manifest, layers)
     claude_agent = MagicMock()
     claude_agent.mounts_for.return_value = []
 
@@ -536,99 +563,83 @@ def test_agent_mounts_forgets_options_of_removed_agents() -> None:
     claude_agent.mounts_for.assert_called_once_with(_user(), {})
 
 
-def test_agent_mounts_raises_on_unknown_layer() -> None:
-    # given a manifest declaring a layer that isn't defined in the layers mapping
-    manifest = Manifest(distribution="arch", layers=["nonexistent"])
-    resolved = ResolvedManifest(manifest, {})
-    user = ResolvedUser(
-        name="raniz",
-        uid=1000,
-        shell="bash",
-        group_name="raniz",
-        gid=1000,
-        extra_groups=[],
-    )
-
-    # when resolving the agents' mounts
-    # then a clear error is raised
-    with pytest.raises(ValueError, match="nonexistent"):
-        resolved.agent_mounts(user)
-
-
-def test_load_reports_syntax_errors_as_config_errors(tmp_path: Path) -> None:
-    # given a manifest file with a syntax error
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text("distribution = \n")
-
-    # when loading the manifest
-    with pytest.raises(ConfigError) as error:
-        load(manifest_path)
-
-    # then the error names the file
-    assert error.value.path == manifest_path
-
-
-def test_load_requires_a_distribution(tmp_path: Path) -> None:
-    # given a manifest file without a distribution
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text('layers = ["base"]\n')
-
-    # when loading the manifest
-    with pytest.raises(ConfigError) as error:
-        load(manifest_path)
-
-    # then the missing distribution is reported against the file
-    assert error.value.path == manifest_path
-    assert error.value.problems == ["distribution: Field required"]
-
-
-def test_load_reports_every_wrongly_typed_value(tmp_path: Path) -> None:
-    # given a manifest file with several wrongly typed values
-    manifest_path = tmp_path / "ask.toml"
-    manifest_path.write_text(
-        'distribution = 1\nlayers = "base"\npackages.arch = ["git", 2]\n'
-    )
-
-    # when loading the manifest
-    with pytest.raises(ConfigError) as error:
-        load(manifest_path)
-
-    # then all of them are reported together
-    assert error.value.problems == [
-        "packages.arch.1: Input should be a valid string",
-        "distribution: Input should be a valid string",
-        "layers: Input should be a valid list",
-    ]
-
-
-def test_tool_managers_enables_every_tool_manager_by_default() -> None:
-    # given a manifest and layer that don't mention tool managers
-    manifest = Manifest(distribution="arch", layers=["base"])
-    resolved = ResolvedManifest(manifest, {"base": Layer()})
+def test_tool_managers_enables_no_tool_manager_by_default() -> None:
+    # given a manifest that doesn't mention tool managers, and a base layer
+    resolved = _resolved({"base": Layer()})
 
     # when resolving the enabled tool managers
     tool_managers = resolved.tool_managers
 
-    # then every known tool manager is enabled
-    assert tool_managers == [Mise()]
-
-
-def test_tool_managers_removes_dash_prefixed_tool_managers() -> None:
-    # given a declared layer opting out of mise
-    manifest = Manifest(distribution="arch", layers=["base"])
-    resolved = ResolvedManifest(manifest, {"base": Layer(tool_managers=["-mise"])})
-
-    # when resolving the enabled tool managers
-    tool_managers = resolved.tool_managers
-
-    # then mise is not enabled
+    # then no tool manager is enabled
     assert tool_managers == []
 
 
-def test_tool_managers_lets_the_project_enable_a_tool_manager_a_layer_removed() -> None:
-    # given a declared layer opting out of mise, and a manifest enabling it again
-    manifest = Manifest(distribution="arch", layers=["base"], tool_managers=["mise"])
-    resolved = ResolvedManifest(manifest, {"base": Layer(tool_managers=["-mise"])})
+def test_services_merges_services_from_layers(tmp_path: Path) -> None:
+    # given a flavour with two layers, each declaring services
+    flavor = Flavor(
+        distribution="arch",
+        layers={
+            "base": Layer(
+                services={"sshd.service": "enabled", "man-db.timer": "disabled"},
+            ),
+            "python": Layer(
+                when=LayerWhen(files=["pyproject.toml"]),
+                services={"cronie.service": "started"},
+            ),
+        },
+    )
+    project_dir = tmp_path
+    (project_dir / "pyproject.toml").touch()
+
+    # when resolving the manifest
+    resolved = ResolvedManifest(Manifest(), flavor, project_dir)
+
+    # then the services from both layers are merged
+    assert resolved.services == {
+        "sshd.service": "enabled",
+        "man-db.timer": "disabled",
+        "cronie.service": "started",
+    }
+
+
+def test_services_ignores_layers_that_do_not_apply(tmp_path: Path) -> None:
+    # given a flavour with two layers, one that applies and one that doesn't
+    flavor = Flavor(
+        distribution="arch",
+        layers={
+            "base": Layer(
+                services={"sshd.service": "enabled"},
+            ),
+            "python": Layer(
+                when=LayerWhen(files=["pyproject.toml"]),
+                services={"cronie.service": "started"},
+            ),
+        },
+    )
+    project_dir = tmp_path
+    # pyproject.toml does not exist
+
+    # when resolving the manifest
+    resolved = ResolvedManifest(Manifest(), flavor, project_dir)
+
+    # then only the services from the base layer are included
+    assert resolved.services == {"sshd.service": "enabled"}
+
+
+def test_services_empty_when_no_layers_have_services() -> None:
+    # given a flavour with no services
+    resolved = _resolved({"base": Layer()})
+
+    # when resolving the services
+    services = resolved.services
+
+    # then services is an empty dict
+    assert services == {}
+
+
+def test_tool_managers_enables_the_tool_managers_the_manifest_lists() -> None:
+    # given a manifest opting into mise
+    resolved = _resolved({}, Manifest(tool_managers=["mise"]))
 
     # when resolving the enabled tool managers
     tool_managers = resolved.tool_managers

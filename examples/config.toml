@@ -16,7 +16,7 @@ when.path = [
 shell = "zsh"
 
 # Or with full options (defaults shown)
-# [flavours.debian.shell]
+# [flavors.debian.shell]
 # name = "zsh"
 # zshrc = true
 # zprofile = false
@@ -31,19 +31,19 @@ shell = "zsh"
 # tcsh:   tcshrc = true, login = false
 
 # Optional user definition, mirrors the calling user if unset
-# [flavours.debian.user]
+# [flavors.debian.user]
 # name = "raniz"
 # uid = 1000
 
 # Except groups, which defaults to just a group with the same name as the user
 # extra_groups = []
 
-# [flavours.debian.user.group]
+# [flavors.debian.user.group]
 # name = "raniz"
 # gid = 1000
 
 # The base layer, this layer always exists and is always applied as the lowest layer
-[flavours.debian.layers.base]
+[flavors.debian.layers.base]
 packages = [
   "neovim",
   "starship",
@@ -68,7 +68,7 @@ ides = [
   "vscode",
 ]
 
-[flavours.debian.layers.python]
+[flavors.debian.layers.python]
 # If multiple layers are applied, ordering _may_ be important
 # defaults to 0
 order = 10
@@ -79,8 +79,6 @@ packages = [
   "uv",
   "ipython3",
 ]
-
-agents
 
 ides = [
     "jetbrains-pycharm",

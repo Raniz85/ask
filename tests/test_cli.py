@@ -8,7 +8,7 @@ import pytest
 
 from ask.agent import AgentError
 from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec, restart
-from ask.config import Config, ConfigError, User
+from ask.config import ConfigError, Flavor, FlavorError, User
 from ask.convergence import effective_configuration, fingerprint
 from ask.incus import (
     ContainerExistsError,
@@ -18,7 +18,7 @@ from ask.incus import (
     InstanceSnapshot,
     Mount,
 )
-from ask.manifest import Manifest
+from ask.manifest import Manifest, ResolvedManifest
 from ask.user import ResolvedUser
 
 _WAYLAND_MOUNT = Mount(
@@ -27,16 +27,22 @@ _WAYLAND_MOUNT = Mount(
 )
 _WAYLAND_ENV = {"WAYLAND_DISPLAY": "/home/raniz/.wayland-socket"}
 _HOME_ENV = {"HOME": "/home/raniz"}
+_FLAVOR = '[flavors.arch]\ndistribution = "arch"\ndefault = true\n'
+_PROJECT_FLAVOR = Flavor(
+    distribution="arch", default=True, user=User(name="raniz", uid=1000)
+)
 
 
 def _run_in_project(tmp_path: Path, command: Callable[[], None]) -> tuple[Path, Mock]:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\nagents = ["claude"]\n'
-    )
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR
+        + '[flavors.arch.layers.base]\nagents = ["claude"]\n'
+        + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
@@ -88,9 +94,9 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
     # given a project directory with an ask.toml declaring a distribution
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # when running create from within that project directory
     with (
@@ -112,9 +118,9 @@ def test_create_rejects_a_container_that_already_exists(tmp_path: Path) -> None:
     # given a project directory with a valid ask.toml
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # and a container for the project that already exists
     with (
@@ -143,12 +149,15 @@ def test_create_rejects_a_container_that_already_exists(tmp_path: Path) -> None:
 def test_create_rejects_an_unknown_distribution_before_launching(
     tmp_path: Path,
 ) -> None:
-    # given a project directory with an ask.toml using an unsupported distribution
+    # given a project directory, and a default flavour using an unsupported
+    # distribution
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "gentoo"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(
+        '[flavors.gentoo]\ndistribution = "gentoo"\ndefault = true\n'
+    )
 
     # when running create from within that project directory
     with (
@@ -161,19 +170,18 @@ def test_create_rejects_an_unknown_distribution_before_launching(
 
     # then the distribution is reported and no container is launched
     assert error.value.problems == [
-        "distribution: unknown distribution 'gentoo' (known: arch)"
+        "flavors.gentoo.distribution: unknown distribution 'gentoo' (known: arch)"
     ]
     container_create.assert_not_called()
 
 
-def test_converge_rejects_undefined_layers_before_touching_the_container(
+def test_converge_rejects_projects_no_flavor_applies_to_before_touching_the_container(
     tmp_path: Path,
 ) -> None:
-    # given a project directory with an ask.toml using a layer the global
-    # config doesn't define
+    # given a project directory, and a global config without any flavours
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["rust"]\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
     config_path.write_text("")
 
@@ -182,14 +190,15 @@ def test_converge_rejects_undefined_layers_before_touching_the_container(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        pytest.raises(ConfigError) as error,
+        pytest.raises(FlavorError) as error,
     ):
         converge()
 
-    # then the layer is reported and the container is never targeted
-    assert error.value.problems == [
-        "layers.0: layer 'rust' is not defined in the global config (known: none)"
-    ]
+    # then the missing flavour is reported and the container is never targeted
+    assert str(error.value) == (
+        f"No flavour applies to {project_dir}. Add a flavour whose when.path "
+        "matches it, or mark one with default = true."
+    )
     container_cls.assert_not_called()
 
 
@@ -199,9 +208,9 @@ def test_converge_starts_a_stopped_targeted_container(
     # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
@@ -230,9 +239,11 @@ def test_converge_creates_a_missing_container_without_asking_when_requested(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when converging from a terminal with missing containers to be created
     with (
@@ -268,14 +279,11 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
     configured_mount.mkdir()
     layer_mount = tmp_path / "layer-mount"
     layer_mount.mkdir()
-    (project_dir / "ask.toml").write_text(
-        f'distribution = "arch"\nbind_mounts = ["{configured_mount}"]\n'
-        'layers = ["python"]\n'
-    )
+    (project_dir / "ask.toml").write_text(f'bind_mounts = ["{configured_mount}"]\n')
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        f'[layers.python]\nbind_mounts = ["{layer_mount}"]\n'
-        '[user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + f'[flavors.arch.layers.python]\nbind_mounts = ["{layer_mount}"]\n'
+        '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -314,9 +322,11 @@ def test_converge_provisions_the_resolved_user(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + 'shell = "zsh"\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when converging from within that project directory
     with (
@@ -350,9 +360,11 @@ def test_converge_provisions_the_user_before_mounting_home_relative_paths(
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     call_order: list[str] = []
 
@@ -385,11 +397,11 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
     # and a config declaring that layer's packages
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\npackages.arch = ["project-pkg"]\nlayers = ["python"]\n'
-    )
+    (project_dir / "ask.toml").write_text('packages = ["project-pkg"]\n')
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[layers.python]\npackages.common = ["layer-pkg"]\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.layers.python]\npackages = ["layer-pkg"]\n'
+    )
 
     # when converging from within that project directory
     with (
@@ -417,9 +429,9 @@ def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> 
     # declaring zsh as the shell
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('shell = "zsh"\n')
+    config_path.write_text(_FLAVOR + 'shell = "zsh"\n')
 
     # when converging from within that project directory
     with (
@@ -445,11 +457,9 @@ def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> N
     # official one
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\npackages.arch = ["aur:yay-bin", "git"]\n'
-    )
+    (project_dir / "ask.toml").write_text('packages = ["aur:yay-bin", "git"]\n')
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
@@ -483,9 +493,9 @@ def test_converge_removes_a_package_that_is_no_longer_declared_as_aur(
     # container previously tracked as aur-installed
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
@@ -512,9 +522,11 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
     # user, and a host home directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + 'shell = "zsh"\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
 
@@ -554,11 +566,11 @@ def test_converge_mounts_the_shell_files_enabled_by_its_options(
     # rc file disabled and zprofile enabled, and a host home directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[shell]\nname = "zsh"\nzshrc = false\nzprofile = true\n'
-        '[user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + '[flavors.arch.shell]\nname = "zsh"\nzshrc = false\nzprofile = true\n'
+        '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -594,9 +606,11 @@ def test_converge_installs_declared_agent_packages(tmp_path: Path) -> None:
     # given a project directory using a layer that declares the claude agent
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[layers.base]\nagents = ["claude"]\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.layers.base]\nagents = ["claude"]\n'
+    )
 
     # when converging from within that project directory
     with (
@@ -629,10 +643,11 @@ def test_converge_mounts_the_state_of_configured_agents(
     # a resolved user, and a host home directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR
+        + '[flavors.arch.layers.base]\nagents = ["claude"]\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -701,11 +716,9 @@ def test_converge_removes_packages_no_longer_declared(tmp_path: Path) -> None:
     # was previously managing that package plus one no longer declared
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\npackages.arch = ["project-pkg"]\n'
-    )
+    (project_dir / "ask.toml").write_text('packages = ["project-pkg"]\n')
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
@@ -739,11 +752,9 @@ def test_converge_does_not_remove_packages_when_nothing_is_stale(
     # already tracks as managed
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\npackages.arch = ["project-pkg"]\n'
-    )
+    (project_dir / "ask.toml").write_text('packages = ["project-pkg"]\n')
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
@@ -769,11 +780,11 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
     # declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\nbind_mounts = ["/home/raniz/.cache/uv"]\n'
-    )
+    (project_dir / "ask.toml").write_text('bind_mounts = ["/home/raniz/.cache/uv"]\n')
     config_path = tmp_path / "config.toml"
-    config_path.write_text('shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + 'shell = "zsh"\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when converging from within that project directory
     with (
@@ -814,10 +825,11 @@ def test_converge_fixes_agent_state_mount_ownership(
     # given a project directory using a layer that declares the claude agent
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR
+        + '[flavors.arch.layers.base]\nagents = ["claude"]\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -874,9 +886,11 @@ def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # and an installed ask version and a clock
     converged_at = datetime(2026, 11, 9, 12, 30, tzinfo=UTC)
@@ -900,9 +914,7 @@ def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
     # then the effective configuration, its fingerprint and the time are
     # recorded as the last thing done to the container
     configuration = effective_configuration(
-        Manifest(distribution="arch"),
-        Config(user=User(name="raniz", uid=1000)),
-        project_dir,
+        ResolvedManifest(Manifest(), _PROJECT_FLAVOR, project_dir)
     )
     datetime_mock.now.assert_called_once_with(UTC)
     assert container.method_calls[-1] == call.set_converged_state(
@@ -923,9 +935,9 @@ def test_converge_does_not_record_the_state_when_provisioning_fails(
     # given a project directory
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # and provisioning that fails
     with (
@@ -962,7 +974,9 @@ def _converge_with_mise(tmp_path: Path, ask_toml: str) -> tuple[Path, MagicMock]
     project_dir.mkdir(exist_ok=True)
     (project_dir / "ask.toml").write_text(ask_toml)
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     steps = MagicMock()
     with (
@@ -995,8 +1009,8 @@ def test_converge_hands_tool_installation_to_mise_for_a_project_with_mise_config
     (tmp_path / "my-project").mkdir()
     (tmp_path / "my-project" / "mise.toml").write_text('[tools]\nerlang = "29"\n')
 
-    # when converging from within that project directory
-    project_dir, steps = _converge_with_mise(tmp_path, 'distribution = "arch"\n')
+    # when converging with an ask.toml that opts into mise
+    project_dir, steps = _converge_with_mise(tmp_path, 'tool_managers = ["mise"]\n')
 
     # then mise is installed alongside the shell's package
     steps.provisioner.provision_packages.assert_called_once_with(
@@ -1024,8 +1038,8 @@ def test_converge_leaves_mise_out_of_a_project_without_mise_config(
     tmp_path: Path,
 ) -> None:
     # given a project directory without mise config
-    # when converging from within that project directory
-    _, steps = _converge_with_mise(tmp_path, 'distribution = "arch"\n')
+    # when converging with an ask.toml that opts into mise
+    _, steps = _converge_with_mise(tmp_path, 'tool_managers = ["mise"]\n')
 
     # then mise is neither installed nor run
     steps.provisioner.provision_packages.assert_called_once_with("arch", ["bash"])
@@ -1035,17 +1049,15 @@ def test_converge_leaves_mise_out_of_a_project_without_mise_config(
     steps.container.set_path_prefix.assert_called_once_with([])
 
 
-def test_converge_leaves_mise_out_of_a_project_that_opts_out_of_it(
+def test_converge_leaves_mise_out_of_a_project_that_does_not_opt_into_it(
     tmp_path: Path,
 ) -> None:
     # given a project directory with a mise.toml
     (tmp_path / "my-project").mkdir()
     (tmp_path / "my-project" / "mise.toml").write_text('[tools]\nerlang = "29"\n')
 
-    # when converging with an ask.toml that opts out of mise
-    _, steps = _converge_with_mise(
-        tmp_path, 'distribution = "arch"\ntool_managers = ["-mise"]\n'
-    )
+    # when converging with an ask.toml that does not opt into mise
+    _, steps = _converge_with_mise(tmp_path, "")
 
     # then mise is neither installed nor run
     steps.provisioner.provision_packages.assert_called_once_with("arch", ["bash"])
@@ -1059,9 +1071,11 @@ def test_enter_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container
     with (
@@ -1086,9 +1100,11 @@ def test_enter_does_not_start_an_already_running_container(tmp_path: Path) -> No
     # given a project directory with a running container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container
     with (
@@ -1113,9 +1129,9 @@ def test_enter_rejects_an_unknown_shell_before_touching_the_container(
     # given a project directory, and a config declaring an unsupported shell
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('shell = "foosh"\n')
+    config_path.write_text(_FLAVOR + 'shell = "foosh"\n')
 
     # when entering the container
     with (
@@ -1128,7 +1144,8 @@ def test_enter_rejects_an_unknown_shell_before_touching_the_container(
 
     # then the shell is reported and the container is never targeted
     assert error.value.problems == [
-        "shell.name: unknown shell 'foosh' (known: bash, elvish, fish, ksh, tcsh, zsh)"
+        "flavors.arch.shell.name: unknown shell 'foosh' "
+        "(known: bash, elvish, fish, ksh, tcsh, zsh)"
     ]
     container_cls.assert_not_called()
 
@@ -1137,9 +1154,11 @@ def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user and shell
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + 'shell = "zsh"\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container
     with (
@@ -1166,9 +1185,11 @@ def test_enter_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when the entered shell exits non-zero
     with (
@@ -1191,9 +1212,11 @@ def test_enter_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) ->
     # wayland session
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container with --gui
     with (
@@ -1228,9 +1251,11 @@ def test_enter_does_not_forward_anything_when_gui_requested_without_a_session(
     # wayland session on the host
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container with --gui
     with (
@@ -1262,9 +1287,11 @@ def test_enter_creates_a_missing_container_when_the_user_accepts(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container from a terminal and accepting the offer to create it
     with (
@@ -1296,9 +1323,11 @@ def test_enter_creates_a_missing_container_when_the_user_accepts_the_default(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container from a terminal and answering the offer with
     # just enter
@@ -1328,9 +1357,11 @@ def test_enter_refuses_a_missing_container_when_the_user_declines(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container from a terminal and declining the offer to create it
     with (
@@ -1362,9 +1393,11 @@ def test_enter_refuses_a_missing_container_when_stdin_is_closed(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container from a terminal without an answer being
     # available on stdin
@@ -1397,9 +1430,11 @@ def test_enter_creates_a_missing_container_without_asking_when_requested(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container from a terminal with missing containers to be created
     with (
@@ -1429,9 +1464,11 @@ def test_enter_does_not_offer_to_create_a_missing_container_without_a_terminal(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when entering the container with stdin not connected to a terminal
     with (
@@ -1476,9 +1513,7 @@ def test_enter_does_not_offer_to_create_an_existing_container(
     ):
         stdin_mock.isatty.return_value = True
         container = container_cls.return_value
-        container.snapshot.return_value = _converged_snapshot(
-            _PROJECT_MANIFEST, _PROJECT_CONFIG, project_dir
-        )
+        container.snapshot.return_value = _converged_snapshot(project_dir)
         container.exec_command.return_value = 0
 
         enter()
@@ -1501,16 +1536,22 @@ _CHANGED_WARNING = (
 def _project(tmp_path: Path) -> tuple[Path, Path]:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
     return project_dir, config_path
 
 
 def _converged_snapshot(
-    m: Manifest, cfg: Config, project_dir: Path
+    project_dir: Path, m: Manifest | None = None
 ) -> InstanceSnapshot:
-    converged = fingerprint(effective_configuration(m, cfg, project_dir))
+    converged = fingerprint(
+        effective_configuration(
+            ResolvedManifest(m or Manifest(), _PROJECT_FLAVOR, project_dir)
+        )
+    )
     return InstanceSnapshot(
         status="Running",
         config={
@@ -1520,8 +1561,6 @@ def _converged_snapshot(
     )
 
 
-_PROJECT_MANIFEST = Manifest(distribution="arch")
-_PROJECT_CONFIG = Config(user=User(name="raniz", uid=1000))
 _STALE_SNAPSHOT = InstanceSnapshot(
     status="Running",
     config={
@@ -1562,7 +1601,7 @@ def test_enter_does_not_converge_an_unchanged_configuration(
 ) -> None:
     # given a project whose container was converged with its current configuration
     project_dir, config_path = _project(tmp_path)
-    snapshot = _converged_snapshot(_PROJECT_MANIFEST, _PROJECT_CONFIG, project_dir)
+    snapshot = _converged_snapshot(project_dir)
 
     # when entering the container from a terminal
     container, input_mock, converge_mock = _enter_with(
@@ -1581,10 +1620,12 @@ def test_enter_does_not_converge_an_unchanged_configuration(
 def test_enter_asks_to_converge_after_the_mise_config_changed(
     tmp_path: Path,
 ) -> None:
-    # given a project with a mise.toml, whose container was converged with it
+    # given a project opting into mise with a mise.toml, whose container was
+    # converged with it
     project_dir, config_path = _project(tmp_path)
+    (project_dir / "ask.toml").write_text('tool_managers = ["mise"]\n')
     (project_dir / "mise.toml").write_text('[tools]\nerlang = "29.1.1"\n')
-    snapshot = _converged_snapshot(_PROJECT_MANIFEST, _PROJECT_CONFIG, project_dir)
+    snapshot = _converged_snapshot(project_dir, Manifest(tool_managers=["mise"]))
 
     # and a mise.toml that has changed since
     (project_dir / "mise.toml").write_text('[tools]\nerlang = "29.2.0"\n')
@@ -1794,9 +1835,11 @@ def test_exec_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when executing a command from within that project directory
     with (
@@ -1823,9 +1866,11 @@ def test_exec_creates_a_missing_container_when_the_user_accepts(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when executing a command from a terminal and accepting the offer to create it
     with (
@@ -1857,9 +1902,11 @@ def test_exec_creates_a_missing_container_without_asking_when_requested(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when executing a command from a terminal with missing containers to be created
     with (
@@ -1887,9 +1934,11 @@ def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when executing a command from within that project directory
     with (
@@ -1916,9 +1965,11 @@ def test_exec_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when the executed command exits non-zero
     with (
@@ -1941,9 +1992,11 @@ def test_exec_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> 
     # wayland session
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when executing a command with --gui
     with (
@@ -1977,9 +2030,11 @@ def test_exec_passes_only_home_when_gui_requested_without_a_session(
     # wayland session on the host
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when executing a command with --gui
     with (
@@ -2005,14 +2060,13 @@ def test_exec_passes_only_home_when_gui_requested_without_a_session(
     )
 
 
-def test_agent_rejects_undefined_layers_before_touching_the_container(
+def test_agent_rejects_projects_no_flavor_applies_to_before_touching_the_container(
     tmp_path: Path,
 ) -> None:
-    # given a project directory with an ask.toml using a layer the global
-    # config doesn't define
+    # given a project directory, and a global config without any flavours
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["rust"]\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
     config_path.write_text("")
 
@@ -2021,14 +2075,15 @@ def test_agent_rejects_undefined_layers_before_touching_the_container(
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_path", return_value=config_path),
         patch("ask.cli.incus.Container") as container_cls,
-        pytest.raises(ConfigError) as error,
+        pytest.raises(FlavorError) as error,
     ):
         agent()
 
-    # then the layer is reported and the container is never targeted
-    assert error.value.problems == [
-        "layers.0: layer 'rust' is not defined in the global config (known: none)"
-    ]
+    # then the missing flavour is reported and the container is never targeted
+    assert str(error.value) == (
+        f"No flavour applies to {project_dir}. Add a flavour whose when.path "
+        "matches it, or mark one with default = true."
+    )
     container_cls.assert_not_called()
 
 
@@ -2039,11 +2094,11 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
     # resolved user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[layers.base]\nagents = ["claude", "codex"]\n'
-        '[user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + '[flavors.arch.layers.base]\nagents = ["claude", "codex"]\n'
+        '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when launching an agent without naming one
@@ -2071,9 +2126,11 @@ def test_agent_launches_the_named_agent_when_given(tmp_path: Path) -> None:
     # given a project directory with no agents configured, and a resolved user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching an agent by name
     with (
@@ -2099,9 +2156,11 @@ def test_agent_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching an agent
     with (
@@ -2128,9 +2187,11 @@ def test_agent_creates_a_missing_container_when_the_user_accepts(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching an agent from a terminal and accepting the offer to create it
     with (
@@ -2162,9 +2223,11 @@ def test_agent_creates_a_missing_container_without_asking_when_requested(
     # given a project directory without a container
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching an agent from a terminal with missing containers to be created
     with (
@@ -2192,9 +2255,11 @@ def test_agent_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when the launched agent exits non-zero
     with (
@@ -2218,9 +2283,11 @@ def test_agent_raises_when_no_agents_are_configured_and_none_given(
     # given a project directory with no agents configured anywhere
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching an agent without naming one
     # then a clear error is raised, rather than starting the container
@@ -2231,16 +2298,20 @@ def test_agent_raises_when_no_agents_are_configured_and_none_given(
     ):
         agent()
 
-    assert str(error.value) == "No agents configured in ask.toml or its layers."
+    assert str(error.value) == (
+        "No agents configured in the flavour layers that apply to this project."
+    )
 
 
 def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
     # given a project directory, and a name with no known agent
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching it by name
     # then a clear error is raised
@@ -2260,9 +2331,11 @@ def test_agent_forwards_extra_arguments_to_the_agent(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching an agent by name with extra arguments
     with (
@@ -2289,9 +2362,11 @@ def test_agent_forwards_wayland_display_when_gui_is_requested(
     # wayland session
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching an agent with --gui
     with (
@@ -2324,10 +2399,11 @@ def test_agent_treats_a_dash_prefixed_name_as_an_argument_to_the_default_agent(
     # and a resolved user
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nlayers = ["base"]\n')
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR
+        + '[flavors.arch.layers.base]\nagents = ["claude"]\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when launching an agent with arguments but without naming one
@@ -2357,9 +2433,9 @@ def test_commands_reject_an_invalid_manifest_before_touching_the_container(
     # given a project directory with an ask.toml containing an unknown key
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text('distribution = "arch"\nflayers = []\n')
+    (project_dir / "ask.toml").write_text("flayers = []\n")
     config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path.write_text(_FLAVOR)
 
     # when running the command from within that project directory
     with (
@@ -2375,18 +2451,20 @@ def test_commands_reject_an_invalid_manifest_before_touching_the_container(
     container_cls.assert_not_called()
 
 
-def test_agent_prints_manifest_warnings_once(
+def test_agent_prints_config_warnings_once(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # given a project directory with an ask.toml that produces a warning
+    # given a project directory, and a global config that produces a warning
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text(
-        'distribution = "arch"\n'
-        'agents = ["claude", { name = "-codex", auth = false }]\n'
-    )
+    (project_dir / "ask.toml").write_text("")
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(
+        _FLAVOR
+        + "[flavors.arch.layers.base]\n"
+        + 'agents = ["claude", { name = "-codex", auth = false }]\n'
+        + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+    )
 
     # when launching an agent
     with (
@@ -2400,8 +2478,9 @@ def test_agent_prints_manifest_warnings_once(
 
     # then the warning is printed exactly once
     assert capsys.readouterr().err == (
-        f"ask: warning in {project_dir / 'ask.toml'}\n"
-        "  agents.1: options have no effect when removing agent 'codex'\n"
+        f"ask: warning in {config_path}\n"
+        "  flavors.arch.layers.base.agents.1: options have no effect when "
+        "removing agent 'codex'\n"
     )
 
 

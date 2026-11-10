@@ -1,4 +1,4 @@
-default = True
+default = true
 distribution = "arch"
 shell = "zsh"
 

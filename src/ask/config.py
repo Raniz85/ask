@@ -9,6 +9,7 @@ from typing import Annotated
 from pydantic import (
     AfterValidator,
     BeforeValidator,
+    StrictBool,
     StrictInt,
     StrictStr,
     TypeAdapter,
@@ -18,9 +19,10 @@ from pydantic_core import ErrorDetails, PydanticCustomError
 
 from ask.agent import AgentOption
 from ask.errors import AskError
+from ask.incus import known_distributions
+from ask.problems import unknown_name
 from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.shell import ShellOption
-from ask.tool_manager import check_name as check_tool_manager_name
 from ask.user import ResolvedUser
 
 
@@ -34,6 +36,10 @@ class ConfigError(AskError):
         lines = [f"Invalid configuration in {self.path}:"]
         lines += [f"  {problem}" for problem in self.problems]
         return "\n".join(lines)
+
+
+class FlavorError(AskError):
+    pass
 
 
 _POSITION = re.compile(
@@ -95,16 +101,44 @@ HomePath = Annotated[Path, AfterValidator(Path.expanduser)]
 
 
 @dataclass
+class LayerWhen:
+    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    files: list[StrictStr]
+
+
+BASE_LAYER = "base"
+
+
+def _validate_service_state(
+    value: dict[StrictStr, StrictStr],
+) -> dict[StrictStr, StrictStr]:
+    for service, state in value.items():
+        if state not in ALLOWED_SERVICE_STATES:
+            raise PydanticCustomError(
+                "invalid_service_state",
+                "Invalid service state '{state}' for service '{service}'. Allowed states: {allowed}",
+                {
+                    "state": state,
+                    "service": service,
+                    "allowed": ", ".join(sorted(ALLOWED_SERVICE_STATES)),
+                },
+            )
+    return value
+
+
+@dataclass
 class Layer:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
     bind_mounts: list[HomePath] = field(default_factory=list)
-    packages: dict[str, list[StrictStr]] = field(default_factory=dict)
+    packages: list[StrictStr] = field(default_factory=list)
+    services: Annotated[
+        dict[StrictStr, StrictStr], AfterValidator(_validate_service_state)
+    ] = field(default_factory=dict)
     agents: list[Annotated[AgentOption, BeforeValidator(_flatten_options)]] = field(
         default_factory=list
     )
-    tool_managers: list[
-        Annotated[StrictStr, AfterValidator(check_tool_manager_name)]
-    ] = field(default_factory=list)
+    order: StrictInt = 0
+    when: LayerWhen | None = None
 
 
 @dataclass
@@ -123,29 +157,108 @@ class User:
     group: Group = field(default_factory=Group)
 
 
+def _expand_home(pattern: object) -> object:
+    if isinstance(pattern, str) and (pattern == "~" or pattern.startswith("~/")):
+        return re.escape(str(Path.home())) + pattern.removeprefix("~")
+    return pattern
+
+
 @dataclass
-class Config:
+class FlavorWhen:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    path: list[Annotated[re.Pattern, BeforeValidator(_expand_home)]] = field(
+        default_factory=list
+    )
+
+
+def _check_distribution(name: str) -> str:
+    if name not in known_distributions():
+        raise unknown_name("distribution", name, known_distributions())
+    return name
+
+
+def _check_base_layer(layers: dict[str, Layer]) -> dict[str, Layer]:
+    base = layers.get(BASE_LAYER)
+    if base is not None and base.when is not None:
+        raise PydanticCustomError(
+            "base_layer_conditions",
+            "the base layer is always applied and cannot have when conditions",
+        )
+    return layers
+
+
+@dataclass
+class Flavor:
+    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    distribution: Annotated[StrictStr, AfterValidator(_check_distribution)]
+    default: StrictBool = False
+    when: FlavorWhen = field(default_factory=FlavorWhen)
     shell: Annotated[ShellOption, BeforeValidator(_flatten_options)] = field(
         default_factory=lambda: ShellOption(name="bash")
     )
     user: User = field(default_factory=User)
-    layers: dict[str, Layer] = field(default_factory=dict)
+    layers: Annotated[dict[str, Layer], AfterValidator(_check_base_layer)] = field(
+        default_factory=dict
+    )
 
 
-def resolve_user(cfg: Config) -> ResolvedUser:
+def _check_single_default(flavors: dict[str, Flavor]) -> dict[str, Flavor]:
+    defaults = [name for name, flavor in flavors.items() if flavor.default]
+    if len(defaults) > 1:
+        raise PydanticCustomError(
+            "multiple_default_flavors",
+            "more than one default flavour: {names}",
+            {"names": ", ".join(repr(name) for name in defaults)},
+        )
+    return flavors
+
+
+@dataclass
+class Config:
+    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    flavors: Annotated[dict[str, Flavor], AfterValidator(_check_single_default)] = (
+        field(default_factory=dict)
+    )
+
+
+def _applies_to(flavor: Flavor, project_dir: Path) -> bool:
+    return any(pattern.fullmatch(str(project_dir)) for pattern in flavor.when.path)
+
+
+def select_flavor(cfg: Config, project_dir: Path) -> tuple[str, Flavor]:
+    matching = [
+        name for name, flavor in cfg.flavors.items() if _applies_to(flavor, project_dir)
+    ]
+    if len(matching) > 1:
+        raise FlavorError(
+            f"Several flavours apply to {project_dir}: "
+            f"{', '.join(repr(name) for name in matching)}. "
+            "Narrow their when.path so that only one matches."
+        )
+    if matching:
+        return matching[0], cfg.flavors[matching[0]]
+    for name, flavor in cfg.flavors.items():
+        if flavor.default:
+            return name, flavor
+    raise FlavorError(
+        f"No flavour applies to {project_dir}. Add a flavour whose when.path "
+        "matches it, or mark one with default = true."
+    )
+
+
+def resolve_user(flavor: Flavor) -> ResolvedUser:
     calling_user = pwd.getpwuid(os.getuid())
-    name = cfg.user.name or calling_user.pw_name
-    uid = cfg.user.uid if cfg.user.uid is not None else calling_user.pw_uid
-    group_name = cfg.user.group.name or name
-    gid = cfg.user.group.gid if cfg.user.group.gid is not None else uid
+    name = flavor.user.name or calling_user.pw_name
+    uid = flavor.user.uid if flavor.user.uid is not None else calling_user.pw_uid
+    group_name = flavor.user.group.name or name
+    gid = flavor.user.group.gid if flavor.user.group.gid is not None else uid
     return ResolvedUser(
         name=name,
         uid=uid,
-        shell=cfg.shell.name,
+        shell=flavor.shell.name,
         group_name=group_name,
         gid=gid,
-        extra_groups=cfg.user.extra_groups,
+        extra_groups=flavor.user.extra_groups,
     )
 
 
@@ -180,15 +293,31 @@ def _validation_problems(error: ValidationError) -> list[str]:
     return [_problem(details) for details in error.errors()]
 
 
-def load_as[T](path: Path, schema: type[T]) -> T:
-    data = read_toml(path)
+def _validate[T](path: Path, data: dict, schema: type[T]) -> T:
     try:
         return TypeAdapter(schema).validate_python(data)
     except ValidationError as error:
         raise ConfigError(path, _validation_problems(error)) from None
 
 
+def load_as[T](path: Path, schema: type[T]) -> T:
+    return _validate(path, read_toml(path), schema)
+
+
+def _load_flavor_files(path: Path, data: dict) -> dict:
+    flavors = data.get("flavors")
+    if not isinstance(flavors, dict):
+        return data
+    loaded = {
+        name: load_as(path.parent / flavor, Flavor)
+        if isinstance(flavor, str)
+        else flavor
+        for name, flavor in flavors.items()
+    }
+    return data | {"flavors": loaded}
+
+
 def load(path: Path) -> Config:
     if not path.exists():
-        return Config(layers={})
-    return load_as(path, Config)
+        return Config(flavors={})
+    return _validate(path, _load_flavor_files(path, read_toml(path)), Config)

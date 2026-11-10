@@ -1,22 +1,27 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import StrictStr
+from pydantic import AfterValidator, StrictStr
 
 from ask import agent, tool_manager
 from ask.agent import Agent
-from ask.config import Layer, load_as
+from ask.config import BASE_LAYER, Flavor, HomePath, Layer, load_as
 from ask.incus import Mount
-from ask.module import resolve_packages
 from ask.removal import is_removal, removals
+from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.tool_manager import Mise
 from ask.user import ResolvedUser
 
 
-@dataclass(kw_only=True)
-class Manifest(Layer):
-    distribution: StrictStr
-    layers: list[StrictStr] = field(default_factory=list)
+@dataclass
+class Manifest:
+    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    packages: list[StrictStr] = field(default_factory=list)
+    bind_mounts: list[HomePath] = field(default_factory=list)
+    tool_managers: list[
+        Annotated[StrictStr, AfterValidator(tool_manager.check_name)]
+    ] = field(default_factory=list)
 
 
 def load(path: Path) -> Manifest:
@@ -32,16 +37,32 @@ class _MergedAgent:
 @dataclass
 class ResolvedManifest:
     manifest: Manifest
-    layers: dict[str, Layer]
+    flavor: Flavor
+    project_dir: Path
 
-    def _configured_layers(self) -> list[Layer]:
-        result: list[Layer] = []
-        for layer_name in self.manifest.layers:
-            try:
-                result.append(self.layers[layer_name])
-            except KeyError:
-                raise ValueError(f"no known layer named {layer_name!r}") from None
-        return result + [self.manifest]
+    def _applies(self, layer: Layer) -> bool:
+        return layer.when is None or any(
+            (self.project_dir / file_name).exists() for file_name in layer.when.files
+        )
+
+    @property
+    def layer_names(self) -> list[str]:
+        base = [name for name in self.flavor.layers if name == BASE_LAYER]
+        others = sorted(
+            (
+                name
+                for name, layer in self.flavor.layers.items()
+                if name != BASE_LAYER and self._applies(layer)
+            ),
+            key=lambda name: self.flavor.layers[name].order,
+        )
+        return base + others
+
+    def _flavor_layers(self) -> list[Layer]:
+        return [self.flavor.layers[name] for name in self.layer_names]
+
+    def _configured_layers(self) -> list[Layer | Manifest]:
+        return [*self._flavor_layers(), self.manifest]
 
     @property
     def bind_mounts(self) -> list[Path]:
@@ -54,17 +75,14 @@ class ResolvedManifest:
     def packages(self) -> list[str]:
         packages: list[str] = []
         for layer in self._configured_layers():
-            layer_packages = resolve_packages(
-                layer.packages, self.manifest.distribution
-            )
-            removed = removals(layer_packages)
+            removed = removals(layer.packages)
             packages = [p for p in packages if p not in removed]
-            packages += [p for p in layer_packages if not is_removal(p)]
+            packages += [p for p in layer.packages if not is_removal(p)]
         return list(dict.fromkeys(packages))
 
     def _merged_agents(self) -> list[_MergedAgent]:
         merged: dict[str, _MergedAgent] = {}
-        for layer in self._configured_layers():
+        for layer in self._flavor_layers():
             for name in removals([option.name for option in layer.agents]):
                 merged.pop(name, None)
             for option in layer.agents:
@@ -84,12 +102,8 @@ class ResolvedManifest:
 
     @property
     def tool_managers(self) -> list[Mise]:
-        names = tool_manager.known_names()
-        for layer in self._configured_layers():
-            removed = removals(layer.tool_managers)
-            names = [name for name in names if name not in removed]
-            names += [name for name in layer.tool_managers if not is_removal(name)]
-        return [tool_manager.resolve(name) for name in dict.fromkeys(names)]
+        names = dict.fromkeys(self.manifest.tool_managers)
+        return [tool_manager.resolve(name) for name in names]
 
     @property
     def services(self) -> dict[str, str]:

@@ -1,9 +1,5 @@
 from pathlib import Path
 
-import pytest
-
-from ask import config
-from ask.config import ConfigError, Layer
 from ask.tool_manager import Mise, config_digest, known_names, resolve
 from ask.user import ResolvedUser
 
@@ -114,34 +110,6 @@ def test_resolve_returns_the_named_tool_manager() -> None:
 
     # then the matching tool manager is returned
     assert tool_manager == Mise()
-
-
-def test_loading_a_config_reads_removed_tool_managers(tmp_path: Path) -> None:
-    # given a layer opting out of mise
-    config_path = tmp_path / "config.toml"
-    config_path.write_text('[layers.base]\ntool_managers = ["-mise"]\n')
-
-    # when loading it
-    loaded = config.load(config_path)
-
-    # then the removal is kept on the layer
-    assert loaded.layers == {"base": Layer(tool_managers=["-mise"])}
-
-
-def test_loading_a_config_rejects_unknown_tool_managers(tmp_path: Path) -> None:
-    # given a layer removing a known tool manager and one ask doesn't support
-    config_path = tmp_path / "config.toml"
-    config_path.write_text('[layers.base]\ntool_managers = ["-mise", "-asdf"]\n')
-
-    # when loading it
-    with pytest.raises(ConfigError) as error:
-        config.load(config_path)
-
-    # then the unsupported one is reported by its name without the removal
-    # prefix, along with the supported ones
-    assert error.value.problems == [
-        "layers.base.tool_managers.1: unknown tool manager 'asdf' (known: mise)"
-    ]
 
 
 def test_config_digest_is_the_same_for_unchanged_config_files(tmp_path: Path) -> None:

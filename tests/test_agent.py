@@ -310,7 +310,7 @@ def test_known_names_lists_every_supported_agent_sorted() -> None:
 
 def _load_problems(tmp_path: Path, toml: str) -> list[str]:
     config_path = tmp_path / "config.toml"
-    config_path.write_text(toml)
+    config_path.write_text('[flavors.arch]\ndistribution = "arch"\n' + toml)
     with pytest.raises(ConfigError) as error:
         config.load(config_path)
     return error.value.problems
@@ -318,14 +318,14 @@ def _load_problems(tmp_path: Path, toml: str) -> list[str]:
 
 def test_loading_a_config_rejects_unknown_agents(tmp_path: Path) -> None:
     # given a layer using a known agent and an agent ask doesn't support
-    toml = '[layers.base]\nagents = ["claude", "hal"]\n'
+    toml = '[flavors.arch.layers.base]\nagents = ["claude", "hal"]\n'
 
     # when loading it
     problems = _load_problems(tmp_path, toml)
 
     # then the agent is reported by its position along with the supported ones
     assert problems == [
-        "layers.base.agents.1.name: unknown agent 'hal' "
+        "flavors.arch.layers.base.agents.1.name: unknown agent 'hal' "
         "(known: claude, codex, opencode, pi)"
     ]
 
@@ -334,21 +334,23 @@ def test_loading_a_config_rejects_options_the_agent_does_not_have(
     tmp_path: Path,
 ) -> None:
     # given a layer enabling an opencode option for claude
-    toml = '[layers.base]\nagents = [{ name = "claude", agents_md = true }]\n'
+    toml = (
+        '[flavors.arch.layers.base]\nagents = [{ name = "claude", agents_md = true }]\n'
+    )
 
     # when loading it
     problems = _load_problems(tmp_path, toml)
 
     # then the option is reported along with the ones claude supports
     assert problems == [
-        "layers.base.agents.0: unknown option 'agents_md' for claude "
+        "flavors.arch.layers.base.agents.0: unknown option 'agents_md' for claude "
         "(known: auth, claude_md, config, skills)"
     ]
 
 
 def test_loading_a_config_checks_removed_agents_by_their_name(tmp_path: Path) -> None:
     # given a layer removing a known agent and an agent ask doesn't support
-    toml = '[layers.base]\nagents = ["-claude", "-hal"]\n'
+    toml = '[flavors.arch.layers.base]\nagents = ["-claude", "-hal"]\n'
 
     # when loading it
     problems = _load_problems(tmp_path, toml)
@@ -356,20 +358,20 @@ def test_loading_a_config_checks_removed_agents_by_their_name(tmp_path: Path) ->
     # then only the unsupported agent is reported, by its name without the
     # removal prefix
     assert problems == [
-        "layers.base.agents.1.name: unknown agent 'hal' "
+        "flavors.arch.layers.base.agents.1.name: unknown agent 'hal' "
         "(known: claude, codex, opencode, pi)"
     ]
 
 
 def test_loading_a_config_checks_options_of_removed_agents(tmp_path: Path) -> None:
     # given a layer removing claude with an option claude doesn't have
-    toml = '[layers.base]\nagents = [{ name = "-claude", telepathy = true }]\n'
+    toml = '[flavors.arch.layers.base]\nagents = [{ name = "-claude", telepathy = true }]\n'
 
     # when loading it
     problems = _load_problems(tmp_path, toml)
 
     # then the option is reported against claude
     assert problems == [
-        "layers.base.agents.0: unknown option 'telepathy' for claude "
+        "flavors.arch.layers.base.agents.0: unknown option 'telepathy' for claude "
         "(known: auth, claude_md, config, skills)"
     ]

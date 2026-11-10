@@ -4,9 +4,7 @@ from pathlib import Path
 from ask import config, manifest
 from ask.config import Config, ConfigError, Layer
 from ask.errors import AskError
-from ask.incus import known_distributions
-from ask.manifest import Manifest
-from ask.problems import known
+from ask.manifest import Manifest, ResolvedManifest
 from ask.removal import REMOVAL_PREFIX
 
 
@@ -40,8 +38,11 @@ def _print_warnings(path: Path, warnings: list[str]) -> None:
 
 def config_warnings(cfg: Config) -> list[str]:
     warnings: list[str] = []
-    for layer_name, layer in cfg.layers.items():
-        warnings += _layer_warnings(f"layers.{layer_name}.", layer)
+    for flavor_name, flavor in cfg.flavors.items():
+        for layer_name, layer in flavor.layers.items():
+            warnings += _layer_warnings(
+                f"flavors.{flavor_name}.layers.{layer_name}.", layer
+            )
     return warnings
 
 
@@ -51,44 +52,39 @@ def load_config(path: Path) -> Config:
     return cfg
 
 
-def check_manifest(m: Manifest, cfg: Config) -> list[str]:
-    problems: list[str] = []
-    if m.distribution not in known_distributions():
-        problems.append(
-            f"distribution: unknown distribution {m.distribution!r} "
-            f"{known(known_distributions())}"
-        )
-    for index, layer_name in enumerate(m.layers):
-        if layer_name not in cfg.layers:
-            problems.append(
-                f"layers.{index}: layer {layer_name!r} is not defined in the "
-                f"global config {known(set(cfg.layers))}"
-            )
-            continue
-        problems += [
-            f"layers.{index}: bind mount {path} from layer {layer_name!r} "
-            "does not exist"
-            for path in cfg.layers[layer_name].bind_mounts
-            if not path.exists()
-        ]
-    problems += [
-        f"bind_mounts.{index}: path {path} does not exist"
-        for index, path in enumerate(m.bind_mounts)
+def _missing_bind_mounts(location: str, bind_mounts: list[Path]) -> list[str]:
+    return [
+        f"{location}bind_mounts.{index}: path {path} does not exist"
+        for index, path in enumerate(bind_mounts)
         if not path.exists()
     ]
-    return problems
 
 
-def manifest_warnings(m: Manifest) -> list[str]:
-    return _layer_warnings("", m)
+def check_manifest(m: Manifest) -> list[str]:
+    return _missing_bind_mounts("", m.bind_mounts)
 
 
-def load_manifest(path: Path, cfg: Config) -> Manifest:
+def load_manifest(path: Path) -> Manifest:
     if not path.exists():
         raise ManifestNotFoundError(path)
     m = manifest.load(path)
-    problems = check_manifest(m, cfg)
+    problems = check_manifest(m)
     if problems:
         raise ConfigError(path, problems)
-    _print_warnings(path, manifest_warnings(m))
     return m
+
+
+def resolve_project(
+    config_path: Path, cfg: Config, m: Manifest, project_dir: Path
+) -> ResolvedManifest:
+    flavor_name, flavor = config.select_flavor(cfg, project_dir)
+    resolved = ResolvedManifest(m, flavor, project_dir)
+    problems: list[str] = []
+    for layer_name in resolved.layer_names:
+        problems += _missing_bind_mounts(
+            f"flavors.{flavor_name}.layers.{layer_name}.",
+            flavor.layers[layer_name].bind_mounts,
+        )
+    if problems:
+        raise ConfigError(config_path, problems)
+    return resolved

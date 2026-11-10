@@ -2,9 +2,11 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic_core import PydanticCustomError
+
 from ask.module import resolve_packages
 from ask.problems import unknown_name
-from ask.removal import unprefixed
+from ask.removal import is_removal
 from ask.user import ResolvedUser
 
 _MISE_CONFIG_PATTERNS = [
@@ -76,6 +78,11 @@ def resolve(name: str) -> Mise:
 
 
 def check_name(name: str) -> str:
-    if unprefixed(name) not in _TOOL_MANAGERS:
-        raise unknown_name("tool manager", unprefixed(name), known_names())
+    if is_removal(name):
+        raise PydanticCustomError(
+            "tool_manager_removal",
+            "tool managers are only enabled by ask.toml and cannot be removed with '-'",
+        )
+    if name not in _TOOL_MANAGERS:
+        raise unknown_name("tool manager", name, known_names())
     return name

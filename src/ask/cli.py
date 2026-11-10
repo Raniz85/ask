@@ -55,16 +55,22 @@ CHANGED_WARNING = (
 )
 
 
+def _resolve_project(project_dir: Path) -> manifest.ResolvedManifest:
+    config_path = config.default_path()
+    cfg = validation.load_config(config_path)
+    m = validation.load_manifest(project_dir / "ask.toml")
+    return validation.resolve_project(config_path, cfg, m, project_dir)
+
+
 def create() -> None:
     project_dir = Path.cwd()
-    cfg = validation.load_config(config.default_path())
-    m = validation.load_manifest(project_dir / "ask.toml", cfg)
+    resolved = _resolve_project(project_dir)
     if incus.Container(project_dir.name).snapshot() is not None:
         raise incus.ContainerExistsError(
             f"Container {project_dir.name!r} already exists. "
             "Run `ask converge` to update it."
         )
-    incus.Container.create(project_dir.name, m.distribution)
+    incus.Container.create(project_dir.name, resolved.flavor.distribution)
     converge()
 
 
@@ -73,31 +79,30 @@ def converge(
     create_missing: CreateMissing = False,
 ) -> None:
     project_dir = Path.cwd()
-    cfg = validation.load_config(config.default_path())
-    m = validation.load_manifest(project_dir / "ask.toml", cfg)
-    resolved_manifest = manifest.ResolvedManifest(m, cfg.layers)
+    resolved = _resolve_project(project_dir)
+    distribution = resolved.flavor.distribution
     container, _ = _running_container(project_dir, create_missing)
-    bind_mounts = [project_dir] + resolved_manifest.bind_mounts
-    user = config.resolve_user(cfg)
+    bind_mounts = [project_dir] + resolved.bind_mounts
+    user = config.resolve_user(resolved.flavor)
     user_shell = shell.resolve(user.shell)
 
     tool_managers = [
         (tool_manager, config_files)
-        for tool_manager in resolved_manifest.tool_managers
+        for tool_manager in resolved.tool_managers
         if (config_files := tool_manager.config_files(project_dir))
     ]
 
-    package_modules: list[Module] = [user_shell, *resolved_manifest.agents]
-    packages = resolved_manifest.packages
+    package_modules: list[Module] = [user_shell, *resolved.agents]
+    packages = resolved.packages
     for mod in package_modules:
-        packages += mod.packages_for(m.distribution)
+        packages += mod.packages_for(distribution)
     for tool_manager, _ in tool_managers:
-        packages += tool_manager.packages_for(m.distribution)
+        packages += tool_manager.packages_for(distribution)
     official_packages, aur_packages = provision.split_aur_packages(packages)
 
     mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
-    mounts += user_shell.mounts_for(user, cfg.shell.options)
-    mounts += resolved_manifest.agent_mounts(user)
+    mounts += user_shell.mounts_for(user, resolved.flavor.shell.options)
+    mounts += resolved.agent_mounts(user)
 
     provisioner = provision.Provisioner(container)
     aur_builder = provision.AurBuilder(container)
@@ -105,13 +110,13 @@ def converge(
     provisioner.provision_user(user)
     container.converge(mounts)
 
-    provisioner.provision_packages(m.distribution, official_packages)
-    aur_builder.install_packages(m.distribution, aur_packages)
+    provisioner.provision_packages(distribution, official_packages)
+    aur_builder.install_packages(distribution, aur_packages)
 
     resolved_packages = official_packages + aur_packages
     stale = incus.stale_packages(container.get_managed_packages(), resolved_packages)
     if stale:
-        provisioner.remove_packages(m.distribution, stale)
+        provisioner.remove_packages(distribution, stale)
     container.set_managed_packages(resolved_packages)
 
     provisioner.fix_bind_mount_ownership(
@@ -126,7 +131,7 @@ def converge(
         path_entries += tool_manager.path_entries(user)
     container.set_path_prefix(path_entries)
 
-    configuration = convergence.effective_configuration(m, cfg, project_dir)
+    configuration = convergence.effective_configuration(resolved)
     container.set_converged_state(
         incus.ConvergedState(
             fingerprint=convergence.fingerprint(configuration),
@@ -143,11 +148,10 @@ def enter(
     converge_changed: ConvergeChanged = None,
 ) -> None:
     project_dir = Path.cwd()
-    cfg = validation.load_config(config.default_path())
-    m = validation.load_manifest(project_dir / "ask.toml", cfg)
-    user = config.resolve_user(cfg)
+    resolved = _resolve_project(project_dir)
+    user = config.resolve_user(resolved.flavor)
     container = _converged_container(
-        project_dir, m, cfg, create_missing, converge_changed
+        project_dir, resolved, create_missing, converge_changed
     )
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
@@ -168,15 +172,16 @@ def agent(
     converge_changed: ConvergeChanged = None,
 ) -> None:
     project_dir = Path.cwd()
-    cfg = validation.load_config(config.default_path())
-    m = validation.load_manifest(project_dir / "ask.toml", cfg)
+    resolved = _resolve_project(project_dir)
     if name is not None and name.startswith("-"):
         args = (name, *args)
         name = None
     if name is None:
-        agent_names = manifest.ResolvedManifest(m, cfg.layers).agent_names
+        agent_names = resolved.agent_names
         if not agent_names:
-            raise agents.AgentError("No agents configured in ask.toml or its layers.")
+            raise agents.AgentError(
+                "No agents configured in the flavour layers that apply to this project."
+            )
         name = agent_names[0]
     if name not in agents.known_names():
         raise agents.AgentError(
@@ -185,8 +190,7 @@ def agent(
     resolved_agent = agents.resolve(name)
     _exec_in_container(
         project_dir,
-        m,
-        cfg,
+        resolved,
         [resolved_agent.name, *args],
         gui,
         create_missing,
@@ -201,10 +205,9 @@ def exec(
     converge_changed: ConvergeChanged = None,
 ) -> None:
     project_dir = Path.cwd()
-    cfg = validation.load_config(config.default_path())
-    m = validation.load_manifest(project_dir / "ask.toml", cfg)
+    resolved = _resolve_project(project_dir)
     _exec_in_container(
-        project_dir, m, cfg, list(command), gui, create_missing, converge_changed
+        project_dir, resolved, list(command), gui, create_missing, converge_changed
     )
 
 
@@ -252,12 +255,9 @@ def _running_container(
 
 
 def _configuration_changed(
-    snapshot: incus.InstanceSnapshot,
-    m: manifest.Manifest,
-    cfg: config.Config,
-    project_dir: Path,
+    snapshot: incus.InstanceSnapshot, resolved: manifest.ResolvedManifest
 ) -> bool:
-    configuration = convergence.effective_configuration(m, cfg, project_dir)
+    configuration = convergence.effective_configuration(resolved)
     return snapshot.converged_fingerprint() != convergence.fingerprint(configuration)
 
 
@@ -272,8 +272,7 @@ def _should_converge(converge_changed: bool | None) -> bool:
 
 def _converged_container(
     project_dir: Path,
-    m: manifest.Manifest,
-    cfg: config.Config,
+    resolved: manifest.ResolvedManifest,
     create_missing: bool,
     converge_changed: bool | None,
 ) -> incus.Container:
@@ -281,7 +280,7 @@ def _converged_container(
     freshly_created = snapshot is None
     if (
         not freshly_created
-        and _configuration_changed(snapshot, m, cfg, project_dir)
+        and _configuration_changed(snapshot, resolved)
         and _should_converge(converge_changed)
     ):
         converge()
@@ -290,16 +289,15 @@ def _converged_container(
 
 def _exec_in_container(
     project_dir: Path,
-    m: manifest.Manifest,
-    cfg: config.Config,
+    resolved: manifest.ResolvedManifest,
     command: list[str],
     gui: bool,
     create_missing: bool,
     converge_changed: bool | None,
 ) -> None:
-    user = config.resolve_user(cfg)
+    user = config.resolve_user(resolved.flavor)
     container = _converged_container(
-        project_dir, m, cfg, create_missing, converge_changed
+        project_dir, resolved, create_missing, converge_changed
     )
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
