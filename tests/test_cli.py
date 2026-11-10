@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 import pytest
 
 from ask.agent import AgentError
-from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec
+from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec, restart
 from ask.config import Config, ConfigError, User
 from ask.convergence import effective_configuration, fingerprint
 from ask.incus import (
@@ -2403,3 +2403,65 @@ def test_agent_prints_manifest_warnings_once(
         f"ask: warning in {project_dir / 'ask.toml'}\n"
         "  agents.1: options have no effect when removing agent 'codex'\n"
     )
+
+
+def test_restart_restarts_a_running_container(tmp_path: Path) -> None:
+    # given a project directory with a running container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    # when restarting from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
+
+        restart()
+
+    # then the container named after the project directory is restarted
+    container_cls.assert_called_once_with("my-project")
+    assert container.method_calls == [call.snapshot(), call.restart()]
+
+
+def test_restart_starts_a_stopped_container(tmp_path: Path) -> None:
+    # given a project directory with a stopped container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    # when restarting from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
+
+        restart()
+
+    # then the container is started, since a stopped container cannot be restarted
+    assert container.method_calls == [call.snapshot(), call.start()]
+
+
+def test_restart_rejects_a_missing_container(tmp_path: Path) -> None:
+    # given a project directory without a container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(ContainerNotFoundError) as error,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = None
+
+        # when restarting from within that project directory
+        restart()
+
+    # then the error says how to create the container, and nothing is started
+    assert str(error.value) == (
+        "No container named 'my-project'. Run `ask create` first."
+    )
+    assert container.method_calls == [call.snapshot()]

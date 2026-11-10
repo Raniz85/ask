@@ -189,6 +189,20 @@ def exec(
     )
 
 
+def restart() -> None:
+    project_dir = Path.cwd()
+    container = incus.Container(project_dir.name)
+    snapshot = container.snapshot()
+    if snapshot is None:
+        raise incus.ContainerNotFoundError(
+            f"No container named {project_dir.name!r}. Run `ask create` first."
+        )
+    if snapshot.is_running():
+        container.restart()
+    else:
+        container.start()
+
+
 def _confirm(prompt: str) -> bool:
     if not sys.stdin.isatty():
         return False

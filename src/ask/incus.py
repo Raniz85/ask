@@ -203,6 +203,9 @@ class Container:
     def start(self) -> None:
         _incus(["incus", "start", self.name])
 
+    def restart(self) -> None:
+        _incus(["incus", "restart", self.name])
+
     def run_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["incus", "exec", self.name, "--", *command],

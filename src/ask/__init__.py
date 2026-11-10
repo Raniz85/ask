@@ -7,7 +7,7 @@ import cyclopts
 from cyclopts.panel import CycloptsPanel
 from rich.console import Console
 
-from ask.cli import agent, converge, create, enter, exec
+from ask.cli import agent, converge, create, enter, exec, restart
 from ask.errors import AskError
 
 app = cyclopts.App()
@@ -16,6 +16,7 @@ app.command(converge)
 app.command(enter)
 app.command(exec)
 app.command(agent)
+app.command(restart)
 
 
 def run(

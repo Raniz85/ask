@@ -280,3 +280,39 @@ def test_ask_reports_an_unknown_tool_manager_without_a_traceback(
             "  tool_managers.0: unknown tool manager 'asdf' (known: mise)",
         ),
     )
+
+
+def test_ask_restarts_a_running_container(tmp_path: Path) -> None:
+    # given a project directory
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    # and an incus command that knows of a running container for the project,
+    # and records how it is invoked
+    invocations = tmp_path / "invocations"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_incus = fake_bin / "incus"
+    fake_incus.write_text(
+        "#!/bin/sh\n"
+        f'echo "$@" >> {invocations}\n'
+        'if [ "$1" = list ]; then\n'
+        '  echo \'[{"name": "my-project", "status": "Running", "config": {}}]\'\n'
+        "fi\n"
+    )
+    fake_incus.chmod(0o755)
+
+    # when running ask restart from within the project directory
+    result = subprocess.run(
+        [str(ASK), "restart"],
+        cwd=project_dir,
+        env={"PATH": str(fake_bin)},
+        capture_output=True,
+        text=True,
+    )
+
+    # then ask succeeds silently, having asked incus to restart the container
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert invocations.read_text() == (
+        "list my-project --format json\nrestart my-project\n"
+    )
