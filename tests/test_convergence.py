@@ -50,6 +50,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
                 "bind_mounts": [],
                 "packages": ["git"],
                 "agents": [{"name": "claude", "options": {}}],
+                "services": {},
                 "order": 0,
                 "when": None,
             },
@@ -58,6 +59,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
             "packages": ["ripgrep"],
             "bind_mounts": ["/src"],
             "tool_managers": ["mise"],
+            "services": {},
         },
         "tool_manager_configs": {},
     }

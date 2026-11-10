@@ -6,12 +6,25 @@ from pydantic import AfterValidator, StrictStr
 
 from ask import agent, tool_manager
 from ask.agent import Agent
-from ask.config import BASE_LAYER, Flavor, HomePath, Layer, load_as
+from ask.config import (
+    BASE_LAYER,
+    Flavor,
+    HomePath,
+    Layer,
+    _normalize_service_dict,
+    load_as,
+    normalize_service_name,
+    read_toml,
+    _validate,
+)
 from ask.incus import Mount
 from ask.removal import is_removal, removals
 from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.tool_manager import Mise
 from ask.user import ResolvedUser
+
+
+from ask.config import _normalize_service_dict
 
 
 @dataclass
@@ -26,7 +39,10 @@ class Manifest:
 
 
 def load(path: Path) -> Manifest:
-    return load_as(path, Manifest)
+    data = read_toml(path)
+    if "services" in data:
+        data["services"] = _normalize_service_dict(data["services"])
+    return _validate(path, data, Manifest)
 
 
 @dataclass
@@ -112,7 +128,7 @@ class ResolvedManifest:
         for layer in self._flavor_layers():
             services.update(layer.services)
         # Manifest services take precedence over layer services
-        services.update(self.manifest.services)
+        services.update(_normalize_service_dict(self.manifest.services))
         return services
 
     def agent_mounts(self, user: ResolvedUser) -> list[Mount]:

@@ -695,6 +695,29 @@ def test_services_merges_manifest_and_layer_services() -> None:
     }
 
 
+def test_services_normalizes_short_names_in_manifest() -> None:
+    # given a manifest with short service names (no suffix) and a layer with full names
+    resolved = _resolved(
+        {
+            "base": Layer(
+                services={"existing.service": "enabled", "docker.socket": "masked"}
+            )
+        },
+        Manifest(services={"short": "disabled", "another": "masked"}),
+    )
+
+    # when resolving the services
+    services = resolved.services
+
+    # then short service names are normalized to include .service suffix while full names are preserved
+    assert services == {
+        "existing.service": "enabled",
+        "docker.socket": "masked",  # Preserved full name
+        "short.service": "disabled",  # Normalized short name
+        "another.service": "masked",  # Normalized short name
+    }
+
+
 def test_tool_managers_enables_the_tool_managers_the_manifest_lists() -> None:
     # given a manifest opting into mise
     resolved = _resolved({}, Manifest(tool_managers=["mise"]))

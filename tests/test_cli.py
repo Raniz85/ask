@@ -2578,3 +2578,41 @@ def test_restart_rejects_a_missing_container(tmp_path: Path) -> None:
         "No container named 'my-project'. Run `ask create` first."
     )
     assert container.method_calls == [call.snapshot()]
+
+
+def test_converge_normalizes_short_service_names_in_manifest(tmp_path: Path) -> None:
+    # given a project with short service names in the manifest
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(
+        'services.short = "enabled"\nservices.another = "disabled"\nservices."full.socket" = "masked"\n'
+    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + '[layers.base]\nservices."existing.service" = "masked"\nservices."layer.socket" = "enabled"\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the services are normalized (short names get .service suffix)
+    provisioner_cls.return_value.provision_services.assert_called_once_with(
+        {
+            "existing.service": "masked",
+            "layer.socket": "enabled",  # Preserved from layer
+            "short.service": "enabled",  # Normalized from manifest
+            "another.service": "disabled",  # Normalized from manifest
+            "full.socket": "masked",  # Preserved from manifest
+        }
+    )

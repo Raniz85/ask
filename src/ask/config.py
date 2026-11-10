@@ -29,6 +29,46 @@ from ask.user import ResolvedUser
 ALLOWED_SERVICE_STATES = {"enabled", "disabled", "masked"}
 
 
+def normalize_service_name(service: str) -> str:
+    """
+    Normalize a service name by adding .service suffix if no other unit type suffix is present.
+
+    Examples:
+        sshd -> sshd.service
+        docker.socket -> docker.socket
+        man-db.timer -> man-db.timer
+    """
+    # If the service already has a unit type suffix, return as-is
+    if any(
+        service.endswith(suffix)
+        for suffix in [
+            ".service",
+            ".socket",
+            ".timer",
+            ".path",
+            ".mount",
+            ".automount",
+            ".target",
+            ".slice",
+            ".scope",
+        ]
+    ):
+        return service
+    # Otherwise, add .service suffix
+    return f"{service}.service"
+
+
+def _normalize_service_dict(services: dict[str, str]) -> dict[str, str]:
+    """Normalize service names in a dictionary."""
+    if not isinstance(services, dict):
+        return {}
+    normalized_services = {}
+    for service, state in services.items():
+        normalized_name = normalize_service_name(service)
+        normalized_services[normalized_name] = state
+    return normalized_services
+
+
 class ConfigError(AskError):
     def __init__(self, path: Path, problems: list[str]) -> None:
         super().__init__(path, problems)
@@ -126,7 +166,8 @@ def _validate_service_state(
                     "allowed": ", ".join(sorted(ALLOWED_SERVICE_STATES)),
                 },
             )
-    return value
+    # Normalize the service names
+    return _normalize_service_dict(value)
 
 
 @dataclass

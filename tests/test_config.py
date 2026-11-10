@@ -520,6 +520,52 @@ def test_load_accepts_valid_service_states(tmp_path: Path) -> None:
         assert config.flavors["arch"].layers["base"].services["sshd.service"] == state
 
 
+def test_load_preserves_full_service_names(tmp_path: Path) -> None:
+    # given a flavour with services using full names
+    flavor_dir = tmp_path / "flavors"
+    flavor_dir.mkdir()
+    flavor_file = flavor_dir / "arch.toml"
+    flavor_file.write_text("""
+        distribution = "arch"
+        default = true
+        [layers.base]
+        services."sshd.service" = "enabled"
+        services."docker.socket" = "disabled"
+        services."man-db.timer" = "masked"
+        """)
+
+    # when loading the config
+    config = load(flavor_dir)
+
+    # then full service names are preserved
+    services = config.flavors["arch"].layers["base"].services
+    assert services["sshd.service"] == "enabled"
+    assert services["docker.socket"] == "disabled"
+    assert services["man-db.timer"] == "masked"
+
+
+def test_load_normalizes_short_service_names(tmp_path: Path) -> None:
+    # given a flavour with services using short names (no suffix)
+    flavor_dir = tmp_path / "flavors"
+    flavor_dir.mkdir()
+    flavor_file = flavor_dir / "arch.toml"
+    flavor_file.write_text("""
+        distribution = "arch"
+        default = true
+        [layers.base]
+        services.sshd = "enabled"
+        services.docker = "disabled"
+        """)
+
+    # when loading the config
+    config = load(flavor_dir)
+
+    # then short service names are normalized to include .service suffix
+    services = config.flavors["arch"].layers["base"].services
+    assert services["sshd.service"] == "enabled"
+    assert services["docker.service"] == "disabled"
+
+
 def test_load_rejects_invalid_service_states(tmp_path: Path) -> None:
     # given a flavour with an invalid service state
     flavors_dir = _flavor_file(
