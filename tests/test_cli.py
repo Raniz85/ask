@@ -27,25 +27,31 @@ _WAYLAND_MOUNT = Mount(
 )
 _WAYLAND_ENV = {"WAYLAND_DISPLAY": "/home/raniz/.wayland-socket"}
 _HOME_ENV = {"HOME": "/home/raniz"}
-_FLAVOR = '[flavors.arch]\ndistribution = "arch"\ndefault = true\n'
+_FLAVOR = 'distribution = "arch"\ndefault = true\n'
 _PROJECT_FLAVOR = Flavor(
     distribution="arch", default=True, user=User(name="raniz", uid=1000)
 )
+
+
+def _flavor_path(tmp_path: Path) -> Path:
+    flavors_dir = tmp_path / "flavors"
+    flavors_dir.mkdir(exist_ok=True)
+    return flavors_dir / "arch.toml"
 
 
 def _run_in_project(tmp_path: Path, command: Callable[[], None]) -> tuple[Path, Mock]:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[flavors.arch.layers.base]\nagents = ["claude"]\n'
-        + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        + '[layers.base]\nagents = ["claude"]\n'
+        + '[user]\nname = "raniz"\nuid = 1000\n'
     )
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.converge"),
         pytest.raises(SystemExit),
@@ -95,13 +101,13 @@ def test_create_launches_container_and_converges(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # when running create from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container.create") as container_create,
         patch("ask.cli.incus.Container.snapshot", return_value=None),
         patch("ask.cli.converge") as converge_mock,
@@ -119,13 +125,13 @@ def test_create_rejects_a_container_that_already_exists(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # and a container for the project that already exists
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch(
             "ask.cli.incus.Container.snapshot",
             return_value=InstanceSnapshot(status="Running", config={}),
@@ -154,15 +160,13 @@ def test_create_rejects_an_unknown_distribution_before_launching(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        '[flavors.gentoo]\ndistribution = "gentoo"\ndefault = true\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text('distribution = "gentoo"\ndefault = true\n')
 
     # when running create from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container.create") as container_create,
         pytest.raises(ConfigError) as error,
     ):
@@ -170,7 +174,7 @@ def test_create_rejects_an_unknown_distribution_before_launching(
 
     # then the distribution is reported and no container is launched
     assert error.value.problems == [
-        "flavors.gentoo.distribution: unknown distribution 'gentoo' (known: arch)"
+        "distribution: unknown distribution 'gentoo' (known: arch)"
     ]
     container_create.assert_not_called()
 
@@ -178,17 +182,16 @@ def test_create_rejects_an_unknown_distribution_before_launching(
 def test_converge_rejects_projects_no_flavor_applies_to_before_touching_the_container(
     tmp_path: Path,
 ) -> None:
-    # given a project directory, and a global config without any flavours
+    # given a project directory, and a flavours directory without any flavours
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path = _flavor_path(tmp_path)
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(FlavorError) as error,
     ):
@@ -209,13 +212,13 @@ def test_converge_starts_a_stopped_targeted_container(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -240,15 +243,13 @@ def test_converge_creates_a_missing_container_without_asking_when_requested(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when converging from a terminal with missing containers to be created
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner"),
         patch("ask.cli.provision.AurBuilder"),
@@ -280,10 +281,10 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
     layer_mount = tmp_path / "layer-mount"
     layer_mount.mkdir()
     (project_dir / "ask.toml").write_text(f'bind_mounts = ["{configured_mount}"]\n')
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR + f'[flavors.arch.layers.python]\nbind_mounts = ["{layer_mount}"]\n'
-        '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + f'[layers.python]\nbind_mounts = ["{layer_mount}"]\n'
+        '[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -292,7 +293,7 @@ def test_converge_applies_resolved_bind_mounts_including_project_dir(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner"),
         patch("ask.cli.provision.AurBuilder"),
@@ -323,15 +324,15 @@ def test_converge_provisions_the_resolved_user(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR + 'shell = "zsh"\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + 'shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -361,17 +362,15 @@ def test_converge_provisions_the_user_before_mounting_home_relative_paths(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     call_order: list[str] = []
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -398,15 +397,13 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('packages = ["project-pkg"]\n')
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.layers.python]\npackages = ["layer-pkg"]\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[layers.python]\npackages = ["layer-pkg"]\n')
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -430,13 +427,13 @@ def test_converge_includes_the_configured_shells_own_package(tmp_path: Path) -> 
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR + 'shell = "zsh"\n')
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -458,13 +455,13 @@ def test_converge_installs_declared_aur_packages_separately(tmp_path: Path) -> N
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('packages = ["aur:yay-bin", "git"]\n')
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder") as aur_builder_cls,
@@ -494,13 +491,13 @@ def test_converge_removes_a_package_that_is_no_longer_declared_as_aur(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -523,9 +520,9 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR + 'shell = "zsh"\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + 'shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -534,7 +531,7 @@ def test_converge_mounts_the_resolved_shells_rc_file_readonly(tmp_path: Path) ->
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner"),
         patch("ask.cli.provision.AurBuilder"),
@@ -567,10 +564,10 @@ def test_converge_mounts_the_shell_files_enabled_by_its_options(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR + '[flavors.arch.shell]\nname = "zsh"\nzshrc = false\nzprofile = true\n'
-        '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + '[shell]\nname = "zsh"\nzshrc = false\nzprofile = true\n'
+        '[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -579,7 +576,7 @@ def test_converge_mounts_the_shell_files_enabled_by_its_options(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner"),
         patch("ask.cli.provision.AurBuilder"),
@@ -607,15 +604,13 @@ def test_converge_installs_declared_agent_packages(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.layers.base]\nagents = ["claude"]\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[layers.base]\nagents = ["claude"]\n')
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder") as aur_builder_cls,
@@ -644,10 +639,10 @@ def test_converge_mounts_the_state_of_configured_agents(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[flavors.arch.layers.base]\nagents = ["claude"]\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        + '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -666,7 +661,7 @@ def test_converge_mounts_the_state_of_configured_agents(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner"),
         patch("ask.cli.provision.AurBuilder"),
@@ -717,13 +712,13 @@ def test_converge_removes_packages_no_longer_declared(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('packages = ["project-pkg"]\n')
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -753,13 +748,13 @@ def test_converge_does_not_remove_packages_when_nothing_is_stale(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('packages = ["project-pkg"]\n')
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -781,15 +776,15 @@ def test_converge_fixes_bind_mount_ownership_after_provisioning_the_user(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text('bind_mounts = ["/home/raniz/.cache/uv"]\n')
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR + 'shell = "zsh"\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + 'shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -826,10 +821,10 @@ def test_converge_fixes_agent_state_mount_ownership(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[flavors.arch.layers.base]\nagents = ["claude"]\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        + '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -848,7 +843,7 @@ def test_converge_fixes_agent_state_mount_ownership(
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.Path.home", return_value=home_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -887,10 +882,8 @@ def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # and an installed ask version and a clock
     converged_at = datetime(2026, 11, 9, 12, 30, tzinfo=UTC)
@@ -898,7 +891,7 @@ def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
     # when converging from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner"),
         patch("ask.cli.provision.AurBuilder"),
@@ -936,13 +929,13 @@ def test_converge_does_not_record_the_state_when_provisioning_fails(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # and provisioning that fails
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -973,15 +966,13 @@ def _converge_with_mise(tmp_path: Path, ask_toml: str) -> tuple[Path, MagicMock]
     project_dir = tmp_path / "my-project"
     project_dir.mkdir(exist_ok=True)
     (project_dir / "ask.toml").write_text(ask_toml)
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     steps = MagicMock()
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.provision.Provisioner") as provisioner_cls,
         patch("ask.cli.provision.AurBuilder"),
@@ -1072,15 +1063,13 @@ def test_enter_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
@@ -1101,15 +1090,13 @@ def test_enter_does_not_start_an_already_running_container(tmp_path: Path) -> No
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
@@ -1130,13 +1117,13 @@ def test_enter_rejects_an_unknown_shell_before_touching_the_container(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR + 'shell = "foosh"\n')
 
     # when entering the container
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(ConfigError) as error,
     ):
@@ -1144,8 +1131,7 @@ def test_enter_rejects_an_unknown_shell_before_touching_the_container(
 
     # then the shell is reported and the container is never targeted
     assert error.value.problems == [
-        "flavors.arch.shell.name: unknown shell 'foosh' "
-        "(known: bash, elvish, fish, ksh, tcsh, zsh)"
+        "shell.name: unknown shell 'foosh' (known: bash, elvish, fish, ksh, tcsh, zsh)"
     ]
     container_cls.assert_not_called()
 
@@ -1155,15 +1141,15 @@ def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR + 'shell = "zsh"\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + 'shell = "zsh"\n[user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when entering the container
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -1186,15 +1172,13 @@ def test_enter_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when the entered shell exits non-zero
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -1213,15 +1197,13 @@ def test_enter_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) ->
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container with --gui
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
         patch("ask.gui.acquire") as acquire_mock,
@@ -1252,15 +1234,13 @@ def test_enter_does_not_forward_anything_when_gui_requested_without_a_session(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container with --gui
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=None),
         patch("ask.gui.acquire") as acquire_mock,
@@ -1288,15 +1268,13 @@ def test_enter_creates_a_missing_container_when_the_user_accepts(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container from a terminal and accepting the offer to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="y"),
@@ -1324,16 +1302,14 @@ def test_enter_creates_a_missing_container_when_the_user_accepts_the_default(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container from a terminal and answering the offer with
     # just enter
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value=""),
@@ -1358,15 +1334,13 @@ def test_enter_refuses_a_missing_container_when_the_user_declines(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container from a terminal and declining the offer to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="n"),
@@ -1394,16 +1368,14 @@ def test_enter_refuses_a_missing_container_when_stdin_is_closed(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container from a terminal without an answer being
     # available on stdin
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", side_effect=EOFError),
@@ -1431,15 +1403,13 @@ def test_enter_creates_a_missing_container_without_asking_when_requested(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container from a terminal with missing containers to be created
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
         patch("ask.cli.sys.stdin") as stdin_mock,
@@ -1465,15 +1435,13 @@ def test_enter_does_not_offer_to_create_a_missing_container_without_a_terminal(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when entering the container with stdin not connected to a terminal
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input") as input_mock,
@@ -1504,7 +1472,7 @@ def test_enter_does_not_offer_to_create_an_existing_container(
     # when entering the container from a terminal
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input") as input_mock,
@@ -1537,10 +1505,8 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
     return project_dir, config_path
 
 
@@ -1580,7 +1546,7 @@ def _enter_with(
 ) -> tuple[Mock, Mock, Mock]:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value=answer) as input_mock,
@@ -1754,7 +1720,7 @@ def test_enter_does_not_ask_to_converge_a_container_it_just_created(
     # when entering the container, accepting to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="y") as input_mock,
@@ -1786,7 +1752,7 @@ def test_exec_converges_a_changed_configuration_when_requested(
     # when executing a command with changes to be converged
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.converge") as converge_mock,
         pytest.raises(SystemExit),
@@ -1813,7 +1779,7 @@ def test_agent_converges_a_changed_configuration_when_requested(
     # when launching an agent with changes to be converged
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.converge") as converge_mock,
         pytest.raises(SystemExit),
@@ -1836,15 +1802,13 @@ def test_exec_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when executing a command from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
@@ -1867,15 +1831,13 @@ def test_exec_creates_a_missing_container_when_the_user_accepts(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when executing a command from a terminal and accepting the offer to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="y"),
@@ -1903,15 +1865,13 @@ def test_exec_creates_a_missing_container_without_asking_when_requested(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when executing a command from a terminal with missing containers to be created
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
         patch("ask.cli.sys.stdin") as stdin_mock,
@@ -1935,15 +1895,13 @@ def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when executing a command from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -1966,15 +1924,13 @@ def test_exec_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when the executed command exits non-zero
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -1993,15 +1949,13 @@ def test_exec_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> 
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when executing a command with --gui
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
         patch("ask.gui.acquire") as acquire_mock,
@@ -2031,15 +1985,13 @@ def test_exec_passes_only_home_when_gui_requested_without_a_session(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when executing a command with --gui
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=None),
         patch("ask.gui.acquire") as acquire_mock,
@@ -2063,17 +2015,16 @@ def test_exec_passes_only_home_when_gui_requested_without_a_session(
 def test_agent_rejects_projects_no_flavor_applies_to_before_touching_the_container(
     tmp_path: Path,
 ) -> None:
-    # given a project directory, and a global config without any flavours
+    # given a project directory, and a flavours directory without any flavours
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text("")
+    config_path = _flavor_path(tmp_path)
 
     # when launching an agent without naming one
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(FlavorError) as error,
     ):
@@ -2095,16 +2046,16 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR + '[flavors.arch.layers.base]\nagents = ["claude", "codex"]\n'
-        '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + '[layers.base]\nagents = ["claude", "codex"]\n'
+        '[user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when launching an agent without naming one
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -2127,15 +2078,13 @@ def test_agent_launches_the_named_agent_when_given(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when launching an agent by name
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -2157,15 +2106,13 @@ def test_agent_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when launching an agent
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
@@ -2188,15 +2135,13 @@ def test_agent_creates_a_missing_container_when_the_user_accepts(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when launching an agent from a terminal and accepting the offer to create it
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.cli.sys.stdin") as stdin_mock,
         patch("builtins.input", return_value="y"),
@@ -2224,15 +2169,13 @@ def test_agent_creates_a_missing_container_without_asking_when_requested(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when launching an agent from a terminal with missing containers to be created
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
         patch("ask.cli.sys.stdin") as stdin_mock,
@@ -2256,15 +2199,13 @@ def test_agent_propagates_a_non_zero_exit_code(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when the launched agent exits non-zero
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -2284,16 +2225,14 @@ def test_agent_raises_when_no_agents_are_configured_and_none_given(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when launching an agent without naming one
     # then a clear error is raised, rather than starting the container
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         pytest.raises(AgentError) as error,
     ):
         agent()
@@ -2308,16 +2247,14 @@ def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when launching it by name
     # then a clear error is raised
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         pytest.raises(AgentError) as error,
     ):
         agent("copilot")
@@ -2332,15 +2269,13 @@ def test_agent_forwards_extra_arguments_to_the_agent(tmp_path: Path) -> None:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when launching an agent by name with extra arguments
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
@@ -2363,15 +2298,13 @@ def test_agent_forwards_wayland_display_when_gui_is_requested(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        _FLAVOR + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
-    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when launching an agent with --gui
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
         patch("ask.gui.acquire") as acquire_mock,
@@ -2400,16 +2333,16 @@ def test_agent_treats_a_dash_prefixed_name_as_an_argument_to_the_default_agent(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[flavors.arch.layers.base]\nagents = ["claude"]\n[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        + '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when launching an agent with arguments but without naming one
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
@@ -2434,13 +2367,13 @@ def test_commands_reject_an_invalid_manifest_before_touching_the_container(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("flayers = []\n")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(_FLAVOR)
 
     # when running the command from within that project directory
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(ConfigError) as error,
     ):
@@ -2458,18 +2391,18 @@ def test_agent_prints_config_warnings_once(
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
-    config_path = tmp_path / "config.toml"
+    config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + "[flavors.arch.layers.base]\n"
+        + "[layers.base]\n"
         + 'agents = ["claude", { name = "-codex", auth = false }]\n'
-        + '[flavors.arch.user]\nname = "raniz"\nuid = 1000\n'
+        + '[user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when launching an agent
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_path", return_value=config_path),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         pytest.raises(SystemExit),
     ):
@@ -2479,7 +2412,7 @@ def test_agent_prints_config_warnings_once(
     # then the warning is printed exactly once
     assert capsys.readouterr().err == (
         f"ask: warning in {config_path}\n"
-        "  flavors.arch.layers.base.agents.1: options have no effect when "
+        "  layers.base.agents.1: options have no effect when "
         "removing agent 'codex'\n"
     )
 

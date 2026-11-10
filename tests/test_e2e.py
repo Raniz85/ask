@@ -8,9 +8,9 @@ TERMINAL_WIDTH = 200
 
 def _config_home_with_a_default_flavor(tmp_path: Path) -> Path:
     config_home = tmp_path / "config"
-    (config_home / "ask").mkdir(parents=True)
-    (config_home / "ask" / "config.toml").write_text(
-        '[flavors.arch]\ndistribution = "arch"\ndefault = true\n'
+    (config_home / "ask" / "flavors").mkdir(parents=True)
+    (config_home / "ask" / "flavors" / "arch.toml").write_text(
+        'distribution = "arch"\n'
     )
     return config_home
 
@@ -293,11 +293,11 @@ def test_ask_reports_a_project_no_flavor_applies_to_without_a_traceback(
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
 
-    # and a global configuration whose only flavour applies to another path
+    # and a single flavour that is not the default and applies to another path
     config_home = tmp_path / "config"
-    (config_home / "ask").mkdir(parents=True)
-    (config_home / "ask" / "config.toml").write_text(
-        '[flavors.debian]\ndistribution = "arch"\nwhen.path = ["/elsewhere"]\n'
+    (config_home / "ask" / "flavors").mkdir(parents=True)
+    (config_home / "ask" / "flavors" / "debian.toml").write_text(
+        'distribution = "arch"\ndefault = false\nwhen.path = ["/elsewhere"]\n'
     )
 
     # when running ask converge from within the project directory

@@ -56,10 +56,10 @@ CHANGED_WARNING = (
 
 
 def _resolve_project(project_dir: Path) -> manifest.ResolvedManifest:
-    config_path = config.default_path()
-    cfg = validation.load_config(config_path)
+    flavors_dir = config.default_dir()
+    cfg = validation.load_config(flavors_dir)
     m = validation.load_manifest(project_dir / "ask.toml")
-    return validation.resolve_project(config_path, cfg, m, project_dir)
+    return validation.resolve_project(flavors_dir, cfg, m, project_dir)
 
 
 def create() -> None:

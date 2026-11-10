@@ -262,9 +262,13 @@ def resolve_user(flavor: Flavor) -> ResolvedUser:
     )
 
 
-def default_path() -> Path:
+def default_dir() -> Path:
     config_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(config_home) / "ask" / "config.toml"
+    return Path(config_home) / "ask" / "flavors"
+
+
+def flavor_path(directory: Path, name: str) -> Path:
+    return directory / f"{name}.toml"
 
 
 def _is_flattened_options(location: tuple[str | int, ...], index: int) -> bool:
@@ -304,20 +308,16 @@ def load_as[T](path: Path, schema: type[T]) -> T:
     return _validate(path, read_toml(path), schema)
 
 
-def _load_flavor_files(path: Path, data: dict) -> dict:
-    flavors = data.get("flavors")
-    if not isinstance(flavors, dict):
-        return data
-    loaded = {
-        name: load_as(path.parent / flavor, Flavor)
-        if isinstance(flavor, str)
-        else flavor
-        for name, flavor in flavors.items()
-    }
-    return data | {"flavors": loaded}
+def _load_flavor(path: Path, single: bool) -> Flavor:
+    data = read_toml(path)
+    if single:
+        data = {"default": True} | data
+    return _validate(path, data, Flavor)
 
 
-def load(path: Path) -> Config:
-    if not path.exists():
+def load(directory: Path) -> Config:
+    if not directory.is_dir():
         return Config(flavors={})
-    return _validate(path, _load_flavor_files(path, read_toml(path)), Config)
+    paths = sorted(directory.glob("*.toml"))
+    flavors = {path.stem: _load_flavor(path, len(paths) == 1) for path in paths}
+    return _validate(directory, {"flavors": flavors}, Config)

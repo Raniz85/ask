@@ -16,7 +16,7 @@ from ask.config import (
     Layer,
     LayerWhen,
     User,
-    default_path,
+    default_dir,
     load,
     read_toml,
     resolve_user,
@@ -26,92 +26,133 @@ from ask.shell import ShellOption
 from ask.user import ResolvedUser
 
 
-def test_default_path_uses_xdg_config_home_env_var(
+def test_default_dir_uses_xdg_config_home_env_var(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # given XDG_CONFIG_HOME pointing at a custom location
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
-    # when resolving the default global config path
-    path = default_path()
+    # when resolving the default flavours directory
+    path = default_dir()
 
-    # then it is ask/config.toml under that location
-    assert path == tmp_path / "ask" / "config.toml"
+    # then it is ask/flavors under that location
+    assert path == tmp_path / "ask" / "flavors"
 
 
-def test_default_path_falls_back_to_dot_config(
+def test_default_dir_falls_back_to_dot_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # given no XDG_CONFIG_HOME set
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    # when resolving the default global config path
-    path = default_path()
+    # when resolving the default flavours directory
+    path = default_dir()
 
-    # then it falls back to ~/.config/ask/config.toml
-    assert path == tmp_path / ".config" / "ask" / "config.toml"
+    # then it falls back to ~/.config/ask/flavors
+    assert path == tmp_path / ".config" / "ask" / "flavors"
 
 
-def test_default_path_treats_an_empty_xdg_config_home_as_unset(
+def test_default_dir_treats_an_empty_xdg_config_home_as_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # given XDG_CONFIG_HOME set to an empty value
     monkeypatch.setenv("XDG_CONFIG_HOME", "")
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    # when resolving the default global config path
-    path = default_path()
+    # when resolving the default flavours directory
+    path = default_dir()
 
-    # then it falls back to ~/.config/ask/config.toml
-    assert path == tmp_path / ".config" / "ask" / "config.toml"
-
-
-def _config_file(tmp_path: Path, text: str) -> Path:
-    path = tmp_path / "config.toml"
-    path.write_text(text)
-    return path
+    # then it falls back to ~/.config/ask/flavors
+    assert path == tmp_path / ".config" / "ask" / "flavors"
 
 
-def test_load_treats_a_missing_file_as_no_flavors(tmp_path: Path) -> None:
-    # given a global config path that doesn't exist
-    config_path = tmp_path / "config.toml"
+def _flavor_file(tmp_path: Path, text: str, name: str = "arch") -> Path:
+    flavors_dir = tmp_path / "flavors"
+    flavors_dir.mkdir(exist_ok=True)
+    (flavors_dir / f"{name}.toml").write_text(text)
+    return flavors_dir
+
+
+def test_load_treats_a_missing_directory_as_no_flavors(tmp_path: Path) -> None:
+    # given a flavours directory that doesn't exist
+    flavors_dir = tmp_path / "flavors"
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then there are no flavours, rather than an error
     assert config == Config(flavors={})
 
 
 def test_load_defaults_to_no_flavors(tmp_path: Path) -> None:
-    # given a global config file with no flavours declared
-    config_path = _config_file(tmp_path, "")
+    # given an empty flavours directory
+    flavors_dir = tmp_path / "flavors"
+    flavors_dir.mkdir()
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then there are no flavours
     assert config == Config(flavors={})
 
 
-def test_load_reads_an_inline_flavor(tmp_path: Path) -> None:
-    # given a global config declaring a flavour in place
-    config_path = _config_file(tmp_path, '[flavors.arch]\ndistribution = "arch"\n')
+def test_load_names_each_flavor_after_its_file(tmp_path: Path) -> None:
+    # given two flavour files
+    _flavor_file(tmp_path, 'distribution = "arch"\nshell = "zsh"\n', name="work")
+    flavors_dir = _flavor_file(tmp_path, 'distribution = "arch"\n', name="home")
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
-    # then the flavour is read with its defaults
+    # then each file is a flavour named after the file, sorted by name
+    assert list(config.flavors.items()) == [
+        ("home", Flavor(distribution="arch")),
+        ("work", Flavor(distribution="arch", shell=ShellOption(name="zsh"))),
+    ]
+
+
+def test_load_ignores_files_that_are_not_toml(tmp_path: Path) -> None:
+    # given a flavour file next to a file that is not TOML
+    flavors_dir = _flavor_file(tmp_path, 'distribution = "arch"\n', name="home")
+    (flavors_dir / "notes.txt").write_text("not a flavour")
+
+    # when loading the config
+    config = load(flavors_dir)
+
+    # then only the TOML file is a flavour
+    assert list(config.flavors) == ["home"]
+
+
+def test_load_makes_a_single_flavor_the_default(tmp_path: Path) -> None:
+    # given a single flavour file that does not say whether it is the default
+    flavors_dir = _flavor_file(tmp_path, 'distribution = "arch"\n')
+
+    # when loading the config
+    config = load(flavors_dir)
+
+    # then it is the default
+    assert config == Config(flavors={"arch": Flavor(distribution="arch", default=True)})
+
+
+def test_load_keeps_an_explicit_default_on_a_single_flavor(tmp_path: Path) -> None:
+    # given a single flavour file that is explicitly not the default
+    flavors_dir = _flavor_file(tmp_path, 'distribution = "arch"\ndefault = false\n')
+
+    # when loading the config
+    config = load(flavors_dir)
+
+    # then it is not the default
     assert config == Config(flavors={"arch": Flavor(distribution="arch")})
 
 
 def test_load_defaults_a_flavor(tmp_path: Path) -> None:
-    # given a flavour declaring only its distribution
-    config_path = _config_file(tmp_path, '[flavors.arch]\ndistribution = "arch"\n')
+    # given two flavours, one declaring only its distribution
+    _flavor_file(tmp_path, 'distribution = "arch"\n', name="other")
+    flavors_dir = _flavor_file(tmp_path, 'distribution = "arch"\n')
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the flavour is not the default, has no path conditions, uses bash,
     # mirrors the calling user and has no layers
@@ -129,111 +170,81 @@ def test_load_defaults_a_flavor(tmp_path: Path) -> None:
 
 def test_load_requires_a_flavor_distribution(tmp_path: Path) -> None:
     # given a flavour without a distribution
-    config_path = _config_file(tmp_path, '[flavors.arch]\nshell = "zsh"\n')
+    flavors_dir = _flavor_file(tmp_path, 'shell = "zsh"\n')
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
-    # then the missing distribution is reported by its path
-    assert error.value.problems == ["flavors.arch.distribution: Field required"]
+    # then the missing distribution is reported against the flavour file, by its
+    # path in that file
+    assert (error.value.path, error.value.problems) == (
+        flavors_dir / "arch.toml",
+        ["distribution: Field required"],
+    )
 
 
 def test_load_rejects_unknown_distributions(tmp_path: Path) -> None:
     # given a flavour with a distribution Ask does not know
-    config_path = _config_file(tmp_path, '[flavors.gentoo]\ndistribution = "gentoo"\n')
+    flavors_dir = _flavor_file(tmp_path, 'distribution = "gentoo"\n')
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the distribution is reported together with the known ones
     assert error.value.problems == [
-        "flavors.gentoo.distribution: unknown distribution 'gentoo' (known: arch)"
+        "distribution: unknown distribution 'gentoo' (known: arch)"
     ]
 
 
-def test_load_reads_a_flavor_from_a_file_next_to_the_config(tmp_path: Path) -> None:
-    # given a global config referring to a flavour file by a relative path
-    config_path = _config_file(tmp_path, 'flavors.arch = "arch.toml"\n')
-
-    # and the flavour file next to it
-    (tmp_path / "arch.toml").write_text('distribution = "arch"\nshell = "zsh"\n')
-
-    # when loading the config
-    config = load(config_path)
-
-    # then the flavour is read from that file
-    assert config == Config(
-        flavors={"arch": Flavor(distribution="arch", shell=ShellOption(name="zsh"))}
-    )
-
-
-def test_load_reports_problems_in_a_flavor_file_against_that_file(
-    tmp_path: Path,
-) -> None:
-    # given a global config referring to a flavour file
-    config_path = _config_file(tmp_path, 'flavors.arch = "arch.toml"\n')
-
-    # and a flavour file with an unknown key
-    flavor_path = tmp_path / "arch.toml"
-    flavor_path.write_text('distribution = "arch"\nide = "vscode"\n')
+def test_load_reports_flavor_files_that_cannot_be_read(tmp_path: Path) -> None:
+    # given a flavour file that is not valid UTF-8
+    flavors_dir = tmp_path / "flavors"
+    flavors_dir.mkdir()
+    (flavors_dir / "arch.toml").write_bytes(b"\xff\xfe")
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
-    # then the problem is reported against the flavour file, by its path in that file
+    # then the problem is reported against the flavour file
     assert (error.value.path, error.value.problems) == (
-        flavor_path,
-        ["ide: unknown key"],
-    )
-
-
-def test_load_reports_a_missing_flavor_file(tmp_path: Path) -> None:
-    # given a global config referring to a flavour file that does not exist
-    config_path = _config_file(tmp_path, 'flavors.arch = "arch.toml"\n')
-
-    # when loading the config
-    with pytest.raises(ConfigError) as error:
-        load(config_path)
-
-    # then the missing file is reported against its own path
-    assert (error.value.path, error.value.problems) == (
-        tmp_path / "arch.toml",
-        ["cannot read file: No such file or directory"],
+        flavors_dir / "arch.toml",
+        ["file is not valid UTF-8"],
     )
 
 
 def test_load_reads_the_default_flavor(tmp_path: Path) -> None:
-    # given a flavour marked as the default
-    config_path = _config_file(
-        tmp_path, '[flavors.arch]\ndistribution = "arch"\ndefault = true\n'
-    )
+    # given two flavours, one marked as the default
+    _flavor_file(tmp_path, 'distribution = "arch"\n', name="other")
+    flavors_dir = _flavor_file(tmp_path, 'distribution = "arch"\ndefault = true\n')
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
-    # then the flavour is read as the default
-    assert config.flavors["arch"].default is True
+    # then only the marked flavour is the default
+    assert [name for name, flavor in config.flavors.items() if flavor.default] == [
+        "arch"
+    ]
 
 
 def test_load_rejects_more_than_one_default_flavor(tmp_path: Path) -> None:
     # given two flavours both marked as the default
-    config_path = _config_file(
-        tmp_path,
-        '[flavors.one]\ndistribution = "arch"\ndefault = true\n'
-        '[flavors.two]\ndistribution = "arch"\ndefault = true\n',
+    _flavor_file(tmp_path, 'distribution = "arch"\ndefault = true\n', name="one")
+    flavors_dir = _flavor_file(
+        tmp_path, 'distribution = "arch"\ndefault = true\n', name="two"
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
-    # then both default flavours are named
-    assert error.value.problems == [
-        "flavors: more than one default flavour: 'one', 'two'"
-    ]
+    # then both default flavours are named, against the flavours directory
+    assert (error.value.path, error.value.problems) == (
+        flavors_dir,
+        ["flavors: more than one default flavour: 'one', 'two'"],
+    )
 
 
 def test_load_expands_the_home_directory_in_flavor_path_conditions(
@@ -244,13 +255,13 @@ def test_load_expands_the_home_directory_in_flavor_path_conditions(
     monkeypatch.setenv("HOME", str(home))
 
     # and a flavour applying to a home-relative path regex
-    config_path = _config_file(
+    flavors_dir = _flavor_file(
         tmp_path,
-        '[flavors.arch]\ndistribution = "arch"\nwhen.path = ["~/src/.*"]\n',
+        'distribution = "arch"\nwhen.path = ["~/src/.*"]\n',
     )
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then "~" is replaced by the escaped home directory, leaving the rest a regex
     assert config.flavors["arch"].when == FlavorWhen(
@@ -260,28 +271,26 @@ def test_load_expands_the_home_directory_in_flavor_path_conditions(
 
 def test_load_rejects_invalid_flavor_path_regexes(tmp_path: Path) -> None:
     # given a flavour path condition that is not a valid regex
-    config_path = _config_file(
-        tmp_path, '[flavors.arch]\ndistribution = "arch"\nwhen.path = ["~/src/("]\n'
+    flavors_dir = _flavor_file(
+        tmp_path, 'distribution = "arch"\nwhen.path = ["~/src/("]\n'
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the regex is reported by its path
     assert error.value.problems == [
-        "flavors.arch.when.path.0: Input should be a valid regular expression"
+        "when.path.0: Input should be a valid regular expression"
     ]
 
 
 def test_load_reads_the_flavor_shell(tmp_path: Path) -> None:
     # given a flavour declaring a shell by name
-    config_path = _config_file(
-        tmp_path, '[flavors.arch]\ndistribution = "arch"\nshell = "zsh"\n'
-    )
+    flavors_dir = _flavor_file(tmp_path, 'distribution = "arch"\nshell = "zsh"\n')
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the declared shell is read with default options
     assert config.flavors["arch"].shell == ShellOption(name="zsh", options={})
@@ -289,14 +298,14 @@ def test_load_reads_the_flavor_shell(tmp_path: Path) -> None:
 
 def test_load_reads_the_flavor_shell_options(tmp_path: Path) -> None:
     # given a flavour declaring a shell table with file options
-    config_path = _config_file(
+    flavors_dir = _flavor_file(
         tmp_path,
-        '[flavors.arch]\ndistribution = "arch"\n'
-        '[flavors.arch.shell]\nname = "zsh"\nzshrc = false\nzprofile = true\n',
+        'distribution = "arch"\n'
+        '[shell]\nname = "zsh"\nzshrc = false\nzprofile = true\n',
     )
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the shell name and its file options are read
     assert config.flavors["arch"].shell == ShellOption(
@@ -306,20 +315,20 @@ def test_load_reads_the_flavor_shell_options(tmp_path: Path) -> None:
 
 def test_load_reads_the_flavor_user(tmp_path: Path) -> None:
     # given a flavour declaring a user with a group and extra groups
-    config_path = _config_file(
+    flavors_dir = _flavor_file(
         tmp_path,
-        '[flavors.arch]\ndistribution = "arch"\n'
-        "[flavors.arch.user]\n"
+        'distribution = "arch"\n'
+        "[user]\n"
         'name = "raniz"\n'
         "uid = 1000\n"
         'extra_groups = ["wheel"]\n'
-        "[flavors.arch.user.group]\n"
+        "[user.group]\n"
         'name = "raniz"\n'
         "gid = 1000\n",
     )
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the declared user is read in full
     assert config.flavors["arch"].user == User(
@@ -331,15 +340,15 @@ def test_load_reads_the_flavor_user(tmp_path: Path) -> None:
 
 
 def _flavor_with_layers(tmp_path: Path, layers: str) -> Path:
-    return _config_file(tmp_path, '[flavors.arch]\ndistribution = "arch"\n' + layers)
+    return _flavor_file(tmp_path, 'distribution = "arch"\n' + layers)
 
 
 def test_load_defaults_a_layer(tmp_path: Path) -> None:
     # given a flavour declaring an empty base layer
-    config_path = _flavor_with_layers(tmp_path, "[flavors.arch.layers.base]\n")
+    flavors_dir = _flavor_with_layers(tmp_path, "[layers.base]\n")
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the layer has no bind mounts, packages or agents, order 0 and no
     # conditions
@@ -353,12 +362,12 @@ def test_load_reads_layer_bind_mounts(
 ) -> None:
     # given a layer with a home-relative bind mount
     monkeypatch.setenv("HOME", str(tmp_path))
-    config_path = _flavor_with_layers(
-        tmp_path, '[flavors.arch.layers.python]\nbind_mounts = ["~/.cache/uv"]\n'
+    flavors_dir = _flavor_with_layers(
+        tmp_path, '[layers.python]\nbind_mounts = ["~/.cache/uv"]\n'
     )
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the layer's bind mounts are read, with "~" expanded
     assert config.flavors["arch"].layers == {
@@ -368,12 +377,12 @@ def test_load_reads_layer_bind_mounts(
 
 def test_load_reads_layer_packages(tmp_path: Path) -> None:
     # given a layer declaring packages
-    config_path = _flavor_with_layers(
-        tmp_path, '[flavors.arch.layers.base]\npackages = ["zsh", "aur:antigen"]\n'
+    flavors_dir = _flavor_with_layers(
+        tmp_path, '[layers.base]\npackages = ["zsh", "aur:antigen"]\n'
     )
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the layer's packages are read as a plain list
     assert config.flavors["arch"].layers == {
@@ -383,28 +392,26 @@ def test_load_reads_layer_packages(tmp_path: Path) -> None:
 
 def test_load_rejects_layer_packages_keyed_by_distribution(tmp_path: Path) -> None:
     # given a layer declaring packages per distribution
-    config_path = _flavor_with_layers(
-        tmp_path, '[flavors.arch.layers.base]\npackages.arch = ["zsh"]\n'
+    flavors_dir = _flavor_with_layers(
+        tmp_path, '[layers.base]\npackages.arch = ["zsh"]\n'
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the packages are reported as not being a list
     assert error.value.problems == [
-        "flavors.arch.layers.base.packages: Input should be a valid list"
+        "layers.base.packages: Input should be a valid list"
     ]
 
 
 def test_load_reads_layer_agents(tmp_path: Path) -> None:
     # given a layer declaring agents to install
-    config_path = _flavor_with_layers(
-        tmp_path, '[flavors.arch.layers.base]\nagents = ["claude"]\n'
-    )
+    flavors_dir = _flavor_with_layers(tmp_path, '[layers.base]\nagents = ["claude"]\n')
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the layer's agents are read as name-only options
     assert config.flavors["arch"].layers == {
@@ -414,16 +421,16 @@ def test_load_reads_layer_agents(tmp_path: Path) -> None:
 
 def test_load_reads_layer_agents_with_full_options(tmp_path: Path) -> None:
     # given a layer declaring an agent with its full set of options
-    config_path = _flavor_with_layers(
+    flavors_dir = _flavor_with_layers(
         tmp_path,
-        "[flavors.arch.layers.base]\n"
+        "[layers.base]\n"
         "agents = [\n"
         '  { name = "claude", claude_md = false, auth = true, skills = true, config = true },\n'
         "]\n",
     )
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the agent's name and its options table are both read
     assert config.flavors["arch"].layers == {
@@ -445,15 +452,13 @@ def test_load_reads_layer_agents_with_full_options(tmp_path: Path) -> None:
 
 def test_load_reads_layer_order_and_conditions(tmp_path: Path) -> None:
     # given a layer with an order and a file condition
-    config_path = _flavor_with_layers(
+    flavors_dir = _flavor_with_layers(
         tmp_path,
-        "[flavors.arch.layers.python]\n"
-        "order = 10\n"
-        'when.files = ["pyproject.toml", "uv.lock"]\n',
+        '[layers.python]\norder = 10\nwhen.files = ["pyproject.toml", "uv.lock"]\n',
     )
 
     # when loading the config
-    config = load(config_path)
+    config = load(flavors_dir)
 
     # then the order and the file names are read
     assert config.flavors["arch"].layers == {
@@ -463,37 +468,32 @@ def test_load_reads_layer_order_and_conditions(tmp_path: Path) -> None:
 
 def test_load_rejects_conditions_on_the_base_layer(tmp_path: Path) -> None:
     # given a base layer with a file condition
-    config_path = _flavor_with_layers(
-        tmp_path, '[flavors.arch.layers.base]\nwhen.files = ["pyproject.toml"]\n'
+    flavors_dir = _flavor_with_layers(
+        tmp_path, '[layers.base]\nwhen.files = ["pyproject.toml"]\n'
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the condition is reported, since the base layer is always applied
     assert error.value.problems == [
-        (
-            "flavors.arch.layers: the base layer is always applied and cannot "
-            "have when conditions"
-        )
+        ("layers: the base layer is always applied and cannot have when conditions")
     ]
 
 
 def test_load_rejects_tool_managers_in_a_layer(tmp_path: Path) -> None:
     # given a layer declaring tool managers
-    config_path = _flavor_with_layers(
-        tmp_path, '[flavors.arch.layers.base]\ntool_managers = ["mise"]\n'
+    flavors_dir = _flavor_with_layers(
+        tmp_path, '[layers.base]\ntool_managers = ["mise"]\n'
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then tool_managers is reported as an unknown key
-    assert error.value.problems == [
-        "flavors.arch.layers.base.tool_managers: unknown key"
-    ]
+    assert error.value.problems == ["layers.base.tool_managers: unknown key"]
 
 
 def test_load_accepts_valid_service_states(tmp_path: Path) -> None:
@@ -540,30 +540,14 @@ def test_load_rejects_invalid_service_states(tmp_path: Path) -> None:
 
 def test_load_rejects_unknown_fields_in_layers(tmp_path: Path) -> None:
     # given a layer declaring a field other than the known layer fields
-    config_path = _flavor_with_layers(
-        tmp_path, "[flavors.arch.layers.base]\nshared_state = true\n"
-    )
+    flavors_dir = _flavor_with_layers(tmp_path, "[layers.base]\nshared_state = true\n")
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the unknown field is reported by its path
-    assert error.value.problems == [
-        "flavors.arch.layers.base.shared_state: unknown key"
-    ]
-
-
-def test_load_rejects_top_level_layers(tmp_path: Path) -> None:
-    # given a global config declaring a layer outside any flavour
-    config_path = _config_file(tmp_path, '[layers.base]\npackages = ["zsh"]\n')
-
-    # when loading the config
-    with pytest.raises(ConfigError) as error:
-        load(config_path)
-
-    # then the layers table is reported as an unknown key
-    assert error.value.problems == ["layers: unknown key"]
+    assert error.value.problems == ["layers.base.shared_state: unknown key"]
 
 
 def _mock_pwent(name: str, uid: int):
@@ -695,103 +679,97 @@ def test_config_error_lists_every_problem() -> None:
 
 
 def test_load_reports_syntax_errors_as_config_errors(tmp_path: Path) -> None:
-    # given a global config file with a syntax error
-    config_path = tmp_path / "config.toml"
-    config_path.write_text("shell = \n")
+    # given a flavour file with a syntax error
+    flavors_dir = _flavor_file(tmp_path, "shell = \n")
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
-    # then the error names the file
-    assert error.value.path == config_path
+    # then the error names the flavour file
+    assert error.value.path == flavors_dir / "arch.toml"
 
 
 def test_load_rejects_values_of_the_wrong_type(tmp_path: Path) -> None:
     # given a flavour user with a non-integer uid
-    config_path = _config_file(
+    flavors_dir = _flavor_file(
         tmp_path,
-        '[flavors.arch]\ndistribution = "arch"\n[flavors.arch.user]\nuid = "1000"\n',
+        'distribution = "arch"\n[user]\nuid = "1000"\n',
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the wrongly typed value is reported by its path
-    assert error.value.problems == [
-        "flavors.arch.user.uid: Input should be a valid integer"
-    ]
+    assert error.value.problems == ["user.uid: Input should be a valid integer"]
 
 
 def test_load_rejects_shell_options_of_the_wrong_type(tmp_path: Path) -> None:
     # given a flavour shell table with a non-boolean option
-    config_path = _config_file(
+    flavors_dir = _flavor_file(
         tmp_path,
-        '[flavors.arch]\ndistribution = "arch"\n'
-        '[flavors.arch.shell]\nname = "zsh"\nzshrc = "yes"\n',
+        'distribution = "arch"\n[shell]\nname = "zsh"\nzshrc = "yes"\n',
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the option is reported by the path it has in the TOML file
-    assert error.value.problems == [
-        "flavors.arch.shell.zshrc: Input should be a valid boolean"
-    ]
+    assert error.value.problems == ["shell.zshrc: Input should be a valid boolean"]
 
 
 def test_load_rejects_agent_options_of_the_wrong_type(tmp_path: Path) -> None:
     # given a layer agent table with a non-boolean option
-    config_path = _flavor_with_layers(
+    flavors_dir = _flavor_with_layers(
         tmp_path,
-        '[flavors.arch.layers.base]\nagents = [{ name = "claude", auth = 1 }]\n',
+        '[layers.base]\nagents = [{ name = "claude", auth = 1 }]\n',
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the option is reported by the path it has in the TOML file
     assert error.value.problems == [
-        "flavors.arch.layers.base.agents.0.auth: Input should be a valid boolean"
+        "layers.base.agents.0.auth: Input should be a valid boolean"
     ]
 
 
 def test_load_rejects_shell_tables_without_a_name(tmp_path: Path) -> None:
     # given a flavour shell table that only sets options
-    config_path = _config_file(
+    flavors_dir = _flavor_file(
         tmp_path,
-        '[flavors.arch]\ndistribution = "arch"\n[flavors.arch.shell]\nzshrc = true\n',
+        'distribution = "arch"\n[shell]\nzshrc = true\n',
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then the missing name is reported
-    assert error.value.problems == ["flavors.arch.shell.name: Field required"]
+    assert error.value.problems == ["shell.name: Field required"]
 
 
 def test_load_reports_every_problem_at_once(tmp_path: Path) -> None:
-    # given a global config with several unrelated problems
-    config_path = _config_file(
+    # given a flavour with several unrelated problems
+    flavors_dir = _flavor_file(
         tmp_path,
-        '[flavors.arch]\ndistribution = "arch"\nshell = 1\n'
-        '[flavors.arch.user]\nuid = "1000"\n'
-        "[flavors.arch.layers.base]\nbind_mount = []\n",
+        'distribution = "arch"\nshell = 1\n'
+        '[user]\nuid = "1000"\n'
+        "[layers.base]\nbind_mount = []\n",
     )
 
     # when loading the config
     with pytest.raises(ConfigError) as error:
-        load(config_path)
+        load(flavors_dir)
 
     # then all of them are reported together
     assert error.value.problems == [
-        "flavors.arch.shell: Input should be a valid string or table",
-        "flavors.arch.user.uid: Input should be a valid integer",
-        "flavors.arch.layers.base.bind_mount: unknown key",
+        "shell: Input should be a valid string or table",
+        "user.uid: Input should be a valid integer",
+        "layers.base.bind_mount: unknown key",
     ]
 
 

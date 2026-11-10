@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 from ask import config, manifest
-from ask.config import Config, ConfigError, Layer
+from ask.config import Config, ConfigError, Flavor, Layer
 from ask.errors import AskError
 from ask.manifest import Manifest, ResolvedManifest
 from ask.removal import REMOVAL_PREFIX
@@ -36,19 +36,17 @@ def _print_warnings(path: Path, warnings: list[str]) -> None:
         print("\n".join(lines), file=sys.stderr)
 
 
-def config_warnings(cfg: Config) -> list[str]:
+def flavor_warnings(flavor: Flavor) -> list[str]:
     warnings: list[str] = []
-    for flavor_name, flavor in cfg.flavors.items():
-        for layer_name, layer in flavor.layers.items():
-            warnings += _layer_warnings(
-                f"flavors.{flavor_name}.layers.{layer_name}.", layer
-            )
+    for layer_name, layer in flavor.layers.items():
+        warnings += _layer_warnings(f"layers.{layer_name}.", layer)
     return warnings
 
 
-def load_config(path: Path) -> Config:
-    cfg = config.load(path)
-    _print_warnings(path, config_warnings(cfg))
+def load_config(directory: Path) -> Config:
+    cfg = config.load(directory)
+    for name, flavor in cfg.flavors.items():
+        _print_warnings(config.flavor_path(directory, name), flavor_warnings(flavor))
     return cfg
 
 
@@ -75,16 +73,16 @@ def load_manifest(path: Path) -> Manifest:
 
 
 def resolve_project(
-    config_path: Path, cfg: Config, m: Manifest, project_dir: Path
+    flavors_dir: Path, cfg: Config, m: Manifest, project_dir: Path
 ) -> ResolvedManifest:
     flavor_name, flavor = config.select_flavor(cfg, project_dir)
     resolved = ResolvedManifest(m, flavor, project_dir)
     problems: list[str] = []
     for layer_name in resolved.layer_names:
         problems += _missing_bind_mounts(
-            f"flavors.{flavor_name}.layers.{layer_name}.",
+            f"layers.{layer_name}.",
             flavor.layers[layer_name].bind_mounts,
         )
     if problems:
-        raise ConfigError(config_path, problems)
+        raise ConfigError(config.flavor_path(flavors_dir, flavor_name), problems)
     return resolved
