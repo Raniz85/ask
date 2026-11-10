@@ -1,0 +1,12 @@
+tool_managers = [
+  "mise",
+]
+
+packages = [
+  "uv",
+  "python",
+]
+
+scripts.test = "uv run pytest"
+scripts.lint = "uv run ruff check"
+

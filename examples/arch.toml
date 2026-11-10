@@ -1,0 +1,32 @@
+default = True
+distribution = "arch"
+shell = "zsh"
+
+[layers.base]
+packages = [
+  "neovim",
+  "starship",
+  "dprint",
+  "aur:antigen",
+]
+
+agents = [
+  "claude",
+  "pi",
+  "opencode",
+]
+
+[layers.python]
+when.files = ["pyproject.toml"]
+
+packages = [
+  "python",
+  "uv",
+  "ipython",
+]
+
+ide = "jetbrains-idea"
+
+bind_mounts = [
+  "~/.cache/uv",
+]

@@ -1,8 +1,22 @@
+# Flavour defined in a separate file
+flavors.arch = "arch.toml"
+
+# Flavour defined in-place
+[flavors.debian]
+# The distribution to use
+distribution = "debian"
+
+# Apply to specific projects
+when.path = [
+  "~/src/apt",
+  "~/src/debconf",
+]
+
 # The shell to use, defaults to bash if unset
 shell = "zsh"
 
 # Or with full options (defaults shown)
-# [shell]
+# [flavours.debian.shell]
 # name = "zsh"
 # zshrc = true
 # zprofile = false
@@ -17,24 +31,28 @@ shell = "zsh"
 # tcsh:   tcshrc = true, login = false
 
 # Optional user definition, mirrors the calling user if unset
-# [user]
+# [flavours.debian.user]
 # name = "raniz"
 # uid = 1000
 
 # Except groups, which defaults to just a group with the same name as the user
 # extra_groups = []
-# [user.group]
+
+# [flavours.debian.user.group]
 # name = "raniz"
 # gid = 1000
 
-[layers.base]
-packages.arch = [
+# The base layer, this layer always exists and is always applied as the lowest layer
+[flavours.debian.layers.base]
+packages = [
   "neovim",
   "starship",
   "dprint",
   "aur:antigen",
 ]
 
+# Agent definitions, `ask agent` will launch the first agent in the list
+# to launch another agent call `ask agent <name>`
 agents = [
   # Can be the name of the agent, which sets default options
   "claude",
@@ -45,22 +63,30 @@ agents = [
   # { name: "pi", system_md: true, auth: true, skills: true, config: true },
 ]
 
-# Tool managers install a project's tools from its own config, e.g. mise from a
-# mise.toml. All are used when their config is present; prefix with "-" to opt out
-# tool_managers = ["-mise"]
+ides = [
+  "jetbrains-idea",
+  "vscode",
+]
 
-[layers.python]
-packages.common = [
+[flavours.debian.layers.python]
+# If multiple layers are applied, ordering _may_ be important
+# defaults to 0
+order = 10
+when.files = ["pyproject.toml"]
+
+packages = [
   "python",
   "uv",
-]
-packages.arch = [
-  "ipython",
-]
-packages.debian = [
   "ipython3",
 ]
-ide = "jetbrains-idea"
+
+agents
+
+ides = [
+    "jetbrains-pycharm",
+    # IDEs in lower layers can be removed
+    "-vscode",
+]
 
 bind_mounts = [
   "~/.cache/uv",

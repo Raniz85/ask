@@ -1,6 +1,4 @@
-distribution = "arch"
-
-layers = [
-  "base",
+packages = [
+  "uv",
   "python",
 ]
