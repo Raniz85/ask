@@ -53,6 +53,22 @@ def test_load_reads_bind_mounts_from_toml(
     assert manifest == Manifest(bind_mounts=[tmp_path / "foo", Path("/abs/path")])
 
 
+def test_load_reads_services_from_toml(tmp_path: Path) -> None:
+    # given a manifest file declaring services
+    manifest_path = _manifest_file(
+        tmp_path,
+        'services."sshd.service" = "enabled"\nservices."man-db.timer" = "disabled"\n',
+    )
+
+    # when loading the manifest
+    manifest = load(manifest_path)
+
+    # then the services are read as a dict
+    assert manifest == Manifest(
+        services={"sshd.service": "enabled", "man-db.timer": "disabled"}
+    )
+
+
 def test_load_reads_tool_managers_from_toml(tmp_path: Path) -> None:
     # given a manifest file opting into mise
     manifest_path = _manifest_file(tmp_path, 'tool_managers = ["mise"]\n')
@@ -635,6 +651,48 @@ def test_services_empty_when_no_layers_have_services() -> None:
 
     # then services is an empty dict
     assert services == {}
+
+
+def test_services_includes_services_from_the_manifest() -> None:
+    # given a manifest with services
+    resolved = _resolved({}, Manifest(services={"project.service": "enabled"}))
+
+    # when resolving the services
+    services = resolved.services
+
+    # then the manifest services are included
+    assert services == {"project.service": "enabled"}
+
+
+def test_services_manifest_overrides_layer_services() -> None:
+    # given a layer and a manifest both declaring the same service
+    resolved = _resolved(
+        {"base": Layer(services={"conflict.service": "disabled"})},
+        Manifest(services={"conflict.service": "enabled"}),
+    )
+
+    # when resolving the services
+    services = resolved.services
+
+    # then the manifest service takes precedence
+    assert services == {"conflict.service": "enabled"}
+
+
+def test_services_merges_manifest_and_layer_services() -> None:
+    # given a layer and a manifest declaring different services
+    resolved = _resolved(
+        {"base": Layer(services={"layer.service": "enabled"})},
+        Manifest(services={"manifest.service": "disabled"}),
+    )
+
+    # when resolving the services
+    services = resolved.services
+
+    # then both services are included
+    assert services == {
+        "layer.service": "enabled",
+        "manifest.service": "disabled",
+    }
 
 
 def test_tool_managers_enables_the_tool_managers_the_manifest_lists() -> None:

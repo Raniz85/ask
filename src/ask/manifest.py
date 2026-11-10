@@ -19,6 +19,7 @@ class Manifest:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
     packages: list[StrictStr] = field(default_factory=list)
     bind_mounts: list[HomePath] = field(default_factory=list)
+    services: dict[StrictStr, StrictStr] = field(default_factory=dict)
     tool_managers: list[
         Annotated[StrictStr, AfterValidator(tool_manager.check_name)]
     ] = field(default_factory=list)
@@ -110,6 +111,8 @@ class ResolvedManifest:
         services: dict[str, str] = {}
         for layer in self._flavor_layers():
             services.update(layer.services)
+        # Manifest services take precedence over layer services
+        services.update(self.manifest.services)
         return services
 
     def agent_mounts(self, user: ResolvedUser) -> list[Mount]:
