@@ -19,14 +19,9 @@ app.command(agent)
 app.command(restart)
 
 
-def run(
-    tokens: Sequence[str], debug: bool, create: bool, converge: bool | None
-) -> None:
+def run(tokens: Sequence[str], debug: bool) -> None:
     try:
-        command, bound, ignored = app.parse_args(tokens)
-        flags = {"create_missing": create, "converge_changed": converge}
-        injected = {name: value for name, value in flags.items() if name in ignored}
-        command(*bound.args, **bound.kwargs, **injected)
+        app(tokens)
     except (Exception, KeyboardInterrupt) as error:
         if debug:
             raise
@@ -60,28 +55,8 @@ def _launcher(
             negative="", help="Show the full traceback when a command fails."
         ),
     ] = False,
-    create: Annotated[
-        bool,
-        cyclopts.Parameter(
-            negative="",
-            help="Create the project's container if it does not exist, without asking.",
-        ),
-    ] = False,
-    converge: Annotated[
-        bool | None,
-        cyclopts.Parameter(
-            help="Converge the project's container if its configuration has "
-            "changed since it was last converged, without asking. "
-            "--no-converge never converges it."
-        ),
-    ] = None,
 ) -> None:
-    run(
-        tokens,
-        debug=debug or bool(os.environ.get("ASK_DEBUG")),
-        create=create,
-        converge=converge,
-    )
+    run(tokens, debug=debug or bool(os.environ.get("ASK_DEBUG")))
 
 
 def main(tokens: Sequence[str] | None = None) -> None:

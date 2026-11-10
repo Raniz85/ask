@@ -20,8 +20,24 @@ from ask import (
 from ask.module import Module
 from ask.user import home_env
 
-CreateMissing = Annotated[bool, Parameter(parse=False)]
-ConvergeChanged = Annotated[bool | None, Parameter(parse=False)]
+# Command-specific arguments for CLI
+CreateMissing = Annotated[
+    bool,
+    Parameter(
+        name="--create",
+        negative="",
+        help="Create the project's container if it does not exist, without asking.",
+    ),
+]
+ConvergeChanged = Annotated[
+    bool | None,
+    Parameter(
+        name="--converge",
+        help="Converge the project's container if its configuration has "
+        "changed since it was last converged, without asking. "
+        "--no-converge never converges it.",
+    ),
+]
 
 FAKE_SSH_ENV = {
     "SSH_CLIENT": "127.0.0.1 1 22",
@@ -52,7 +68,10 @@ def create() -> None:
     converge()
 
 
-def converge(*, create_missing: CreateMissing = False) -> None:
+def converge(
+    *,
+    create_missing: CreateMissing = False,
+) -> None:
     project_dir = Path.cwd()
     cfg = validation.load_config(config.default_path())
     m = validation.load_manifest(project_dir / "ask.toml", cfg)

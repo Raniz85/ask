@@ -151,9 +151,9 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
     )
     fake_incus.chmod(0o755)
 
-    # when running ask --create exec from within the project directory
+    # when running ask exec --create from within the project directory
     result = subprocess.run(
-        [str(ASK), "--create", "exec", "true"],
+        [str(ASK), "exec", "--create", "true"],
         cwd=project_dir,
         env={
             "PATH": str(fake_bin),
@@ -228,9 +228,9 @@ def test_ask_does_not_warn_about_a_changed_configuration_when_told_not_to_conver
     # given a project directory whose running container was never converged
     project_dir, env = _project_with_an_unconverged_container(tmp_path)
 
-    # when running ask --no-converge exec without a terminal
+    # when running ask exec --no-converge without a terminal
     result = subprocess.run(
-        [str(ASK), "--no-converge", "exec", "true"],
+        [str(ASK), "exec", "--no-converge", "true"],
         cwd=project_dir,
         env=env,
         stdin=subprocess.DEVNULL,
