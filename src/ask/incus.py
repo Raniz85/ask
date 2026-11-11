@@ -59,7 +59,8 @@ def _incus(
     try:
         if capture:
             return subprocess.run(command, check=True, capture_output=True, text=True)
-        return subprocess.run(command, check=True)
+        subprocess.run(command, check=True)
+        return subprocess.CompletedProcess(command, returncode=0, stdout="", stderr="")
     except FileNotFoundError as error:
         raise IncusError(
             "The incus command was not found. Is Incus installed and on PATH?"

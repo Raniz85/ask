@@ -102,21 +102,21 @@ def _list_devices_result(*names: str) -> subprocess.CompletedProcess:
 def test_diff_devices_adds_mounts_not_yet_present() -> None:
     # given no existing devices, and two desired mounts
     to_remove, to_add = _diff_devices(
-        set(), {"bind--project": Path("/project"), "bind--extra": Path("/extra")}
+        set(), {"bind--project": Mount(host_path=Path("/project"), container_path=Path("/project")), "bind--extra": Mount(host_path=Path("/extra"), container_path=Path("/extra"))}
     )
 
     # then both desired devices are reported for addition, and nothing for removal
     assert to_remove == set()
     assert to_add == {
-        "bind--project": Path("/project"),
-        "bind--extra": Path("/extra"),
+        "bind--project": Mount(host_path=Path("/project"), container_path=Path("/project")),
+        "bind--extra": Mount(host_path=Path("/extra"), container_path=Path("/extra")),
     }
 
 
 def test_diff_devices_does_not_re_add_an_already_present_device() -> None:
     # given a device that already exists, matching the one desired mount
     to_remove, to_add = _diff_devices(
-        {"bind--project"}, {"bind--project": Path("/project")}
+        {"bind--project"}, {"bind--project": Mount(host_path=Path("/project"), container_path=Path("/project"))}
     )
 
     # then nothing is reported for addition or removal

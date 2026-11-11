@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 from cyclopts import Parameter
 
@@ -114,7 +114,7 @@ def _converge_container(
         if (config_files := tool_manager.config_files(project_dir))
     ]
 
-    package_modules: list[Module] = [user_shell, *resolved.agents]
+    package_modules: list[Module] = [cast(Module, user_shell), *[agent for agent in resolved.agents if isinstance(agent, Module)]]
     packages = resolved.packages
     for mod in package_modules:
         packages += mod.packages_for(distribution)
@@ -290,6 +290,8 @@ def _running_container(
 def _configuration_changed(
     snapshot: incus.InstanceSnapshot, resolved: manifest.ResolvedManifest
 ) -> bool:
+    if snapshot is None:
+        return False
     configuration = convergence.effective_configuration(resolved)
     return snapshot.converged_fingerprint() != convergence.fingerprint(configuration)
 
@@ -312,12 +314,10 @@ def _converged_container(
     container, snapshot = _running_container(project_dir, create_missing)
     with _keep_invocation_fresh(container):
         freshly_created = snapshot is None
-        if (
-            not freshly_created
-            and _configuration_changed(snapshot, resolved)
-            and _should_converge(converge_changed)
-        ):
-            converge()
+        if not freshly_created:
+            assert snapshot is not None
+            if _configuration_changed(snapshot, resolved) and _should_converge(converge_changed):
+                converge()
     return container
 
 
