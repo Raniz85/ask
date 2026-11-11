@@ -8,6 +8,7 @@ from cyclopts.panel import CycloptsPanel
 from rich.console import Console
 
 from ask.cli import agent, converge, create, enter, exec, restart
+from ask.cli import run as run_script
 from ask.errors import AskError
 
 app = cyclopts.App()
@@ -17,6 +18,7 @@ app.command(enter)
 app.command(exec)
 app.command(agent)
 app.command(restart)
+app.command(run_script, name="run")
 
 
 def run(tokens: Sequence[str], debug: bool) -> None:

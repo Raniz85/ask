@@ -32,6 +32,11 @@ def _dump[T](schema: type[T], value: T) -> dict[str, str] | object:
 
 def effective_configuration(resolved: ResolvedManifest) -> str:
     flavor = resolved.flavor
+    manifest = _dump(Manifest, resolved.manifest)
+    assert isinstance(manifest, dict)
+    # scripts only run inside the container on demand, they do not affect its
+    # provisioned state, so they are not part of the converged configuration
+    manifest.pop("scripts", None)
     configuration = {
         "flavor": {
             "distribution": flavor.distribution,
@@ -44,7 +49,7 @@ def effective_configuration(resolved: ResolvedManifest) -> str:
             if (layer_dump := _dump(Layer, flavor.layers[name]))
             and isinstance(layer_dump, dict)
         ],
-        "manifest": _dump(Manifest, resolved.manifest),
+        "manifest": manifest,
         "tool_manager_configs": _tool_manager_configs(resolved),
     }
     return json.dumps(configuration, sort_keys=True, separators=(",", ":"))

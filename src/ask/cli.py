@@ -1,3 +1,4 @@
+import shlex
 import sys
 import threading
 from collections.abc import Iterator
@@ -231,6 +232,23 @@ def agent(
         gui,
         create_missing,
         converge_changed,
+    )
+
+
+def run(
+    name: str,
+    *args: str,
+    gui: bool = False,
+    create_missing: CreateMissing = False,
+    converge_changed: ConvergeChanged = None,
+) -> None:
+    project_dir = Path.cwd()
+    resolved = _resolve_project(project_dir)
+    if name not in resolved.scripts:
+        raise AskError(f"Script '{name}' is not defined in ask.toml.")
+    command = shlex.split(resolved.scripts[name]) + list(args)
+    _exec_in_container(
+        project_dir, resolved, command, gui, create_missing, converge_changed
     )
 
 

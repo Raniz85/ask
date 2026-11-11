@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Annotated
 
 from pydantic import AfterValidator, StrictStr
+from pydantic_core import PydanticCustomError
 
 from ask import agent, tool_manager
 from ask.agent import Agent
@@ -22,6 +23,24 @@ from ask.tool_manager import Mise
 from ask.user import ResolvedUser
 
 
+def _validate_scripts(
+    scripts: dict[StrictStr, StrictStr],
+) -> dict[StrictStr, StrictStr]:
+    for name, command in scripts.items():
+        if not name.strip():
+            raise PydanticCustomError(
+                "empty_script_name",
+                "script name cannot be empty",
+            )
+        if not command.strip():
+            raise PydanticCustomError(
+                "empty_script_command",
+                "script command cannot be empty for script '{name}'",
+                {"name": name},
+            )
+    return scripts
+
+
 @dataclass
 class Manifest:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
@@ -31,6 +50,9 @@ class Manifest:
     tool_managers: list[
         Annotated[StrictStr, AfterValidator(tool_manager.check_name)]
     ] = field(default_factory=list)
+    scripts: Annotated[
+        dict[StrictStr, StrictStr], AfterValidator(_validate_scripts)
+    ] = field(default_factory=dict)
 
 
 def load(path: Path) -> Manifest:
@@ -125,6 +147,10 @@ class ResolvedManifest:
         # Manifest services take precedence over layer services
         services.update(_normalize_service_dict(self.manifest.services))
         return services
+
+    @property
+    def scripts(self) -> dict[str, str]:
+        return self.manifest.scripts
 
     def agent_mounts(self, user: ResolvedUser) -> list[Mount]:
         mounts: list[Mount] = []

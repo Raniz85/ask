@@ -18,9 +18,11 @@ from ask.cli import (
     enter,
     exec,
     restart,
+    run,
 )
 from ask.config import ConfigError, Flavor, FlavorError, User
 from ask.convergence import effective_configuration, fingerprint
+from ask.errors import AskError
 from ask.incus import (
     ContainerExistsError,
     ContainerNotFoundError,
@@ -987,6 +989,110 @@ def test_converge_fixes_agent_state_mount_ownership(
             extra_groups=[],
         ),
     )
+
+
+def test_run_executes_script_command(tmp_path: Path) -> None:
+    # given a project directory with a script defined in ask.toml
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('scripts.test = "pytest"\n')
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when running the script
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        run("test")
+
+    # then the script command is executed in the container
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["pytest"], env=_HOME_ENV
+    )
+
+
+def test_run_executes_script_command_with_args(tmp_path: Path) -> None:
+    # given a project directory with a script defined in ask.toml
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('scripts.test = "pytest"\n')
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when running the script with additional arguments
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        run("test", "-v", "--cov")
+
+    # then the script command and arguments are executed in the container
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["pytest", "-v", "--cov"], env=_HOME_ENV
+    )
+
+
+def test_run_splits_the_script_command_with_shell_quoting_rules(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a script command containing quoted arguments
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(
+        'scripts.greet = "echo \\"hello world\\" \'hi there\'"\n'
+    )
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when running the script
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        run("greet")
+
+    # then the quotes are honoured and not passed through as part of the arguments
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["echo", "hello world", "hi there"], env=_HOME_ENV
+    )
+
+
+def test_run_rejects_undefined_script(tmp_path: Path) -> None:
+    # given a project directory without the requested script in ask.toml
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('scripts.lint = "ruff check"\n')
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when running the undefined script
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(AskError) as error,
+    ):
+        run("test")
+
+    # then the error reports the undefined script
+    assert str(error.value) == "Script 'test' is not defined in ask.toml."
+    container_cls.assert_not_called()
 
 
 def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:

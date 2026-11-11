@@ -80,6 +80,33 @@ def test_load_reads_tool_managers_from_toml(tmp_path: Path) -> None:
     assert manifest == Manifest(tool_managers=["mise"])
 
 
+def test_load_reads_scripts_from_toml(tmp_path: Path) -> None:
+    # given a manifest file declaring scripts
+    manifest_path = _manifest_file(
+        tmp_path, '[scripts]\ntest = "pytest"\nlint = "ruff check"\n'
+    )
+
+    # when loading the manifest
+    manifest = load(manifest_path)
+
+    # then the scripts are read as a dict of command strings
+    assert manifest.scripts == {"test": "pytest", "lint": "ruff check"}
+
+
+def test_load_rejects_an_empty_script_command(tmp_path: Path) -> None:
+    # given a manifest file declaring a script with an empty command
+    manifest_path = _manifest_file(tmp_path, '[scripts]\ntest = ""\n')
+
+    # when loading the manifest
+    with pytest.raises(ConfigError) as error:
+        load(manifest_path)
+
+    # then the empty command is reported against the scripts table
+    assert error.value.problems == [
+        "scripts: script command cannot be empty for script 'test'"
+    ]
+
+
 def test_load_rejects_keys_that_belong_to_flavors_and_layers(tmp_path: Path) -> None:
     # given a manifest file declaring keys that only flavours and their layers have
     manifest_path = _manifest_file(
