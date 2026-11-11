@@ -51,3 +51,15 @@ See `docs/adr/0001-record-architecture-decisions.md` for the rationale.
 - Keep changes scoped to the task at hand; file unrelated issues/ideas separately instead of
   fixing them inline.
 - Match existing style/formatting in the file you're editing.
+
+### Task Automation
+
+Common development tasks are automated using a [`Justfile`](https://just.systems).
+Run these commands via `just <command>` to ensure consistency:
+
+- `check`: Run all formatting, linting, typechecking, and tests.
+- `sync`: Update and sync dependencies using `uv`.
+- `format`: Format code using `dprint`.
+- `lint`: Lint code using `ruff`.
+- `typecheck`: Run type checking using `mypy`.
+- `test`: Run tests with coverage.
