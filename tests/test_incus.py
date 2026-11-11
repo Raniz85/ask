@@ -785,6 +785,17 @@ def test_restart_restarts_the_named_container() -> None:
     run.assert_called_once_with(["incus", "restart", "my-project"], check=True)
 
 
+def test_stop_stops_the_named_container() -> None:
+    # given a container to stop
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when stopping it
+        container.stop()
+
+    # then incus is invoked to stop the named container
+    run.assert_called_once_with(["incus", "stop", "my-project"], check=True)
+
+
 def test_stale_packages_returns_managed_packages_no_longer_desired() -> None:
     # given a set of previously managed packages, some no longer desired
     # when computing which are stale

@@ -17,6 +17,7 @@ from ask.cli import (
     resolve_shortcut,
     restart,
     setup,
+    stop,
 )
 from ask.cli import run as run_script
 from ask.errors import AskError
@@ -30,6 +31,7 @@ app.command(agent)
 app.command(init)
 app.command(restart)
 app.command(setup)
+app.command(stop)
 app.command(run_script, name="run")
 
 

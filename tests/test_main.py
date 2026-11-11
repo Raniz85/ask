@@ -288,7 +288,7 @@ def test_commands_accept_create_and_converge_flags(
     assert bound.kwargs == expected
 
 
-@pytest.mark.parametrize("command", ["restart", "create"])
+@pytest.mark.parametrize("command", ["restart", "create", "stop"])
 def test_create_and_converge_flags_do_not_appear_in_help_for_commands_that_do_not_accept_them(
     capsys: pytest.CaptureFixture[str], command: str
 ) -> None:

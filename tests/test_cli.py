@@ -21,6 +21,7 @@ from ask.cli import (
     resolve_shortcut,
     restart,
     run,
+    stop,
 )
 from ask.config import ConfigError, Flavor, FlavorError, User
 from ask.convergence import effective_configuration, fingerprint
@@ -2784,6 +2785,68 @@ def test_restart_rejects_a_missing_container(tmp_path: Path) -> None:
         restart()
 
     # then the error says how to create the container, and nothing is started
+    assert str(error.value) == (
+        "No container named 'my-project'. Run `ask create` first."
+    )
+    assert container.method_calls == [call.snapshot()]
+
+
+def test_stop_stops_a_running_container(tmp_path: Path) -> None:
+    # given a project directory with a running container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    # when stopping from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
+
+        stop()
+
+    # then the container named after the project directory is stopped
+    container_cls.assert_called_once_with("my-project")
+    assert container.method_calls == [call.snapshot(), call.stop()]
+
+
+def test_stop_does_nothing_to_an_already_stopped_container(tmp_path: Path) -> None:
+    # given a project directory with a stopped container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    # when stopping from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
+
+        stop()
+
+    # then the container is left alone
+    assert container.method_calls == [call.snapshot()]
+
+
+def test_stop_rejects_a_missing_container(tmp_path: Path) -> None:
+    # given a project directory without a container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(ContainerNotFoundError) as error,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = None
+
+        # when stopping from within that project directory
+        stop()
+
+    # then the error says how to create the container, and nothing is stopped
     assert str(error.value) == (
         "No container named 'my-project'. Run `ask create` first."
     )
