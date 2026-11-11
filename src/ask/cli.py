@@ -1,3 +1,5 @@
+import os
+import pwd
 import shlex
 import sys
 import threading
@@ -24,6 +26,9 @@ from ask import (
     validation,
 )
 from ask import gui as gui_support
+from ask import (
+    setup as setup_ops,
+)
 from ask.errors import AskError
 from ask.module import Module
 from ask.user import home_env
@@ -114,6 +119,11 @@ def init() -> None:
     if path.exists():
         raise AskError(f"{path} already exists; not overwriting it.")
     path.write_text(INIT_TEMPLATE)
+
+
+def setup() -> None:
+    user = pwd.getpwuid(os.getuid())
+    setup_ops.run_setup(setup_ops.config_dir(), user.pw_name, user.pw_uid, _confirm)
 
 
 def create() -> None:
