@@ -52,7 +52,8 @@ def test_ask_reports_a_missing_manifest_without_a_traceback(tmp_path: Path) -> N
         "",
         _error_panel(
             f"No ask.toml found in {project_dir}. "
-            "Run ask from a project directory containing ask.toml."
+            "Run `ask init` to create one, or run ask from a project directory "
+            "containing ask.toml."
         ),
     )
 

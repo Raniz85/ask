@@ -103,10 +103,11 @@ def test_load_manifest_reports_a_missing_manifest(tmp_path: Path) -> None:
     with pytest.raises(ManifestNotFoundError) as error:
         load_manifest(path)
 
-    # then the error says where ask looked and what it needs
+    # then the error says where ask looked and hints at ask init
     assert str(error.value) == (
         f"No ask.toml found in {tmp_path}. "
-        "Run ask from a project directory containing ask.toml."
+        "Run `ask init` to create one, or run ask from a project directory "
+        "containing ask.toml."
     )
 
 
