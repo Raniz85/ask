@@ -796,6 +796,17 @@ def test_stop_stops_the_named_container() -> None:
     run.assert_called_once_with(["incus", "stop", "my-project"], check=True)
 
 
+def test_delete_deletes_the_named_container() -> None:
+    # given a container to delete
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when deleting it
+        container.delete()
+
+    # then incus is invoked to delete the named container
+    run.assert_called_once_with(["incus", "delete", "my-project"], check=True)
+
+
 def test_stale_packages_returns_managed_packages_no_longer_desired() -> None:
     # given a set of previously managed packages, some no longer desired
     # when computing which are stale

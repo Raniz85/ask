@@ -15,6 +15,7 @@ from ask.cli import (
     agent,
     converge,
     create,
+    destroy,
     enter,
     exec,
     init,
@@ -2850,6 +2851,66 @@ def test_stop_rejects_a_missing_container(tmp_path: Path) -> None:
     assert str(error.value) == (
         "No container named 'my-project'. Run `ask create` first."
     )
+    assert container.method_calls == [call.snapshot()]
+
+
+def test_destroy_deletes_a_stopped_container(tmp_path: Path) -> None:
+    # given a project directory with a stopped container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    # when destroying from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
+
+        destroy()
+
+    # then the container named after the project directory is deleted
+    container_cls.assert_called_once_with("my-project")
+    assert container.method_calls == [call.snapshot(), call.delete()]
+
+
+def test_destroy_stops_a_running_container_before_deleting_it(tmp_path: Path) -> None:
+    # given a project directory with a running container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    # when destroying from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
+
+        destroy()
+
+    # then the container is stopped first, since a running container cannot be deleted
+    assert container.method_calls == [call.snapshot(), call.stop(), call.delete()]
+
+
+def test_destroy_rejects_a_missing_container(tmp_path: Path) -> None:
+    # given a project directory without a container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(ContainerNotFoundError) as error,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = None
+
+        # when destroying from within that project directory
+        destroy()
+
+    # then the error says the container does not exist, and nothing is deleted
+    assert str(error.value) == "No container named 'my-project'."
     assert container.method_calls == [call.snapshot()]
 
 

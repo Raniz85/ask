@@ -11,6 +11,7 @@ from ask.cli import (
     agent,
     converge,
     create,
+    destroy,
     enter,
     exec,
     init,
@@ -25,6 +26,7 @@ from ask.errors import AskError
 app = cyclopts.App()
 app.command(create)
 app.command(converge)
+app.command(destroy)
 app.command(enter)
 app.command(exec)
 app.command(agent)
