@@ -10,8 +10,8 @@ from ask.incus import (
     Container,
     ConvergedState,
     Fingerprint,
-    InstanceSnapshot,
     IncusError,
+    InstanceSnapshot,
     Mount,
     _diff_devices,
     device_name_for,
@@ -102,13 +102,23 @@ def _list_devices_result(*names: str) -> subprocess.CompletedProcess:
 def test_diff_devices_adds_mounts_not_yet_present() -> None:
     # given no existing devices, and two desired mounts
     to_remove, to_add = _diff_devices(
-        set(), {"bind--project": Mount(host_path=Path("/project"), container_path=Path("/project")), "bind--extra": Mount(host_path=Path("/extra"), container_path=Path("/extra"))}
+        set(),
+        {
+            "bind--project": Mount(
+                host_path=Path("/project"), container_path=Path("/project")
+            ),
+            "bind--extra": Mount(
+                host_path=Path("/extra"), container_path=Path("/extra")
+            ),
+        },
     )
 
     # then both desired devices are reported for addition, and nothing for removal
     assert to_remove == set()
     assert to_add == {
-        "bind--project": Mount(host_path=Path("/project"), container_path=Path("/project")),
+        "bind--project": Mount(
+            host_path=Path("/project"), container_path=Path("/project")
+        ),
         "bind--extra": Mount(host_path=Path("/extra"), container_path=Path("/extra")),
     }
 
@@ -116,7 +126,12 @@ def test_diff_devices_adds_mounts_not_yet_present() -> None:
 def test_diff_devices_does_not_re_add_an_already_present_device() -> None:
     # given a device that already exists, matching the one desired mount
     to_remove, to_add = _diff_devices(
-        {"bind--project"}, {"bind--project": Mount(host_path=Path("/project"), container_path=Path("/project"))}
+        {"bind--project"},
+        {
+            "bind--project": Mount(
+                host_path=Path("/project"), container_path=Path("/project")
+            )
+        },
     )
 
     # then nothing is reported for addition or removal
@@ -669,7 +684,8 @@ def test_exec_command_runs_the_command_as_the_given_user_and_cwd() -> None:
             "--",
             "ls",
             "-la",
-        ]
+        ],
+        check=False,
     )
 
 
@@ -708,7 +724,8 @@ def test_exec_command_passes_extra_environment_variables() -> None:
             "SSH_CLIENT=127.0.0.1 1 22",
             "--",
             "ls",
-        ]
+        ],
+        check=False,
     )
 
 
@@ -724,7 +741,9 @@ def test_exec_command_does_not_capture_or_check_the_result() -> None:
     # then stdio is left to inherit the caller's (no output capturing), and
     # a non-zero exit is not treated as an error (no check=True)
     _, kwargs = run.call_args
-    assert "check" not in kwargs
+    assert (
+        kwargs["check"] is False
+    )  # Explicitly document that exec_command does not raise on non-zero exit codes
     assert "capture_output" not in kwargs
     assert "stdout" not in kwargs
     assert "stderr" not in kwargs
@@ -818,6 +837,7 @@ def test_run_command_runs_the_given_command_capturing_output() -> None:
     # than inheriting the caller's stdio
     run.assert_called_once_with(
         ["incus", "exec", "my-project", "--", "pacman", "-Qq", "paru"],
+        check=False,
         capture_output=True,
         text=True,
     )
@@ -1046,8 +1066,7 @@ def test_set_path_prefix_puts_the_entries_before_the_default_path() -> None:
             "config",
             "set",
             "my-project",
-            "environment.PATH=/home/raniz/.local/share/mise/shims:"
-            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "environment.PATH=/home/raniz/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         ],
         check=True,
     )
@@ -1067,8 +1086,7 @@ def test_set_path_prefix_restores_the_default_path_without_entries() -> None:
             "config",
             "set",
             "my-project",
-            "environment.PATH="
-            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "environment.PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         ],
         check=True,
     )

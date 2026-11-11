@@ -326,8 +326,10 @@ def test_loading_a_config_rejects_unknown_agents(tmp_path: Path) -> None:
 
     # then the agent is reported by its position along with the supported ones
     assert problems == [
-        "layers.base.agents.1.name: unknown agent 'hal' "
-        "(known: claude, codex, opencode, pi)"
+        (
+            "layers.base.agents.1.name: unknown agent 'hal' "
+            "(known: claude, codex, opencode, pi)"
+        )
     ]
 
 
@@ -342,8 +344,10 @@ def test_loading_a_config_rejects_options_the_agent_does_not_have(
 
     # then the option is reported along with the ones claude supports
     assert problems == [
-        "layers.base.agents.0: unknown option 'agents_md' for claude "
-        "(known: auth, claude_md, config, skills)"
+        (
+            "layers.base.agents.0: unknown option 'agents_md' for claude "
+            "(known: auth, claude_md, config, skills)"
+        )
     ]
 
 
@@ -357,8 +361,7 @@ def test_loading_a_config_checks_removed_agents_by_their_name(tmp_path: Path) ->
     # then only the unsupported agent is reported, by its name without the
     # removal prefix
     assert problems == [
-        "layers.base.agents.1.name: unknown agent 'hal' "
-        "(known: claude, codex, opencode, pi)"
+        "layers.base.agents.1.name: unknown agent 'hal' (known: claude, codex, opencode, pi)"
     ]
 
 
@@ -371,6 +374,5 @@ def test_loading_a_config_checks_options_of_removed_agents(tmp_path: Path) -> No
 
     # then the option is reported against claude
     assert problems == [
-        "layers.base.agents.0: unknown option 'telepathy' for claude "
-        "(known: auth, claude_md, config, skills)"
+        "layers.base.agents.0: unknown option 'telepathy' for claude (known: auth, claude_md, config, skills)"
     ]

@@ -1,11 +1,11 @@
 import io
 import shlex
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from pyinfra.api import Config as PyinfraConfig
 from pyinfra.api import Inventory, State

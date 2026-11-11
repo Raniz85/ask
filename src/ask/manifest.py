@@ -12,19 +12,14 @@ from ask.config import (
     HomePath,
     Layer,
     _normalize_service_dict,
-    load_as,
-    normalize_service_name,
-    read_toml,
     _validate,
+    read_toml,
 )
 from ask.incus import Mount
 from ask.removal import is_removal, removals
 from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.tool_manager import Mise
 from ask.user import ResolvedUser
-
-
-from ask.config import _normalize_service_dict
 
 
 @dataclass

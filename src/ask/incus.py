@@ -213,6 +213,7 @@ class Container:
     def run_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["incus", "exec", self.name, "--", *command],
+            check=False,
             capture_output=True,
             text=True,
         )
@@ -244,7 +245,8 @@ class Container:
                 *env_args,
                 "--",
                 *command,
-            ]
+            ],
+            check=False,
         )
         return result.returncode
 

@@ -10,9 +10,10 @@ from cyclopts import Parameter
 
 from ask import (
     agent as agents,
+)
+from ask import (
     config,
     convergence,
-    gui as gui_support,
     incus,
     manifest,
     problems,
@@ -21,6 +22,7 @@ from ask import (
     slug,
     validation,
 )
+from ask import gui as gui_support
 from ask.errors import AskError
 from ask.module import Module
 from ask.user import home_env
@@ -92,7 +94,7 @@ def converge(
     project_dir = Path.cwd()
     resolved = _resolve_project(project_dir)
     distribution = resolved.flavor.distribution
-    container_name = slug.slugify(project_dir.name)
+    slug.slugify(project_dir.name)
     container, _ = _running_container(project_dir, create_missing)
     with _keep_invocation_fresh(container):
         _converge_container(container, project_dir, resolved, distribution)
@@ -114,7 +116,10 @@ def _converge_container(
         if (config_files := tool_manager.config_files(project_dir))
     ]
 
-    package_modules: list[Module] = [cast(Module, user_shell), *[agent for agent in resolved.agents if isinstance(agent, Module)]]
+    package_modules: list[Module] = [
+        cast(Module, user_shell),
+        *[agent for agent in resolved.agents if isinstance(agent, Module)],
+    ]
     packages = resolved.packages
     for mod in package_modules:
         packages += mod.packages_for(distribution)
@@ -316,7 +321,9 @@ def _converged_container(
         freshly_created = snapshot is None
         if not freshly_created:
             assert snapshot is not None
-            if _configuration_changed(snapshot, resolved) and _should_converge(converge_changed):
+            if _configuration_changed(snapshot, resolved) and _should_converge(
+                converge_changed
+            ):
                 converge()
     return container
 

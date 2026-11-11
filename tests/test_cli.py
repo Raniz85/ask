@@ -1672,7 +1672,11 @@ def _enter_with(
         container.snapshot.return_value = snapshot
         container.exec_command.return_value = 0
 
-        enter(gui=kwargs.get("gui", False) or False, create_missing=kwargs.get("create_missing", False) or False, converge_changed=kwargs.get("converge_changed"))
+        enter(
+            gui=kwargs.get("gui", False) or False,
+            create_missing=kwargs.get("create_missing", False) or False,
+            converge_changed=kwargs.get("converge_changed"),
+        )
     return container, input_mock, converge_mock
 
 

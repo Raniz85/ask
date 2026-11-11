@@ -35,6 +35,7 @@ def test_ask_reports_a_missing_manifest_without_a_traceback(tmp_path: Path) -> N
     # when running ask converge from within the project directory
     result = subprocess.run(
         [str(ASK), "converge"],
+        check=False,
         cwd=project_dir,
         env={
             "PATH": "/usr/bin:/bin",
@@ -74,6 +75,7 @@ def test_ask_reports_a_missing_incus_binary_without_a_traceback(
     # when running ask enter from within the project directory
     result = subprocess.run(
         [str(ASK), "enter"],
+        check=False,
         cwd=project_dir,
         env={
             "PATH": str(empty_bin),
@@ -116,6 +118,7 @@ def test_ask_does_not_offer_to_create_a_missing_container_without_a_terminal(
     # piped to stdin rather than a terminal
     result = subprocess.run(
         [str(ASK), "enter"],
+        check=False,
         cwd=project_dir,
         env={
             "PATH": str(fake_bin),
@@ -161,6 +164,7 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
     # when running ask exec --create from within the project directory
     result = subprocess.run(
         [str(ASK), "exec", "--create", "true"],
+        check=False,
         cwd=project_dir,
         env={
             "PATH": str(fake_bin),
@@ -212,6 +216,7 @@ def test_ask_warns_about_a_changed_configuration_without_a_terminal(
     # when running ask exec without a terminal
     result = subprocess.run(
         [str(ASK), "exec", "true"],
+        check=False,
         cwd=project_dir,
         env=env,
         stdin=subprocess.DEVNULL,
@@ -223,8 +228,7 @@ def test_ask_warns_about_a_changed_configuration_without_a_terminal(
     assert (result.returncode, result.stdout, result.stderr) == (
         0,
         "",
-        "ask: warning: configuration has changed since the container was last "
-        "converged; run `ask converge` to apply it\n",
+        "ask: warning: configuration has changed since the container was last converged; run `ask converge` to apply it\n",
     )
 
 
@@ -237,6 +241,7 @@ def test_ask_does_not_warn_about_a_changed_configuration_when_told_not_to_conver
     # when running ask exec --no-converge without a terminal
     result = subprocess.run(
         [str(ASK), "exec", "--no-converge", "true"],
+        check=False,
         cwd=project_dir,
         env=env,
         stdin=subprocess.DEVNULL,
@@ -264,6 +269,7 @@ def test_ask_reports_an_unknown_tool_manager_without_a_traceback(
     # when running ask converge from within the project directory
     result = subprocess.run(
         [str(ASK), "converge"],
+        check=False,
         cwd=project_dir,
         env={
             "PATH": "/usr/bin:/bin",
@@ -304,6 +310,7 @@ def test_ask_reports_a_project_no_flavor_applies_to_without_a_traceback(
     # when running ask converge from within the project directory
     result = subprocess.run(
         [str(ASK), "converge"],
+        check=False,
         cwd=project_dir,
         env={
             "PATH": "/usr/bin:/bin",
@@ -348,6 +355,7 @@ def test_ask_restarts_a_running_container(tmp_path: Path) -> None:
     # when running ask restart from within the project directory
     result = subprocess.run(
         [str(ASK), "restart"],
+        check=False,
         cwd=project_dir,
         env={"PATH": str(fake_bin)},
         capture_output=True,
@@ -378,6 +386,7 @@ def test_ask_exec_records_the_invocation_around_the_command(tmp_path: Path) -> N
     # when running ask exec --no-converge without a terminal
     result = subprocess.run(
         [str(ASK), "exec", "--no-converge", "true"],
+        check=False,
         cwd=project_dir,
         env=env,
         stdin=subprocess.DEVNULL,

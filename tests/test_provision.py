@@ -1,10 +1,9 @@
-import subprocess
-from pathlib import Path
-from collections.abc import Callable
-from unittest.mock import ANY, MagicMock, call, patch
-
 import io
+import subprocess
+from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 from pyinfra.api.exceptions import PyinfraError
@@ -13,15 +12,15 @@ from pyinfra.operations import files, pacman, server, systemd
 
 from ask import idle
 from ask.incus import Container
-from ask.tool_manager import config_digest
 from ask.provision import (
     AurBuilder,
     MiseProvisioner,
-    ProvisioningError,
     Provisioner,
+    ProvisioningError,
     _ancestors_under_home,
     split_aur_packages,
 )
+from ask.tool_manager import config_digest
 from ask.user import ResolvedUser
 
 
@@ -549,7 +548,7 @@ def test_aur_builder_provision_builder_writes_a_pacman_scoped_sudoers_dropin() -
     # when provisioning the aur builder
     with (
         patch("ask.provision.Inventory"),
-        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.State"),
         patch("ask.provision.connect_all"),
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
@@ -622,7 +621,7 @@ def test_share_paru_cache_makes_the_aur_builder_own_the_cache_directories() -> N
         patch("ask.provision.incus.ensure_storage_volume"),
         patch.object(Container, "attach_volume"),
         patch("ask.provision.Inventory"),
-        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.State"),
         patch("ask.provision.connect_all"),
         patch("ask.provision.add_op") as add_op,
         patch("ask.provision.run_ops"),
@@ -810,11 +809,11 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
         patch.object(Container, "run_command", side_effect=_container_without_paru()),
         patch.object(Container, "exec_command", return_value=0) as exec_command,
         patch("builtins.input", return_value="n"),
+        pytest.raises(ProvisioningError) as error,
     ):
         # when ensuring paru is present
         # then a clear error is raised
-        with pytest.raises(ProvisioningError) as error:
-            aur_builder.ensure_paru()
+        aur_builder.ensure_paru()
 
     assert str(error.value) == (
         "The paru build was declined. Cannot install AUR packages."
@@ -830,14 +829,11 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
     [
         (
             "git",
-            "`git clone https://aur.archlinux.org/paru-bin.git "
-            "/home/aur/.cache/paru/clone/paru-bin` failed in "
-            "container 'my-project' with exit status 128.",
+            "`git clone https://aur.archlinux.org/paru-bin.git /home/aur/.cache/paru/clone/paru-bin` failed in container 'my-project' with exit status 128.",
         ),
         (
             "makepkg",
-            "`makepkg -si --noconfirm` failed in container 'my-project' "
-            "with exit status 128.",
+            "`makepkg -si --noconfirm` failed in container 'my-project' with exit status 128.",
         ),
     ],
 )

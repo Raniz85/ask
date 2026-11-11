@@ -63,3 +63,5 @@ Run these commands via `just <command>` to ensure consistency:
 - `lint`: Lint code using `ruff`.
 - `typecheck`: Run type checking using `mypy`.
 - `test`: Run tests with coverage.
+
+No task is complete until `just check` passes

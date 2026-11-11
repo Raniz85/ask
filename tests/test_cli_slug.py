@@ -1,11 +1,11 @@
 """Tests for slugification in CLI commands."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
 from ask import incus
-from ask.cli import create, converge, _running_container
+from ask.cli import _running_container, create
 from ask.slug import slugify
 
 
@@ -48,7 +48,7 @@ def test_running_container_uses_slugified_name(mock_project_dir):
         patch("ask.incus.Container.snapshot", return_value=None),
         patch("ask.cli.create"),
         patch("ask.cli._confirm", return_value=True),
+        patch("pathlib.Path.cwd", return_value=mock_project_dir),
     ):
-        with patch("pathlib.Path.cwd", return_value=mock_project_dir):
-            container, _ = _running_container(mock_project_dir, create_missing=True)
-            assert container.name == "my-project-with-dots"
+        container, _ = _running_container(mock_project_dir, create_missing=True)
+        assert container.name == "my-project-with-dots"

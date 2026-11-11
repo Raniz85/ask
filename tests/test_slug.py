@@ -1,6 +1,7 @@
 """Tests for the slugify function."""
 
 import pytest
+
 from ask.slug import slugify
 
 

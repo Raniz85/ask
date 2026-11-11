@@ -356,8 +356,7 @@ def test_loading_a_config_rejects_every_option_the_shell_does_not_have(
 
     # then both options are reported in one problem
     assert problems == [
-        "shell: unknown options 'bash_profile', 'bashrc' for zsh "
-        "(known: zprofile, zshenv, zshrc)"
+        "shell: unknown options 'bash_profile', 'bashrc' for zsh (known: zprofile, zshenv, zshrc)"
     ]
 
 
