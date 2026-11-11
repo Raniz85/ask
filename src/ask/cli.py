@@ -1,4 +1,7 @@
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -18,8 +21,14 @@ from ask import (
     slug,
     validation,
 )
+from ask.errors import AskError
 from ask.module import Module
 from ask.user import home_env
+
+# How often a running Ask command refreshes the recorded invocation, so the
+# in-instance idle watch keeps the instance up while Ask is using it. Must
+# stay well below the idle threshold in ask.idle.
+_INVOCATION_REFRESH_INTERVAL = 60
 
 # Command-specific arguments for CLI
 CreateMissing = Annotated[
@@ -85,6 +94,16 @@ def converge(
     distribution = resolved.flavor.distribution
     container_name = slug.slugify(project_dir.name)
     container, _ = _running_container(project_dir, create_missing)
+    with _keep_invocation_fresh(container):
+        _converge_container(container, project_dir, resolved, distribution)
+
+
+def _converge_container(
+    container: incus.Container,
+    project_dir: Path,
+    resolved: manifest.ResolvedManifest,
+    distribution: str,
+) -> None:
     bind_mounts = [project_dir] + resolved.bind_mounts
     user = config.resolve_user(resolved.flavor)
     user_shell = shell.resolve(user.shell)
@@ -120,6 +139,8 @@ def converge(
     services = resolved.services
     if services:
         provisioner.provision_services(services)
+
+    provisioner.provision_idle_shutdown(distribution, user)
 
     resolved_packages = official_packages + aur_packages
     stale = incus.stale_packages(container.get_managed_packages(), resolved_packages)
@@ -161,6 +182,7 @@ def enter(
     container = _converged_container(
         project_dir, resolved, create_missing, converge_changed
     )
+    _record_invocation(container)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
             user.uid,
@@ -169,6 +191,7 @@ def enter(
             [user.shell],
             env=home_env(user) | FAKE_SSH_ENV | gui_env,
         )
+    _record_invocation(container)
     sys.exit(returncode)
 
 
@@ -260,6 +283,7 @@ def _running_container(
         return container, None
     if not snapshot.is_running():
         container.start()
+    _record_invocation(container)
     return container, snapshot
 
 
@@ -286,13 +310,14 @@ def _converged_container(
     converge_changed: bool | None,
 ) -> incus.Container:
     container, snapshot = _running_container(project_dir, create_missing)
-    freshly_created = snapshot is None
-    if (
-        not freshly_created
-        and _configuration_changed(snapshot, resolved)
-        and _should_converge(converge_changed)
-    ):
-        converge()
+    with _keep_invocation_fresh(container):
+        freshly_created = snapshot is None
+        if (
+            not freshly_created
+            and _configuration_changed(snapshot, resolved)
+            and _should_converge(converge_changed)
+        ):
+            converge()
     return container
 
 
@@ -308,8 +333,36 @@ def _exec_in_container(
     container = _converged_container(
         project_dir, resolved, create_missing, converge_changed
     )
+    _record_invocation(container)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
             user.uid, user.gid, project_dir, command, env=home_env(user) | gui_env
         )
+    _record_invocation(container)
     sys.exit(returncode)
+
+
+def _record_invocation(container: incus.Container) -> None:
+    container.set_invocation_at(datetime.now(UTC))
+
+
+def _refresh_invocations(container: incus.Container, stop: threading.Event) -> None:
+    while not stop.wait(_INVOCATION_REFRESH_INTERVAL):
+        try:
+            _record_invocation(container)
+        except AskError:
+            return
+
+
+@contextmanager
+def _keep_invocation_fresh(container: incus.Container) -> Iterator[None]:
+    stop = threading.Event()
+    thread = threading.Thread(
+        target=_refresh_invocations, args=(container, stop), daemon=True
+    )
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()

@@ -25,6 +25,9 @@ _CONVERGED_VERSION_CONFIG_KEY = "user.ask.converged.version"
 _CONVERGED_HASH_CONFIG_KEY = "user.ask.converged.hash"
 _CONVERGED_CONFIGURATION_CONFIG_KEY = "user.ask.converged.configuration"
 _CONVERGED_AT_CONFIG_KEY = "user.ask.converged.at"
+# Public because the in-instance idle watcher reads the same key through the
+# in-instance Incus socket; see ask.idle.
+INVOCATION_AT_CONFIG_KEY = "user.ask.invocation.at"
 
 
 def _trusted_config_key(tool_manager: str) -> str:
@@ -284,6 +287,17 @@ class Container:
                 f"{_CONVERGED_HASH_CONFIG_KEY}={state.fingerprint.config_hash}",
                 f"{_CONVERGED_CONFIGURATION_CONFIG_KEY}={state.configuration}",
                 f"{_CONVERGED_AT_CONFIG_KEY}={state.at.isoformat()}",
+            ],
+        )
+
+    def set_invocation_at(self, at: datetime) -> None:
+        _incus(
+            [
+                "incus",
+                "config",
+                "set",
+                self.name,
+                f"{INVOCATION_AT_CONFIG_KEY}={at.isoformat()}",
             ],
         )
 

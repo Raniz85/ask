@@ -11,6 +11,7 @@ from pyinfra.api.exceptions import PyinfraError
 from pyinfra.api.output import echo
 from pyinfra.operations import files, pacman, server, systemd
 
+from ask import idle
 from ask.incus import Container
 from ask.tool_manager import config_digest
 from ask.provision import (
@@ -1368,4 +1369,53 @@ def test_mise_install_reports_a_failing_mise_install(tmp_path: Path) -> None:
     # then the error names the failing command
     assert str(error.value) == (
         "`mise install` failed in container 'my-project' with exit status 1."
+    )
+
+
+def test_provision_idle_shutdown_installs_the_watch_and_enables_the_timer() -> None:
+    # given a provisioner and the resolved user that commands run as
+    provisioner = Provisioner(Container("my-project"))
+    user = ResolvedUser(
+        name="raniz",
+        uid=1000,
+        shell="bash",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
+    )
+
+    # when provisioning the idle shutdown watch
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_idle_shutdown("arch", user)
+
+    # then curl and jq are installed for the watchdog script, the script and
+    # the systemd units are put in place, systemd is reloaded, and the timer
+    # is enabled and started
+    state = state_cls.return_value
+    calls = add_op.call_args_list
+    assert calls[0] == call(state, pacman.packages, packages=["curl", "jq"])
+    put_calls = [c for c in calls if c.args[1] == files.put]
+    assert [(c.kwargs["dest"], c.kwargs["mode"]) for c in put_calls] == [
+        ("/usr/local/bin/ask-idle-shutdown", "755"),
+        ("/etc/systemd/system/ask-idle-shutdown.service", "644"),
+        ("/etc/systemd/system/ask-idle-shutdown.timer", "644"),
+    ]
+    assert [c.kwargs["src"].getvalue() for c in put_calls] == [
+        idle.shutdown_script(user),
+        idle.service_unit(),
+        idle.timer_unit(),
+    ]
+    assert calls[-2] == call(state, systemd.daemon_reload)
+    assert calls[-1] == call(
+        state,
+        systemd.service,
+        service="ask-idle-shutdown.timer",
+        enabled=True,
+        running=True,
     )

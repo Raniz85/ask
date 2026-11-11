@@ -1,4 +1,6 @@
 import hashlib
+import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7,7 +9,16 @@ from unittest.mock import MagicMock, Mock, call, patch
 import pytest
 
 from ask.agent import AgentError
-from ask.cli import FAKE_SSH_ENV, agent, converge, create, enter, exec, restart
+from ask.cli import (
+    FAKE_SSH_ENV,
+    _refresh_invocations,
+    agent,
+    converge,
+    create,
+    enter,
+    exec,
+    restart,
+)
 from ask.config import ConfigError, Flavor, FlavorError, User
 from ask.convergence import effective_configuration, fingerprint
 from ask.incus import (
@@ -1010,7 +1021,9 @@ def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
     configuration = effective_configuration(
         ResolvedManifest(Manifest(), _PROJECT_FLAVOR, project_dir)
     )
-    datetime_mock.now.assert_called_once_with(UTC)
+    # the clock is read once to record the invocation and once for the
+    # converged state
+    assert datetime_mock.now.call_args_list == [call(UTC), call(UTC)]
     assert container.method_calls[-1] == call.set_converged_state(
         ConvergedState(
             fingerprint=Fingerprint(
@@ -2616,3 +2629,249 @@ def test_converge_normalizes_short_service_names_in_manifest(tmp_path: Path) -> 
             "full.socket": "masked",  # Preserved from manifest
         }
     )
+
+
+def test_converge_provisions_the_idle_shutdown_watch(tmp_path: Path) -> None:
+    # given a project directory, and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the idle shutdown watch is provisioned for the resolved user, so
+    # the instance shuts itself down once it has been idle for a while
+    provisioner_cls.return_value.provision_idle_shutdown.assert_called_once_with(
+        "arch",
+        ResolvedUser(
+            name="raniz",
+            uid=1000,
+            shell="bash",
+            group_name="raniz",
+            gid=1000,
+            extra_groups=[],
+        ),
+    )
+
+
+def test_converge_records_an_invocation_on_the_container(tmp_path: Path) -> None:
+    # given a project directory with a container, and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+    at = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+        patch("ask.cli.datetime") as datetime_mock,
+    ):
+        datetime_mock.now.return_value = at
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the invocation is recorded on the container's metadata, so the
+    # idle watch inside the instance does not shut it down mid-convergence
+    container.set_invocation_at.assert_called_once_with(at)
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_command"),
+    [
+        (lambda: exec("erl"), ["erl"]),
+        (lambda: agent(), ["claude"]),
+    ],
+    ids=["exec", "agent"],
+)
+def test_commands_record_the_invocation_before_and_after_running(
+    tmp_path: Path, command: Callable[[], None], expected_command: list[str]
+) -> None:
+    # given a project directory and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + '[layers.base]\nagents = ["claude"]\n'
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+    at = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+
+    # when running a command in the project's container
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.converge"),
+        patch("ask.cli.datetime") as datetime_mock,
+        pytest.raises(SystemExit),
+    ):
+        datetime_mock.now.return_value = at
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+        command()
+
+    # then the invocation is recorded on the container when it is ensured
+    # running, both before the command starts and after it ends, so the idle
+    # window starts when the command ends
+    assert container.set_invocation_at.call_args_list == [call(at), call(at), call(at)]
+
+
+def test_enter_records_the_invocation_before_and_after_the_session(
+    tmp_path: Path,
+) -> None:
+    # given a project directory and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+    at = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+
+    # when entering the project's container
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.converge"),
+        patch("ask.cli.datetime") as datetime_mock,
+        pytest.raises(SystemExit),
+    ):
+        datetime_mock.now.return_value = at
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+        enter()
+
+    # then the invocation is recorded when the container is ensured running,
+    # both before the shell starts and after the session ends, so the idle
+    # window starts when the session ends
+    assert container.set_invocation_at.call_args_list == [call(at), call(at), call(at)]
+
+
+def test_refresh_invocations_records_repeatedly_until_stopped() -> None:
+    # given a container and a stop event
+    container = Mock()
+    stop = threading.Event()
+    records: list[Mock] = []
+
+    # when the refresher loop runs with a zero interval, stopping after three
+    # records
+    def record(recorded: Mock) -> None:
+        records.append(recorded)
+        if len(records) == 3:
+            stop.set()
+
+    with (
+        patch("ask.cli._INVOCATION_REFRESH_INTERVAL", 0),
+        patch("ask.cli._record_invocation", side_effect=record),
+    ):
+        _refresh_invocations(container, stop)
+
+    # then the invocation was recorded over and over until the stop event
+    assert records == [container, container, container]
+
+
+def test_converge_keeps_refreshing_the_invocation_while_it_runs(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a container, and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+    refreshed = threading.Event()
+
+    # when converging, with one provisioning step blocking until the invocation
+    # has been recorded again by the background refresher
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+        patch("ask.cli._INVOCATION_REFRESH_INTERVAL", 0.05),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        def record(at: datetime) -> None:
+            if container.set_invocation_at.call_count >= 2:
+                refreshed.set()
+
+        container.set_invocation_at.side_effect = record
+        provisioner_cls.return_value.provision_user.side_effect = (
+            lambda *args, **kwargs: refreshed.wait(timeout=10)
+        )
+
+        converge()
+
+    # then the invocation was refreshed while convergence was still running,
+    # so the idle watch inside the instance cannot shut it down mid-converge
+    assert refreshed.is_set()
+    assert container.set_invocation_at.call_count >= 2
+
+
+def test_enter_keeps_refreshing_the_invocation_while_waiting_at_a_prompt(
+    tmp_path: Path,
+) -> None:
+    # given a project directory whose container's configuration has changed,
+    # and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when entering the container, and the converge prompt blocks until the
+    # invocation has been recorded again by the background refresher
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.converge"),
+        patch("ask.cli.sys.stdin") as stdin_mock,
+        patch("ask.cli._confirm") as confirm_mock,
+        patch("ask.cli._INVOCATION_REFRESH_INTERVAL", 0.05),
+        pytest.raises(SystemExit),
+    ):
+        stdin_mock.isatty.return_value = True
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        def wait_for_refresh(prompt: str) -> bool:
+            deadline = time.monotonic() + 10
+            while container.set_invocation_at.call_count < 2:
+                assert time.monotonic() < deadline, "invocation was not refreshed"
+                time.sleep(0.01)
+            return False
+
+        confirm_mock.side_effect = wait_for_refresh
+
+        enter()
+
+    # then the invocation was refreshed while ask was waiting at the prompt,
+    # so the idle watch cannot shut the instance down while ask is using it
+    assert container.set_invocation_at.call_count >= 2

@@ -16,7 +16,7 @@ from pyinfra.api.operations import run_ops
 from pyinfra.api.output import set_echo
 from pyinfra.operations import files, pacman, server, systemd
 
-from ask import incus
+from ask import idle, incus
 from ask.errors import AskError
 from ask.tool_manager import config_digest
 from ask.user import ResolvedUser, home_env
@@ -157,6 +157,46 @@ class Provisioner:
                         masked=True,
                         running=False,
                     )
+
+    def provision_idle_shutdown(self, distribution: str, user: ResolvedUser) -> None:
+        operation = _package_operation_for(distribution)
+        with self.session() as state:
+            add_op(state, operation, packages=idle.WATCH_PACKAGES)
+            add_op(
+                state,
+                files.put,
+                src=io.StringIO(idle.shutdown_script(user)),
+                dest=str(idle.SCRIPT_PATH),
+                user="root",
+                group="root",
+                mode="755",
+            )
+            add_op(
+                state,
+                files.put,
+                src=io.StringIO(idle.service_unit()),
+                dest=str(idle.SERVICE_UNIT_PATH),
+                user="root",
+                group="root",
+                mode="644",
+            )
+            add_op(
+                state,
+                files.put,
+                src=io.StringIO(idle.timer_unit()),
+                dest=str(idle.TIMER_UNIT_PATH),
+                user="root",
+                group="root",
+                mode="644",
+            )
+            add_op(state, systemd.daemon_reload)
+            add_op(
+                state,
+                systemd.service,
+                service=idle.TIMER_NAME,
+                enabled=True,
+                running=True,
+            )
 
 
 def _run_checked(

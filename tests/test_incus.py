@@ -1072,3 +1072,25 @@ def test_set_path_prefix_restores_the_default_path_without_entries() -> None:
         ],
         check=True,
     )
+
+
+def test_set_invocation_at_stores_the_timestamp_under_a_user_key() -> None:
+    # given a container and a point in time
+    container = Container("my-project")
+    at = datetime(2026, 11, 9, 12, 30, tzinfo=UTC)
+    with patch("ask.incus.subprocess.run") as run:
+        # when recording an invocation at that time
+        container.set_invocation_at(at)
+
+    # then the timestamp is stored as ISO 8601 under a user.* config key,
+    # like the other Ask metadata on the container
+    run.assert_called_once_with(
+        [
+            "incus",
+            "config",
+            "set",
+            "my-project",
+            "user.ask.invocation.at=2026-11-09T12:30:00+00:00",
+        ],
+        check=True,
+    )

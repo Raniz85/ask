@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -358,3 +359,41 @@ def test_ask_restarts_a_running_container(tmp_path: Path) -> None:
     assert invocations.read_text() == (
         "list my-project --format json\nrestart my-project\n"
     )
+
+
+def test_ask_exec_records_the_invocation_around_the_command(tmp_path: Path) -> None:
+    # given a project directory whose running container was never converged,
+    # and an incus command that records how it is invoked
+    project_dir, env = _project_with_an_unconverged_container(tmp_path)
+    invocations = tmp_path / "invocations"
+    fake_incus = tmp_path / "bin" / "incus"
+    fake_incus.write_text(
+        "#!/bin/sh\n"
+        f'echo "$@" >> {invocations}\n'
+        'if [ "$1" = list ]; then\n'
+        '  echo \'[{"name": "my-project", "status": "Running", "config": {}}]\'\n'
+        "fi\n"
+    )
+
+    # when running ask exec --no-converge without a terminal
+    result = subprocess.run(
+        [str(ASK), "exec", "--no-converge", "true"],
+        cwd=project_dir,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+
+    # then the command runs successfully, and the invocation timestamp is
+    # stored on the container's user.* metadata when the container is ensured
+    # running, both before the command runs and after it ends
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    lines = invocations.read_text().splitlines()
+    timestamp = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00"
+    invocation_set = rf"config set my-project user\.ask\.invocation\.at={timestamp}"
+    assert lines[0] == "list my-project --format json"
+    assert re.fullmatch(invocation_set, lines[1])
+    assert re.fullmatch(invocation_set, lines[2])
+    assert lines[3].startswith("exec my-project ")
+    assert re.fullmatch(invocation_set, lines[4])
