@@ -75,6 +75,47 @@ def _resolve_project(project_dir: Path) -> manifest.ResolvedManifest:
     return validation.resolve_project(flavors_dir, cfg, m, project_dir)
 
 
+INIT_TEMPLATE = """\
+# Ask project manifest: configures the development container for this project.
+# Shared container configuration (flavours) lives in ~/.config/ask/flavors/.
+
+# Packages to install in the container.
+# Prefix with "aur:" for AUR packages, or with "-" to remove a package that a
+# flavour layer added.
+# packages = [
+#   "uv",
+#   "python",
+# ]
+
+# Host directories to mount into the container at the same path.
+# "~" expands to your home directory.
+# bind_mounts = [
+#   "~/.cache/uv",
+# ]
+
+# Systemd units to enable, disable or mask in the container.
+# [services]
+# "sshd.service" = "enabled"
+# "man-db.timer" = "disabled"
+
+# Tool managers to enable for this project. Known tool managers: mise.
+# tool_managers = [
+#   "mise",
+# ]
+
+# Named shell commands to run inside the container with `ask run <name>`.
+# [scripts]
+# test = "uv run pytest"
+"""
+
+
+def init() -> None:
+    path = Path.cwd() / "ask.toml"
+    if path.exists():
+        raise AskError(f"{path} already exists; not overwriting it.")
+    path.write_text(INIT_TEMPLATE)
+
+
 def create() -> None:
     project_dir = Path.cwd()
     resolved = _resolve_project(project_dir)

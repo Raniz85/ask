@@ -7,7 +7,16 @@ import cyclopts
 from cyclopts.panel import CycloptsPanel
 from rich.console import Console
 
-from ask.cli import agent, converge, create, enter, exec, resolve_shortcut, restart
+from ask.cli import (
+    agent,
+    converge,
+    create,
+    enter,
+    exec,
+    init,
+    resolve_shortcut,
+    restart,
+)
 from ask.cli import run as run_script
 from ask.errors import AskError
 
@@ -17,6 +26,7 @@ app.command(converge)
 app.command(enter)
 app.command(exec)
 app.command(agent)
+app.command(init)
 app.command(restart)
 app.command(run_script, name="run")
 

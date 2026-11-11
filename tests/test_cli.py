@@ -17,6 +17,7 @@ from ask.cli import (
     create,
     enter,
     exec,
+    init,
     resolve_shortcut,
     restart,
     run,
@@ -33,6 +34,7 @@ from ask.incus import (
     Mount,
 )
 from ask.manifest import Manifest, ResolvedManifest
+from ask.manifest import load as load_manifest
 from ask.user import ResolvedUser
 
 _WAYLAND_MOUNT = Mount(
@@ -3070,3 +3072,42 @@ def test_enter_keeps_refreshing_the_invocation_while_waiting_at_a_prompt(
     # then the invocation was refreshed while ask was waiting at the prompt,
     # so the idle watch cannot shut the instance down while ask is using it
     assert container.set_invocation_at.call_count >= 2
+
+
+def test_init_creates_a_documented_ask_toml(tmp_path: Path) -> None:
+    # given an empty project directory
+    # when running init from within it
+    with patch("ask.cli.Path.cwd", return_value=tmp_path):
+        init()
+
+    # then ask.toml is created, documenting every possible manifest field
+    path = tmp_path / "ask.toml"
+    assert path.exists()
+    content = path.read_text()
+    for field_name in (
+        "packages",
+        "bind_mounts",
+        "services",
+        "tool_managers",
+        "scripts",
+    ):
+        assert field_name in content
+
+    # and the generated file is a valid, empty manifest
+    assert load_manifest(path) == Manifest()
+
+
+def test_init_refuses_to_overwrite_an_existing_ask_toml(tmp_path: Path) -> None:
+    # given a project directory that already has an ask.toml
+    path = tmp_path / "ask.toml"
+    path.write_text('packages = ["uv"]\n')
+
+    # when running init from within it
+    with (
+        patch("ask.cli.Path.cwd", return_value=tmp_path),
+        pytest.raises(AskError, match="already exists"),
+    ):
+        init()
+
+    # then the existing file is left untouched
+    assert path.read_text() == 'packages = ["uv"]\n'
