@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 
@@ -144,6 +144,43 @@ def test_main_runs_the_command_with_the_resolved_debug_setting(
     # setting, and the process exits successfully
     run_mock.assert_called_once_with(expected_tokens, debug=expected_debug)
     assert exit_info.value.code == 0
+
+
+@pytest.mark.parametrize(
+    ("tokens", "expected_tokens"),
+    [
+        (["exec", "foo", "--option"], ("exec", "--", "foo", "--option")),
+        (["exec", "--gui", "foo", "--gui"], ("exec", "--gui", "--", "foo", "--gui")),
+        (["exec", "--gui=true", "foo"], ("exec", "--gui=true", "--", "foo")),
+        (["exec", "--", "foo", "--gui"], ("exec", "--", "foo", "--gui")),
+        (["exec", "foo", "--help"], ("exec", "--", "foo", "--help")),
+        (["exec", "--gui"], ("exec", "--gui")),
+        (["run", "test", "-v"], ("run", "--", "test", "-v")),
+        (
+            ["run", "--create", "--no-converge", "test", "--create"],
+            ("run", "--create", "--no-converge", "--", "test", "--create"),
+        ),
+        (["agent", "--resume"], ("agent", "--", "--resume")),
+        (["agent", "claude", "--gui"], ("agent", "--", "claude", "--gui")),
+        (["converge", "--create"], ("converge", "--create")),
+        (["--debug", "exec", "ls", "--debug"], ("exec", "--", "ls", "--debug")),
+    ],
+)
+def test_main_passes_everything_after_the_command_through_unparsed(
+    monkeypatch: pytest.MonkeyPatch,
+    tokens: list[str],
+    expected_tokens: tuple[str, ...],
+) -> None:
+    # given an environment without debugging enabled
+    monkeypatch.delenv("ASK_DEBUG", raising=False)
+
+    # when running a command whose trailing arguments belong to another program
+    with patch("ask.run") as run_mock, pytest.raises(SystemExit):
+        main(tokens)
+
+    # then ask's own options are kept, and everything from the first other
+    # argument onwards is separated so ask does not parse it
+    run_mock.assert_called_once_with(expected_tokens, debug=ANY)
 
 
 @pytest.mark.parametrize(

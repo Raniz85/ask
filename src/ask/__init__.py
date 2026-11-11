@@ -61,5 +61,33 @@ def _launcher(
     run(tokens, debug=debug or bool(os.environ.get("ASK_DEBUG")))
 
 
+_PASSTHROUGH_COMMANDS = ("exec", "run", "agent")
+
+
 def main(tokens: Sequence[str] | None = None) -> None:
-    app.meta(tokens)
+    app.meta(_separate_passthrough(sys.argv[1:] if tokens is None else tokens))
+
+
+def _separate_passthrough(tokens: Sequence[str]) -> list[str]:
+    command_index = next(
+        (i for i, token in enumerate(tokens) if not token.startswith("-")), None
+    )
+    if command_index is None or tokens[command_index] not in _PASSTHROUGH_COMMANDS:
+        return list(tokens)
+    own_options = _option_names(tokens[command_index])
+    for index in range(command_index + 1, len(tokens)):
+        token = tokens[index]
+        if token == "--":
+            break
+        if token.split("=", 1)[0] not in own_options:
+            return [*tokens[:index], "--", *tokens[index:]]
+    return list(tokens)
+
+
+def _option_names(command: str) -> set[str]:
+    return {
+        name
+        for argument in app[command].assemble_argument_collection()
+        if argument.field_info.kind is argument.field_info.KEYWORD_ONLY
+        for name in argument.names
+    } | set(app.help_flags)
