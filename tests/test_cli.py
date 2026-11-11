@@ -17,6 +17,7 @@ from ask.cli import (
     create,
     enter,
     exec,
+    resolve_shortcut,
     restart,
     run,
 )
@@ -1093,6 +1094,90 @@ def test_run_rejects_undefined_script(tmp_path: Path) -> None:
     # then the error reports the undefined script
     assert str(error.value) == "Script 'test' is not defined in ask.toml."
     container_cls.assert_not_called()
+
+
+def _resolve_in_project(project_dir: Path, config_path: Path, name: str) -> str:
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+    ):
+        return resolve_shortcut(name)
+
+
+def test_resolve_shortcut_maps_a_known_agent_name_to_agent(tmp_path: Path) -> None:
+    # given a project without any scripts
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when resolving an unknown command that names a known agent
+    target = _resolve_in_project(project_dir, config_path, "claude")
+
+    # then it dispatches to the agent command
+    assert target == "agent"
+
+
+def test_resolve_shortcut_maps_a_script_name_to_run(tmp_path: Path) -> None:
+    # given a project with a script defined in ask.toml
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('scripts.build = "make"\n')
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when resolving an unknown command that names the script
+    target = _resolve_in_project(project_dir, config_path, "build")
+
+    # then it dispatches to the run command
+    assert target == "run"
+
+
+def test_resolve_shortcut_rejects_a_name_matching_both_an_agent_and_a_script(
+    tmp_path: Path,
+) -> None:
+    # given a project whose script has the same name as a known agent
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('scripts.claude = "make claude"\n')
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when resolving the ambiguous name
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        pytest.raises(AskError) as error,
+    ):
+        resolve_shortcut("claude")
+
+    # then the error tells the user to pick ask agent or ask run explicitly
+    assert "ask agent" in str(error.value)
+    assert "ask run" in str(error.value)
+
+
+def test_resolve_shortcut_rejects_a_name_matching_neither_an_agent_nor_a_script(
+    tmp_path: Path,
+) -> None:
+    # given a project with an unrelated script
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('scripts.build = "make"\n')
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when resolving a name that matches nothing
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        pytest.raises(AskError) as error,
+    ):
+        resolve_shortcut("nope")
+
+    # then the error tells the user to pick ask agent or ask run explicitly
+    assert "ask agent" in str(error.value)
+    assert "ask run" in str(error.value)
 
 
 def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:

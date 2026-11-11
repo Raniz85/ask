@@ -235,6 +235,23 @@ def agent(
     )
 
 
+def resolve_shortcut(name: str) -> str:
+    resolved = _resolve_project(Path.cwd())
+    matches = [
+        command
+        for command, matched in (
+            ("agent", name in agents.known_names()),
+            ("run", name in resolved.scripts),
+        )
+        if matched
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    raise AskError(
+        f"Ambigous command {name!r}; use `ask agent {name}` or `ask run {name}`."
+    )
+
+
 def run(
     name: str,
     *args: str,

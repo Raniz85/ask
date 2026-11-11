@@ -7,7 +7,7 @@ import cyclopts
 from cyclopts.panel import CycloptsPanel
 from rich.console import Console
 
-from ask.cli import agent, converge, create, enter, exec, restart
+from ask.cli import agent, converge, create, enter, exec, resolve_shortcut, restart
 from ask.cli import run as run_script
 from ask.errors import AskError
 
@@ -23,11 +23,17 @@ app.command(run_script, name="run")
 
 def run(tokens: Sequence[str], debug: bool) -> None:
     try:
-        app(tokens)
+        app(_expand_shortcut(tokens))
     except (Exception, KeyboardInterrupt) as error:
         if debug:
             raise
         _report(error)
+
+
+def _expand_shortcut(tokens: Sequence[str]) -> list[str]:
+    if not tokens or tokens[0].startswith("-") or tokens[0] in app.resolved_commands():
+        return list(tokens)
+    return [resolve_shortcut(tokens[0]), "--", *tokens]
 
 
 def _report(error: BaseException) -> NoReturn:

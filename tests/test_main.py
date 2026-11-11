@@ -114,6 +114,87 @@ def test_run_reraises_errors_when_debugging(error: Exception) -> None:
     assert raised.value is error
 
 
+def test_run_dispatches_an_unknown_command_that_matches_one_agent() -> None:
+    # given an unknown command that resolves to the agent command
+    with (
+        patch("ask.app") as app_mock,
+        patch("ask.resolve_shortcut", return_value="agent") as resolve_mock,
+    ):
+        app_mock.resolved_commands.return_value = []
+        run(["claude", "--gui"], debug=False)
+
+    # then the command is re-dispatched as `ask agent` with the arguments passed through
+    resolve_mock.assert_called_once_with("claude")
+    app_mock.assert_called_once_with(["agent", "--", "claude", "--gui"])
+
+
+def test_run_dispatches_an_unknown_command_that_matches_one_script() -> None:
+    # given an unknown command that resolves to the run command
+    with (
+        patch("ask.app") as app_mock,
+        patch("ask.resolve_shortcut", return_value="run") as resolve_mock,
+    ):
+        app_mock.resolved_commands.return_value = []
+        run(["build", "-v"], debug=False)
+
+    # then the command is re-dispatched as `ask run` with the arguments passed through
+    resolve_mock.assert_called_once_with("build")
+    app_mock.assert_called_once_with(["run", "--", "build", "-v"])
+
+
+def test_run_reports_an_error_when_an_unknown_command_matches_neither_uniquely(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # given an unknown command that does not uniquely match an agent or a script
+    with (
+        patch("ask.app") as app_mock,
+        patch(
+            "ask.resolve_shortcut",
+            side_effect=AskError(
+                "Unknown command 'nope'; use `ask agent nope` or `ask run nope`."
+            ),
+        ),
+    ):
+        app_mock.resolved_commands.return_value = []
+        with pytest.raises(SystemExit) as exit_info:
+            run(["nope"], debug=False)
+
+    # then the error is printed to stderr, pointing at ask agent and ask run
+    assert exit_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "ask agent" in err
+    assert "ask run" in err
+    app_mock.assert_not_called()
+
+
+def test_run_passes_known_commands_through_unchanged() -> None:
+    # given a token that is already a registered command
+    with (
+        patch("ask.app") as app_mock,
+        patch("ask.resolve_shortcut") as resolve_mock,
+    ):
+        app_mock.resolved_commands.return_value = ["converge"]
+        run(["converge", "--create"], debug=False)
+
+    # then the tokens are passed to the app untouched
+    resolve_mock.assert_not_called()
+    app_mock.assert_called_once_with(["converge", "--create"])
+
+
+def test_run_passes_flags_through_unchanged() -> None:
+    # given a token that is a flag, not a command name
+    with (
+        patch("ask.app") as app_mock,
+        patch("ask.resolve_shortcut") as resolve_mock,
+    ):
+        app_mock.resolved_commands.return_value = []
+        run(["--help"], debug=False)
+
+    # then the tokens are passed to the app untouched
+    resolve_mock.assert_not_called()
+    app_mock.assert_called_once_with(["--help"])
+
+
 @pytest.mark.parametrize(
     ("tokens", "env", "expected_tokens", "expected_debug"),
     [
