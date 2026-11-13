@@ -1,4 +1,4 @@
-from ask.env import Env, merge
+from ask.env import Env, merge, profile_script
 
 
 def test_merge_combines_variables_with_later_ones_winning() -> None:
@@ -36,3 +36,25 @@ def test_merge_sets_a_removed_variable_again_from_a_later_environment() -> None:
 
     # then the last value is kept
     assert merged == {"EDITOR": "nvim"}
+
+
+def test_profile_script_exports_every_variable_quoted_for_the_shell() -> None:
+    # given variables, one with characters the shell would interpret
+    env = {"EDITOR": "nvim", "GREETING": "hello $USER, it's me"}
+
+    # when rendering the profile script
+    script = profile_script(env)
+
+    # then each variable is exported with its value quoted
+    assert script == (
+        "export EDITOR=nvim\nexport GREETING='hello $USER, it'\"'\"'s me'\n"
+    )
+
+
+def test_profile_script_is_empty_without_variables() -> None:
+    # given no variables
+    # when rendering the profile script
+    script = profile_script({})
+
+    # then it is empty
+    assert script == ""

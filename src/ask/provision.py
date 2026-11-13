@@ -16,7 +16,7 @@ from pyinfra.api.operations import run_ops
 from pyinfra.api.output import set_echo
 from pyinfra.operations import files, pacman, server, systemd
 
-from ask import idle, incus
+from ask import env, idle, incus
 from ask.errors import AskError
 from ask.tool_manager import config_digest
 from ask.user import ResolvedUser, home_env
@@ -157,6 +157,18 @@ class Provisioner:
                         masked=True,
                         running=False,
                     )
+
+    def provision_instance_env(self, variables: dict[str, str]) -> None:
+        with self.session() as state:
+            add_op(
+                state,
+                files.put,
+                src=io.StringIO(env.profile_script(variables)),
+                dest=str(env.PROFILE_PATH),
+                user="root",
+                group="root",
+                mode="644",
+            )
 
     def provision_idle_shutdown(self, distribution: str, user: ResolvedUser) -> None:
         operation = _package_operation_for(distribution)

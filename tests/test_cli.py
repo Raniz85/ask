@@ -409,6 +409,36 @@ def test_converge_provisions_the_user_before_mounting_home_relative_paths(
     assert call_order == ["provision_user", "converge"]
 
 
+def test_converge_provisions_the_instance_environment_variables(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with ask.toml and a layer setting variables
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text('env = { LANG = "C.UTF-8" }\n')
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR + '[layers.base]\nenv = { EDITOR = "nvim", LANG = "C" }\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container_cls.return_value.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the merged instance variables are provisioned
+    provisioner_cls.return_value.provision_instance_env.assert_called_once_with(
+        {"EDITOR": "nvim", "LANG": "C.UTF-8"}
+    )
+
+
 def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
     # given a project directory with ask.toml declaring packages and a layer,
     # and a config declaring that layer's packages

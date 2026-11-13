@@ -11,6 +11,7 @@ from pyinfra.api.output import echo
 from pyinfra.operations import files, pacman, server, systemd
 
 from ask import idle
+from ask.env import profile_script
 from ask.incus import Container
 from ask.provision import (
     AurBuilder,
@@ -1414,4 +1415,34 @@ def test_provision_idle_shutdown_installs_the_watch_and_enables_the_timer() -> N
         service="ask-idle-shutdown.timer",
         enabled=True,
         running=True,
+    )
+
+
+def test_provision_instance_env_puts_the_profile_script_in_place() -> None:
+    # given a provisioner
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning the instance's environment variables
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_instance_env({"EDITOR": "nvim"})
+
+    # then the profile script exporting them is put in place for every login
+    # shell
+    add_op.assert_called_once_with(
+        state_cls.return_value,
+        files.put,
+        src=ANY,
+        dest="/etc/profile.d/ask.sh",
+        user="root",
+        group="root",
+        mode="644",
+    )
+    assert add_op.call_args.kwargs["src"].getvalue() == profile_script(
+        {"EDITOR": "nvim"}
     )

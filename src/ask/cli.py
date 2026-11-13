@@ -197,6 +197,7 @@ def _converge_container(
     if services:
         provisioner.provision_services(services)
 
+    provisioner.provision_instance_env(resolved.instance_env)
     provisioner.provision_idle_shutdown(distribution, user)
 
     resolved_packages = official_packages + aur_packages

@@ -1,5 +1,7 @@
 import re
+import shlex
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BeforeValidator, StrictStr
@@ -41,3 +43,12 @@ def merge(envs: Iterable[Mapping[str, Value]]) -> dict[str, str]:
             else:
                 merged[name] = value
     return merged
+
+
+PROFILE_PATH = Path("/etc/profile.d/ask.sh")
+
+
+def profile_script(env: Mapping[str, str]) -> str:
+    return "".join(
+        f"export {name}={shlex.quote(value)}\n" for name, value in env.items()
+    )
