@@ -26,6 +26,19 @@ packages = [
   "git",
   "uv",
 ]
+
+# Environment variables for every shell and command in the container.
+# [layers.base.env]
+# EDITOR = "nvim"
+
+# Agents keyed by name: true enables an agent, false removes one a lower layer
+# enabled, and a table sets its options and environment variables. env applies
+# to every agent and default names the agent `ask agent` runs.
+# [layers.base.agents]
+# default = "claude"
+# env = { GIT_AUTHOR_NAME = "Agent" }
+# claude = true
+# codex = { auth = false, env = { RUST_LOG = "info" } }
 """
 
 

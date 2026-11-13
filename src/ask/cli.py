@@ -108,6 +108,11 @@ INIT_TEMPLATE = """\
 #   "mise",
 # ]
 
+# Environment variables for every shell and command in the container.
+# Set a variable to false to remove one that a flavour layer set.
+# [env]
+# EDITOR = "nvim"
+
 # Named shell commands to run inside the container with `ask run <name>`.
 # [scripts]
 # test = "uv run pytest"
