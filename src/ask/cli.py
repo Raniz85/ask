@@ -247,7 +247,7 @@ def enter(
             user.gid,
             project_dir,
             [user.shell],
-            env=home_env(user) | FAKE_SSH_ENV | gui_env,
+            env=resolved.instance_env | home_env(user) | FAKE_SSH_ENV | gui_env,
         )
     _record_invocation(container)
     sys.exit(returncode)
@@ -280,6 +280,7 @@ def agent(
         project_dir,
         resolved,
         [resolved_agent.name, *args],
+        resolved.agent_env(resolved_agent.name),
         gui,
         create_missing,
         converge_changed,
@@ -316,7 +317,13 @@ def run(
         raise AskError(f"Script '{name}' is not defined in ask.toml.")
     command = shlex.split(resolved.scripts[name]) + list(args)
     _exec_in_container(
-        project_dir, resolved, command, gui, create_missing, converge_changed
+        project_dir,
+        resolved,
+        command,
+        resolved.instance_env,
+        gui,
+        create_missing,
+        converge_changed,
     )
 
 
@@ -329,7 +336,13 @@ def exec(
     project_dir = Path.cwd()
     resolved = _resolve_project(project_dir)
     _exec_in_container(
-        project_dir, resolved, list(command), gui, create_missing, converge_changed
+        project_dir,
+        resolved,
+        list(command),
+        resolved.instance_env,
+        gui,
+        create_missing,
+        converge_changed,
     )
 
 
@@ -441,6 +454,7 @@ def _exec_in_container(
     project_dir: Path,
     resolved: manifest.ResolvedManifest,
     command: list[str],
+    variables: dict[str, str],
     gui: bool,
     create_missing: bool,
     converge_changed: bool | None,
@@ -452,7 +466,11 @@ def _exec_in_container(
     _record_invocation(container)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
-            user.uid, user.gid, project_dir, command, env=home_env(user) | gui_env
+            user.uid,
+            user.gid,
+            project_dir,
+            command,
+            env=variables | home_env(user) | gui_env,
         )
     _record_invocation(container)
     sys.exit(returncode)

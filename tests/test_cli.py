@@ -57,15 +57,18 @@ def _flavor_path(tmp_path: Path) -> Path:
     return flavors_dir / "arch.toml"
 
 
-def _run_in_project(tmp_path: Path, command: Callable[[], None]) -> tuple[Path, Mock]:
+def _run_in_project(
+    tmp_path: Path,
+    command: Callable[[], None],
+    manifest: str = "",
+    layer: str = "agents = { claude = true }\n",
+) -> tuple[Path, Mock]:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "ask.toml").write_text("")
+    (project_dir / "ask.toml").write_text(manifest)
     config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR
-        + "[layers.base]\nagents = { claude = true }\n"
-        + '[user]\nname = "raniz"\nuid = 1000\n'
+        _FLAVOR + "[layers.base]\n" + layer + '[user]\nname = "raniz"\nuid = 1000\n'
     )
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
@@ -109,6 +112,92 @@ def test_enter_runs_the_shell_with_the_users_home_directory(tmp_path: Path) -> N
 
     # then the shell runs with HOME set to the user's home directory, alongside
     # the variables that make it look like an SSH session
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+    )
+
+
+_ENV_LAYER = (
+    'env = { EDITOR = "nvim", LANG = "C" }\n'
+    "agents = { "
+    'env = { EDITOR = "vi", AGENT = "any" }, '
+    'claude = { env = { AGENT = "claude" } } }\n'
+)
+_ENV_MANIFEST = 'env = { LANG = "C.UTF-8" }\n[scripts]\ntest = "pytest"\n'
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_command"),
+    [(lambda: exec("erl"), ["erl"]), (lambda: run("test"), ["pytest"])],
+    ids=["exec", "run"],
+)
+def test_commands_run_with_the_instance_environment_variables(
+    tmp_path: Path, command: Callable[[], None], expected_command: list[str]
+) -> None:
+    # given a layer and a manifest setting variables for the instance and the
+    # agents
+    # when running a command in the project's container
+    project_dir, container = _run_in_project(
+        tmp_path, command, _ENV_MANIFEST, _ENV_LAYER
+    )
+
+    # then it runs with the instance variables only
+    container.exec_command.assert_called_once_with(
+        1000,
+        1000,
+        project_dir,
+        expected_command,
+        env={"EDITOR": "nvim", "LANG": "C.UTF-8"} | _HOME_ENV,
+    )
+
+
+def test_enter_runs_the_shell_with_the_instance_environment_variables(
+    tmp_path: Path,
+) -> None:
+    # given a layer and a manifest setting variables for the instance and the
+    # agents
+    # when entering the project's container
+    project_dir, container = _run_in_project(
+        tmp_path, lambda: enter(), _ENV_MANIFEST, _ENV_LAYER
+    )
+
+    # then the shell runs with the instance variables only
+    container.exec_command.assert_called_once_with(
+        1000,
+        1000,
+        project_dir,
+        ["bash"],
+        env={"EDITOR": "nvim", "LANG": "C.UTF-8"} | _HOME_ENV | FAKE_SSH_ENV,
+    )
+
+
+def test_agent_runs_with_the_agent_environment_variables(tmp_path: Path) -> None:
+    # given a layer and a manifest setting variables for the instance, every
+    # agent and the agent
+    # when launching the agent
+    project_dir, container = _run_in_project(
+        tmp_path, lambda: agent(), _ENV_MANIFEST, _ENV_LAYER
+    )
+
+    # then it runs with the instance variables, overridden by those of every
+    # agent, overridden by its own
+    container.exec_command.assert_called_once_with(
+        1000,
+        1000,
+        project_dir,
+        ["claude"],
+        env={"EDITOR": "vi", "LANG": "C.UTF-8", "AGENT": "claude"} | _HOME_ENV,
+    )
+
+
+def test_variables_ask_sets_win_over_configured_ones(tmp_path: Path) -> None:
+    # given a layer setting HOME for the instance
+    # when entering the project's container
+    project_dir, container = _run_in_project(
+        tmp_path, lambda: enter(), layer='env = { HOME = "/elsewhere" }\n'
+    )
+
+    # then the shell runs with the HOME Ask sets
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
     )
