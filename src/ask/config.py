@@ -17,7 +17,8 @@ from pydantic import (
 )
 from pydantic_core import ErrorDetails, PydanticCustomError
 
-from ask.agent import AgentOption
+from ask import agent
+from ask.agent import AgentTable
 from ask.errors import AskError
 from ask.incus import known_distributions
 from ask.problems import unknown_name
@@ -178,8 +179,8 @@ class Layer:
     services: Annotated[
         dict[StrictStr, StrictStr], AfterValidator(_validate_service_state)
     ] = field(default_factory=dict)
-    agents: list[Annotated[AgentOption, BeforeValidator(_flatten_options)]] = field(
-        default_factory=list
+    agents: Annotated[AgentTable, BeforeValidator(agent.to_table)] = field(
+        default_factory=AgentTable
     )
     order: StrictInt = 0
     when: LayerWhen | None = None
@@ -315,13 +316,16 @@ def flavor_path(directory: Path, name: str) -> Path:
     return directory / f"{name}.toml"
 
 
-def _is_flattened_options(location: tuple[str | int, ...], index: int) -> bool:
-    # Shell and agent options are written next to "name" in TOML, so the
-    # "options" level that _flatten_options adds is hidden from the user.
+def _is_hidden(location: tuple[str | int, ...], index: int) -> bool:
+    # Hide the levels that _flatten_options and agent.to_table add, and the
+    # marker pydantic adds to invalid keys, so problems use the TOML paths.
+    part = location[index]
+    parent = location[index - 1] if index > 0 else None
+    grandparent = location[index - 2] if index > 1 else None
     return (
-        location[index] == _OPTIONS
-        and index > 0
-        and (location[index - 1] == "shell" or isinstance(location[index - 1], int))
+        (part == _OPTIONS and (parent == "shell" or grandparent == agent.ENTRIES))
+        or (part == agent.ENTRIES and parent == "agents")
+        or part == "[key]"
     )
 
 
@@ -330,7 +334,7 @@ def _problem(details: ErrorDetails) -> str:
     path = ".".join(
         str(part)
         for index, part in enumerate(location)
-        if not _is_flattened_options(location, index)
+        if not _is_hidden(location, index)
     )
     if details["type"] == "unexpected_keyword_argument":
         return f"{path}: unknown key"

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from ask.agent import AgentOption
+from ask.agent import AgentSettings, AgentTable
 from ask.config import Flavor, Layer, LayerWhen, User
 from ask.convergence import effective_configuration, fingerprint
 from ask.incus import Fingerprint
@@ -25,7 +25,12 @@ def test_effective_configuration_contains_everything_that_converge_uses(
         distribution="arch",
         shell=ShellOption(name="zsh"),
         user=User(name="raniz", uid=1000),
-        layers={"base": Layer(packages=["git"], agents=[AgentOption(name="claude")])},
+        layers={
+            "base": Layer(
+                packages=["git"],
+                agents=AgentTable(entries={"claude": AgentSettings()}),
+            )
+        },
     )
 
     # when building the effective configuration
@@ -49,7 +54,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
                 "name": "base",
                 "bind_mounts": [],
                 "packages": ["git"],
-                "agents": [{"name": "claude", "options": {}}],
+                "agents": {"entries": {"claude": {"enabled": True, "options": {}}}},
                 "services": {},
                 "order": 0,
                 "when": None,
@@ -91,6 +96,36 @@ def test_effective_configuration_ignores_layers_that_do_not_apply(
     )
 
     # then they are identical
+    assert configurations[0] == configurations[1]
+
+
+def test_effective_configuration_ignores_the_default_agent(tmp_path: Path) -> None:
+    # given flavours that differ only in their default agent
+    def flavor(default: str) -> Flavor:
+        return Flavor(
+            distribution="arch",
+            layers={
+                "base": Layer(
+                    agents=AgentTable(
+                        default=default,
+                        entries={"claude": AgentSettings(), "codex": AgentSettings()},
+                    )
+                )
+            },
+        )
+
+    # when building the effective configuration for both
+    configurations = (
+        effective_configuration(
+            ResolvedManifest(Manifest(), flavor("claude"), tmp_path)
+        ),
+        effective_configuration(
+            ResolvedManifest(Manifest(), flavor("codex"), tmp_path)
+        ),
+    )
+
+    # then they are identical, as the default agent only matters when an
+    # agent is launched
     assert configurations[0] == configurations[1]
 
 

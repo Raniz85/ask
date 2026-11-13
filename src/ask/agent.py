@@ -2,13 +2,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AfterValidator, StrictBool, StrictStr, ValidationInfo
+from pydantic import AfterValidator, BeforeValidator, StrictBool, StrictStr
+from pydantic_core import PydanticCustomError
 
 from ask.errors import AskError
 from ask.incus import Mount
 from ask.module import resolve_packages
 from ask.problems import unknown_name, unknown_options
-from ask.removal import unprefixed
 from ask.schema import FORBID_UNKNOWN_KEYS
 from ask.user import ResolvedUser
 
@@ -146,26 +146,63 @@ def resolve(name: str) -> Agent:
 
 
 def _check_name(name: str) -> str:
-    if unprefixed(name) not in _AGENTS:
-        raise unknown_name("agent", unprefixed(name), known_names())
+    if name not in _AGENTS:
+        raise unknown_name("agent", name, known_names())
     return name
 
 
-def _check_options(options: dict[str, bool], info: ValidationInfo) -> dict[str, bool]:
-    name = unprefixed(info.data.get("name", ""))
-    if name not in _AGENTS:
-        return options
-    option_keys = _AGENTS[name].option_keys()
-    unknown = sorted(key for key in options if key not in option_keys)
-    if unknown:
-        raise unknown_options("agent", name, unknown, option_keys)
-    return options
+AgentName = Annotated[StrictStr, AfterValidator(_check_name)]
 
 
 @dataclass
-class AgentOption:
+class AgentSettings:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    name: Annotated[StrictStr, AfterValidator(_check_name)]
-    options: Annotated[dict[str, StrictBool], AfterValidator(_check_options)] = field(
-        default_factory=dict
+    enabled: StrictBool = True
+    options: dict[str, StrictBool] = field(default_factory=dict)
+
+
+def _to_settings(value: object) -> object:
+    if isinstance(value, bool):
+        return {"enabled": value}
+    if isinstance(value, dict):
+        return {"options": value}
+    raise PydanticCustomError(
+        "bool_or_table", "Input should be a valid boolean or table"
     )
+
+
+def _check_options(
+    entries: dict[str, AgentSettings],
+) -> dict[str, AgentSettings]:
+    for name, settings in entries.items():
+        option_keys = _AGENTS[name].option_keys()
+        unknown = sorted(key for key in settings.options if key not in option_keys)
+        if unknown:
+            raise unknown_options("agent", name, unknown, option_keys)
+    return entries
+
+
+ENTRIES = "entries"
+
+
+@dataclass
+class AgentTable:
+    __pydantic_config__ = FORBID_UNKNOWN_KEYS
+    default: AgentName | None = None
+    entries: Annotated[
+        dict[AgentName, Annotated[AgentSettings, BeforeValidator(_to_settings)]],
+        AfterValidator(_check_options),
+    ] = field(default_factory=dict)
+
+
+_RESERVED_KEYS = {"default"}
+
+
+def to_table(value: object) -> object:
+    if not isinstance(value, dict):
+        raise PydanticCustomError("table", "Input should be a valid table")
+    reserved = {key: value[key] for key in _RESERVED_KEYS if key in value}
+    entries = {
+        name: settings for name, settings in value.items() if name not in _RESERVED_KEYS
+    }
+    return reserved | {ENTRIES: entries}

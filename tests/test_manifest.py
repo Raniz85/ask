@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from ask.agent import Agent, AgentOption
+from ask.agent import Agent, AgentError, AgentSettings, AgentTable
 from ask.config import ConfigError, Flavor, Layer, LayerWhen
 from ask.incus import Mount
 from ask.manifest import Manifest, ResolvedManifest, load
@@ -111,7 +111,7 @@ def test_load_rejects_keys_that_belong_to_flavors_and_layers(tmp_path: Path) -> 
     # given a manifest file declaring keys that only flavours and their layers have
     manifest_path = _manifest_file(
         tmp_path,
-        'distribution = "arch"\nlayers = ["base"]\nagents = ["claude"]\norder = 1\n',
+        'distribution = "arch"\nlayers = ["base"]\nagents = { claude = true }\norder = 1\n',
     )
 
     # when loading the manifest
@@ -432,12 +432,18 @@ def test_packages_removal_does_not_affect_its_own_layer() -> None:
     assert packages == ["zsh", "git"]
 
 
+def _enabling(*names: str, default: str | None = None) -> AgentTable:
+    return AgentTable(
+        default=default, entries={name: AgentSettings() for name in names}
+    )
+
+
 def test_agent_names_combines_agents_from_every_applied_layer() -> None:
     # given a flavour with two layers, each enabling an agent
     resolved = _resolved(
         {
-            "base": Layer(agents=[AgentOption(name="claude")]),
-            "python": Layer(agents=[AgentOption(name="other")]),
+            "base": Layer(agents=_enabling("claude")),
+            "python": Layer(agents=_enabling("other")),
         }
     )
 
@@ -454,10 +460,8 @@ def test_agent_names_merges_duplicates() -> None:
     # another agent
     resolved = _resolved(
         {
-            "base": Layer(agents=[AgentOption(name="claude")]),
-            "python": Layer(
-                agents=[AgentOption(name="codex"), AgentOption(name="claude")]
-            ),
+            "base": Layer(agents=_enabling("claude")),
+            "python": Layer(agents=_enabling("codex", "claude")),
         }
     )
 
@@ -468,16 +472,19 @@ def test_agent_names_merges_duplicates() -> None:
     assert agent_names == ["claude", "codex"]
 
 
-def test_agent_names_removes_dash_prefixed_agents_from_lower_layers() -> None:
+def test_agent_names_removes_disabled_agents_from_lower_layers() -> None:
     # given a layer enabling two agents, and a later layer removing one of them
     # and an agent no layer enables
     resolved = _resolved(
         {
-            "base": Layer(
-                agents=[AgentOption(name="claude"), AgentOption(name="codex")]
-            ),
+            "base": Layer(agents=_enabling("claude", "codex")),
             "python": Layer(
-                agents=[AgentOption(name="-claude"), AgentOption(name="-pi")]
+                agents=AgentTable(
+                    entries={
+                        "claude": AgentSettings(enabled=False),
+                        "pi": AgentSettings(enabled=False),
+                    }
+                )
             ),
         }
     )
@@ -494,8 +501,8 @@ def test_agents_resolves_each_configured_agent_name_in_order() -> None:
     # given a flavour with two layers, each enabling an agent
     resolved = _resolved(
         {
-            "base": Layer(agents=[AgentOption(name="claude")]),
-            "python": Layer(agents=[AgentOption(name="other")]),
+            "base": Layer(agents=_enabling("claude")),
+            "python": Layer(agents=_enabling("other")),
         }
     )
     claude_agent = Agent(name="claude")
@@ -509,6 +516,72 @@ def test_agents_resolves_each_configured_agent_name_in_order() -> None:
     # then each configured agent name is resolved, in order
     resolve.assert_has_calls([call("claude"), call("other")])
     assert agents == [claude_agent, other_agent]
+
+
+def test_default_agent_is_the_first_agent_without_an_explicit_default() -> None:
+    # given two layers enabling agents, none naming a default
+    resolved = _resolved(
+        {
+            "base": Layer(agents=_enabling("codex")),
+            "python": Layer(agents=_enabling("claude")),
+        }
+    )
+
+    # when resolving the default agent
+    default = resolved.default_agent
+
+    # then it is the first enabled agent
+    assert default == "codex"
+
+
+def test_default_agent_is_the_default_of_the_last_layer_naming_one() -> None:
+    # given three layers enabling agents, the first two naming a default
+    resolved = _resolved(
+        {
+            "base": Layer(agents=_enabling("claude", "codex", default="codex")),
+            "python": Layer(agents=_enabling("pi", default="pi")),
+            "rust": Layer(agents=_enabling("opencode")),
+        }
+    )
+
+    # when resolving the default agent
+    default = resolved.default_agent
+
+    # then it is the default named by the last layer that names one
+    assert default == "pi"
+
+
+def test_default_agent_is_none_without_agents() -> None:
+    # given a layer enabling no agents
+    resolved = _resolved({"base": Layer()})
+
+    # when resolving the default agent
+    default = resolved.default_agent
+
+    # then there is none
+    assert default is None
+
+
+def test_default_agent_rejects_a_default_that_is_not_enabled() -> None:
+    # given a layer naming a default agent, and a later layer removing it
+    resolved = _resolved(
+        {
+            "base": Layer(agents=_enabling("claude", "codex", default="codex")),
+            "python": Layer(
+                agents=AgentTable(entries={"codex": AgentSettings(enabled=False)})
+            ),
+        }
+    )
+
+    # when resolving the default agent
+    with pytest.raises(AgentError) as error:
+        _ = resolved.default_agent
+
+    # then the default is reported as not being enabled
+    assert str(error.value) == (
+        "The default agent 'codex' is not enabled in the flavour layers that "
+        "apply to this project."
+    )
 
 
 def _user() -> ResolvedUser:
@@ -527,8 +600,12 @@ def test_agent_mounts_calls_mounts_for_with_each_agents_options() -> None:
     # with its own options
     resolved = _resolved(
         {
-            "base": Layer(agents=[AgentOption(name="claude", options={"auth": False})]),
-            "python": Layer(agents=[AgentOption(name="other")]),
+            "base": Layer(
+                agents=AgentTable(
+                    entries={"claude": AgentSettings(options={"auth": False})}
+                )
+            ),
+            "python": Layer(agents=_enabling("other")),
         }
     )
     claude_agent = MagicMock()
@@ -562,12 +639,18 @@ def test_agent_mounts_merges_agent_options_with_later_layers_winning() -> None:
     resolved = _resolved(
         {
             "base": Layer(
-                agents=[
-                    AgentOption(name="claude", options={"auth": False, "skills": False})
-                ],
+                agents=AgentTable(
+                    entries={
+                        "claude": AgentSettings(
+                            options={"auth": False, "skills": False}
+                        )
+                    }
+                )
             ),
             "python": Layer(
-                agents=[AgentOption(name="claude", options={"auth": True})]
+                agents=AgentTable(
+                    entries={"claude": AgentSettings(options={"auth": True})}
+                )
             ),
         }
     )
@@ -590,9 +673,15 @@ def test_agent_mounts_forgets_options_of_removed_agents() -> None:
     # that agent, and a third layer enabling it again without options
     resolved = _resolved(
         {
-            "base": Layer(agents=[AgentOption(name="claude", options={"auth": False})]),
-            "no-claude": Layer(agents=[AgentOption(name="-claude")]),
-            "claude-again": Layer(agents=[AgentOption(name="claude")]),
+            "base": Layer(
+                agents=AgentTable(
+                    entries={"claude": AgentSettings(options={"auth": False})}
+                )
+            ),
+            "no-claude": Layer(
+                agents=AgentTable(entries={"claude": AgentSettings(enabled=False)})
+            ),
+            "claude-again": Layer(agents=_enabling("claude")),
         }
     )
     claude_agent = MagicMock()

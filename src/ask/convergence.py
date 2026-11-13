@@ -22,12 +22,17 @@ def _tool_manager_configs(resolved: ResolvedManifest) -> dict[str, dict[str, str
     return configs
 
 
-def _dump[T](schema: type[T], value: T) -> dict[str, str] | object:
-    dumped = TypeAdapter(schema).dump_python(value, mode="json")
-    if schema is Layer:
-        assert isinstance(dumped, dict)
-        return dumped
-    return dumped
+def _dump[T](schema: type[T], value: T) -> object:
+    return TypeAdapter(schema).dump_python(value, mode="json")
+
+
+def _layer(name: str, layer: Layer) -> dict[str, object]:
+    dumped = _dump(Layer, layer)
+    assert isinstance(dumped, dict)
+    # the default agent only matters when an agent is launched, it does not
+    # affect the provisioned state of the container
+    dumped["agents"].pop("default")
+    return {"name": name, **dumped}
 
 
 def effective_configuration(resolved: ResolvedManifest) -> str:
@@ -43,12 +48,7 @@ def effective_configuration(resolved: ResolvedManifest) -> str:
             "shell": _dump(ShellOption, flavor.shell),
             "user": _dump(User, flavor.user),
         },
-        "layers": [
-            {"name": name, **layer_dump}
-            for name in resolved.layer_names
-            if (layer_dump := _dump(Layer, flavor.layers[name]))
-            and isinstance(layer_dump, dict)
-        ],
+        "layers": [_layer(name, flavor.layers[name]) for name in resolved.layer_names],
         "manifest": manifest,
         "tool_manager_configs": _tool_manager_configs(resolved),
     }

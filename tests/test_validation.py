@@ -2,14 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from ask.agent import AgentOption
 from ask.config import Config, ConfigError, Flavor, FlavorError, Layer, LayerWhen
 from ask.manifest import Manifest, ResolvedManifest
 from ask.shell import ShellOption
 from ask.validation import (
     ManifestNotFoundError,
     check_manifest,
-    flavor_warnings,
     load_config,
     load_manifest,
     resolve_project,
@@ -32,54 +30,6 @@ def test_load_config_returns_valid_configs(tmp_path: Path) -> None:
                 distribution="arch", default=True, shell=ShellOption(name="zsh")
             )
         }
-    )
-
-
-def test_flavor_warnings_reports_options_on_removed_agents() -> None:
-    # given a flavour layer removing one agent with options and one without,
-    # and enabling another agent with options
-    flavor = Flavor(
-        distribution="arch",
-        layers={
-            "base": Layer(
-                agents=[
-                    AgentOption(name="-claude", options={"auth": False}),
-                    AgentOption(name="-codex"),
-                    AgentOption(name="pi", options={"auth": False}),
-                ]
-            )
-        },
-    )
-
-    # when collecting its warnings
-    warnings = flavor_warnings(flavor)
-
-    # then only the removal with options is reported, by its position in the
-    # flavour file
-    assert warnings == [
-        "layers.base.agents.0: options have no effect when removing agent 'claude'"
-    ]
-
-
-def test_load_config_prints_warnings_against_the_file(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # given a flavour file with a layer removing an agent with options
-    flavors_dir = tmp_path / "flavors"
-    flavors_dir.mkdir()
-    (flavors_dir / "arch.toml").write_text(
-        'distribution = "arch"\n'
-        '[layers.base]\nagents = [{ name = "-claude", auth = false }]\n'
-    )
-
-    # when loading the flavours
-    load_config(flavors_dir)
-
-    # then the warning is printed to stderr against the flavour file
-    assert capsys.readouterr().err == (
-        f"ask: warning in {flavors_dir / 'arch.toml'}\n"
-        "  layers.base.agents.0: options have no effect when "
-        "removing agent 'claude'\n"
     )
 
 

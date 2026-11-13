@@ -117,18 +117,33 @@ class ResolvedManifest:
     def _merged_agents(self) -> list[_MergedAgent]:
         merged: dict[str, _MergedAgent] = {}
         for layer in self._flavor_layers():
-            for name in removals([option.name for option in layer.agents]):
-                merged.pop(name, None)
-            for option in layer.agents:
-                if is_removal(option.name):
+            for name, settings in layer.agents.entries.items():
+                if not settings.enabled:
+                    merged.pop(name, None)
                     continue
-                entry = merged.setdefault(option.name, _MergedAgent(option.name))
-                entry.options.update(option.options)
+                entry = merged.setdefault(name, _MergedAgent(name))
+                entry.options.update(settings.options)
         return list(merged.values())
 
     @property
     def agent_names(self) -> list[str]:
         return [entry.name for entry in self._merged_agents()]
+
+    @property
+    def default_agent(self) -> str | None:
+        defaults = [
+            layer.agents.default
+            for layer in self._flavor_layers()
+            if layer.agents.default is not None
+        ]
+        if not defaults:
+            return next(iter(self.agent_names), None)
+        if defaults[-1] not in self.agent_names:
+            raise agent.AgentError(
+                f"The default agent {defaults[-1]!r} is not enabled in the flavour "
+                "layers that apply to this project."
+            )
+        return defaults[-1]
 
     @property
     def agents(self) -> list[Agent]:

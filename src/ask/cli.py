@@ -265,12 +265,11 @@ def agent(
         args = (name, *args)
         name = None
     if name is None:
-        agent_names = resolved.agent_names
-        if not agent_names:
+        name = resolved.default_agent
+        if name is None:
             raise agents.AgentError(
                 "No agents configured in the flavour layers that apply to this project."
             )
-        name = agent_names[0]
     if name not in agents.known_names():
         raise agents.AgentError(
             f"Unknown agent {name!r} {problems.known(agents.known_names())}."

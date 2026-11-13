@@ -64,7 +64,7 @@ def _run_in_project(tmp_path: Path, command: Callable[[], None]) -> tuple[Path, 
     config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[layers.base]\nagents = ["claude"]\n'
+        + "[layers.base]\nagents = { claude = true }\n"
         + '[user]\nname = "raniz"\nuid = 1000\n'
     )
     with (
@@ -724,7 +724,7 @@ def test_converge_installs_declared_agent_packages(tmp_path: Path) -> None:
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
     config_path = _flavor_path(tmp_path)
-    config_path.write_text(_FLAVOR + '[layers.base]\nagents = ["claude"]\n')
+    config_path.write_text(_FLAVOR + "[layers.base]\nagents = { claude = true }\n")
 
     # when converging from within that project directory
     with (
@@ -761,7 +761,7 @@ def test_converge_mounts_the_state_of_configured_agents(
     config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
+        + '[layers.base]\nagents = { claude = true }\n[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -943,7 +943,7 @@ def test_converge_fixes_agent_state_mount_ownership(
     config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
+        + '[layers.base]\nagents = { claude = true }\n[user]\nname = "raniz"\nuid = 1000\n'
     )
     home_dir = tmp_path / "home"
     home_dir.mkdir()
@@ -2361,7 +2361,7 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
     (project_dir / "ask.toml").write_text("")
     config_path = _flavor_path(tmp_path)
     config_path.write_text(
-        _FLAVOR + '[layers.base]\nagents = ["claude", "codex"]\n'
+        _FLAVOR + "[layers.base]\nagents = { claude = true, codex = true }\n"
         '[user]\nname = "raniz"\nuid = 1000\n'
     )
 
@@ -2384,6 +2384,37 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
         1000, 1000, project_dir, ["claude"], env=_HOME_ENV
     )
     assert exc_info.value.code == 0
+
+
+def test_agent_launches_the_default_agent_when_none_given(tmp_path: Path) -> None:
+    # given a project directory using a layer that enables two agents and names
+    # the second one its default, and a resolved user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR + "[layers.base]\n"
+        'agents = { default = "codex", claude = true, codex = true }\n'
+        '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when launching an agent without naming one
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        agent()
+
+    # then the default agent is executed in the container
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["codex"], env=_HOME_ENV
+    )
 
 
 def test_agent_launches_the_named_agent_when_given(tmp_path: Path) -> None:
@@ -2649,7 +2680,7 @@ def test_agent_treats_a_dash_prefixed_name_as_an_argument_to_the_default_agent(
     config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[layers.base]\nagents = ["claude"]\n[user]\nname = "raniz"\nuid = 1000\n'
+        + '[layers.base]\nagents = { claude = true }\n[user]\nname = "raniz"\nuid = 1000\n'
     )
 
     # when launching an agent with arguments but without naming one
@@ -2695,39 +2726,6 @@ def test_commands_reject_an_invalid_manifest_before_touching_the_container(
     # then the problem is reported and the container is never targeted
     assert error.value.problems == ["flayers: unknown key"]
     container_cls.assert_not_called()
-
-
-def test_agent_prints_config_warnings_once(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # given a project directory, and a global config that produces a warning
-    project_dir = tmp_path / "my-project"
-    project_dir.mkdir()
-    (project_dir / "ask.toml").write_text("")
-    config_path = _flavor_path(tmp_path)
-    config_path.write_text(
-        _FLAVOR
-        + "[layers.base]\n"
-        + 'agents = ["claude", { name = "-codex", auth = false }]\n'
-        + '[user]\nname = "raniz"\nuid = 1000\n'
-    )
-
-    # when launching an agent
-    with (
-        patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_dir", return_value=config_path.parent),
-        patch("ask.cli.incus.Container") as container_cls,
-        pytest.raises(SystemExit),
-    ):
-        container_cls.return_value.exec_command.return_value = 0
-        agent(converge_changed=False)
-
-    # then the warning is printed exactly once
-    assert capsys.readouterr().err == (
-        f"ask: warning in {config_path}\n"
-        "  layers.base.agents.1: options have no effect when "
-        "removing agent 'codex'\n"
-    )
 
 
 def test_restart_restarts_a_running_container(tmp_path: Path) -> None:
@@ -3035,7 +3033,7 @@ def test_commands_record_the_invocation_before_and_after_running(
     config_path = _flavor_path(tmp_path)
     config_path.write_text(
         _FLAVOR
-        + '[layers.base]\nagents = ["claude"]\n'
+        + "[layers.base]\nagents = { claude = true }\n"
         + '[user]\nname = "raniz"\nuid = 1000\n'
     )
     at = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)

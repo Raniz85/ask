@@ -1,11 +1,9 @@
-import sys
 from pathlib import Path
 
 from ask import config, manifest
-from ask.config import Config, ConfigError, Flavor, Layer
+from ask.config import Config, ConfigError
 from ask.errors import AskError
 from ask.manifest import Manifest, ResolvedManifest
-from ask.removal import REMOVAL_PREFIX
 
 
 class ManifestNotFoundError(AskError):
@@ -21,34 +19,8 @@ class ManifestNotFoundError(AskError):
         )
 
 
-def _layer_warnings(location: str, layer: Layer) -> list[str]:
-    return [
-        f"{location}agents.{index}: options have no effect when removing agent "
-        f"{option.name.removeprefix(REMOVAL_PREFIX)!r}"
-        for index, option in enumerate(layer.agents)
-        if option.name.startswith(REMOVAL_PREFIX) and option.options
-    ]
-
-
-def _print_warnings(path: Path, warnings: list[str]) -> None:
-    if warnings:
-        lines = [f"ask: warning in {path}"]
-        lines += [f"  {warning}" for warning in warnings]
-        print("\n".join(lines), file=sys.stderr)
-
-
-def flavor_warnings(flavor: Flavor) -> list[str]:
-    warnings: list[str] = []
-    for layer_name, layer in flavor.layers.items():
-        warnings += _layer_warnings(f"layers.{layer_name}.", layer)
-    return warnings
-
-
 def load_config(directory: Path) -> Config:
-    cfg = config.load(directory)
-    for name, flavor in cfg.flavors.items():
-        _print_warnings(config.flavor_path(directory, name), flavor_warnings(flavor))
-    return cfg
+    return config.load(directory)
 
 
 def _missing_bind_mounts(location: str, bind_mounts: list[Path]) -> list[str]:

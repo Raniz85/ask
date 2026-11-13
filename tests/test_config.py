@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ask.agent import AgentOption
+from ask.agent import AgentSettings, AgentTable
 from ask.config import (
     Config,
     ConfigError,
@@ -353,7 +353,9 @@ def test_load_defaults_a_layer(tmp_path: Path) -> None:
     # then the layer has no bind mounts, packages or agents, order 0 and no
     # conditions
     assert config.flavors["arch"].layers == {
-        "base": Layer(bind_mounts=[], packages=[], agents=[], order=0, when=None)
+        "base": Layer(
+            bind_mounts=[], packages=[], agents=AgentTable(), order=0, when=None
+        )
     }
 
 
@@ -406,48 +408,73 @@ def test_load_rejects_layer_packages_keyed_by_distribution(tmp_path: Path) -> No
     ]
 
 
-def test_load_reads_layer_agents(tmp_path: Path) -> None:
-    # given a layer declaring agents to install
-    flavors_dir = _flavor_with_layers(tmp_path, '[layers.base]\nagents = ["claude"]\n')
-
-    # when loading the config
-    config = load(flavors_dir)
-
-    # then the layer's agents are read as name-only options
-    assert config.flavors["arch"].layers == {
-        "base": Layer(agents=[AgentOption(name="claude")])
-    }
-
-
-def test_load_reads_layer_agents_with_full_options(tmp_path: Path) -> None:
-    # given a layer declaring an agent with its full set of options
+def test_load_reads_layer_agents_keyed_by_name(tmp_path: Path) -> None:
+    # given a layer enabling an agent, removing another and enabling a third
+    # with options
     flavors_dir = _flavor_with_layers(
         tmp_path,
-        "[layers.base]\n"
-        "agents = [\n"
-        '  { name = "claude", claude_md = false, auth = true, skills = true, config = true },\n'
-        "]\n",
+        "[layers.base.agents]\n"
+        "claude = true\n"
+        "codex = false\n"
+        "pi = { auth = false, skills = true }\n",
     )
 
     # when loading the config
     config = load(flavors_dir)
 
-    # then the agent's name and its options table are both read
+    # then each agent is read with whether it is enabled and its options
     assert config.flavors["arch"].layers == {
         "base": Layer(
-            agents=[
-                AgentOption(
-                    name="claude",
-                    options={
-                        "claude_md": False,
-                        "auth": True,
-                        "skills": True,
-                        "config": True,
-                    },
-                )
-            ],
+            agents=AgentTable(
+                entries={
+                    "claude": AgentSettings(),
+                    "codex": AgentSettings(enabled=False),
+                    "pi": AgentSettings(options={"auth": False, "skills": True}),
+                }
+            )
         )
     }
+
+
+def test_load_reads_layer_agents_in_declaration_order(tmp_path: Path) -> None:
+    # given a layer declaring agents both as values and as sub-tables
+    flavors_dir = _flavor_with_layers(
+        tmp_path,
+        "[layers.base.agents]\n"
+        "pi = true\n"
+        "claude = true\n"
+        "[layers.base.agents.codex]\n"
+        "auth = false\n"
+        "[layers.base.agents.opencode]\n",
+    )
+
+    # when loading the config
+    config = load(flavors_dir)
+
+    # then the agents keep the order they are declared in
+    assert list(config.flavors["arch"].layers["base"].agents.entries) == [
+        "pi",
+        "claude",
+        "codex",
+        "opencode",
+    ]
+
+
+def test_load_reads_the_default_agent_of_a_layer(tmp_path: Path) -> None:
+    # given a layer naming its default agent
+    flavors_dir = _flavor_with_layers(
+        tmp_path,
+        '[layers.base.agents]\ndefault = "codex"\nclaude = true\ncodex = true\n',
+    )
+
+    # when loading the config
+    config = load(flavors_dir)
+
+    # then the default is read apart from the agents
+    assert config.flavors["arch"].layers["base"].agents == AgentTable(
+        default="codex",
+        entries={"claude": AgentSettings(), "codex": AgentSettings()},
+    )
 
 
 def test_load_reads_layer_order_and_conditions(tmp_path: Path) -> None:
@@ -770,7 +797,7 @@ def test_load_rejects_agent_options_of_the_wrong_type(tmp_path: Path) -> None:
     # given a layer agent table with a non-boolean option
     flavors_dir = _flavor_with_layers(
         tmp_path,
-        '[layers.base]\nagents = [{ name = "claude", auth = 1 }]\n',
+        "[layers.base.agents]\nclaude = { auth = 1 }\n",
     )
 
     # when loading the config
@@ -779,8 +806,42 @@ def test_load_rejects_agent_options_of_the_wrong_type(tmp_path: Path) -> None:
 
     # then the option is reported by the path it has in the TOML file
     assert error.value.problems == [
-        "layers.base.agents.0.auth: Input should be a valid boolean"
+        "layers.base.agents.claude.auth: Input should be a valid boolean"
     ]
+
+
+def test_load_rejects_agents_that_are_neither_a_boolean_nor_a_table(
+    tmp_path: Path,
+) -> None:
+    # given a layer setting an agent to a string
+    flavors_dir = _flavor_with_layers(
+        tmp_path,
+        '[layers.base.agents]\nclaude = "yes"\n',
+    )
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(flavors_dir)
+
+    # then the agent is reported by the path it has in the TOML file
+    assert error.value.problems == [
+        "layers.base.agents.claude: Input should be a valid boolean or table"
+    ]
+
+
+def test_load_rejects_agents_that_are_not_a_table(tmp_path: Path) -> None:
+    # given a layer declaring its agents as an array
+    flavors_dir = _flavor_with_layers(
+        tmp_path,
+        '[layers.base]\nagents = ["claude"]\n',
+    )
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(flavors_dir)
+
+    # then the agents are reported as not being a table
+    assert error.value.problems == ["layers.base.agents: Input should be a valid table"]
 
 
 def test_load_rejects_shell_tables_without_a_name(tmp_path: Path) -> None:
