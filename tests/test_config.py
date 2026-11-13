@@ -793,6 +793,75 @@ def test_load_rejects_shell_options_of_the_wrong_type(tmp_path: Path) -> None:
     assert error.value.problems == ["shell.zshrc: Input should be a valid boolean"]
 
 
+def test_load_reads_environment_variables_of_a_layer_and_its_agents(
+    tmp_path: Path,
+) -> None:
+    # given a layer setting instance variables, variables for every agent, and
+    # variables for one agent, removing one variable at each level
+    flavors_dir = _flavor_with_layers(
+        tmp_path,
+        "[layers.base]\n"
+        'env = { EDITOR = "nvim", PAGER = false }\n'
+        "[layers.base.agents]\n"
+        'env = { GIT_AUTHOR_NAME = "agent", LANG = false }\n'
+        'codex = { auth = false, env = { FOO = "1", BAR = false } }\n',
+    )
+
+    # when loading the config
+    config = load(flavors_dir)
+
+    # then each set of variables is read at its own level
+    assert config.flavors["arch"].layers["base"] == Layer(
+        env={"EDITOR": "nvim", "PAGER": False},
+        agents=AgentTable(
+            env={"GIT_AUTHOR_NAME": "agent", "LANG": False},
+            entries={
+                "codex": AgentSettings(
+                    options={"auth": False}, env={"FOO": "1", "BAR": False}
+                )
+            },
+        ),
+    )
+
+
+@pytest.mark.parametrize("name", ["1ST", "MY-VAR", "MY VAR", ""])
+def test_load_rejects_invalid_environment_variable_names(
+    tmp_path: Path, name: str
+) -> None:
+    # given a layer setting a variable whose name a shell cannot export
+    flavors_dir = _flavor_with_layers(
+        tmp_path, f'[layers.base]\nenv = {{ "{name}" = "value" }}\n'
+    )
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(flavors_dir)
+
+    # then the name is reported by the path it has in the TOML file
+    assert error.value.problems == [
+        f"layers.base.env.{name}: invalid environment variable name {name!r}"
+    ]
+
+
+@pytest.mark.parametrize("value", ["true", "1", "[]"])
+def test_load_rejects_environment_variable_values_other_than_a_string_or_false(
+    tmp_path: Path, value: str
+) -> None:
+    # given a layer setting a variable to a value that is not a string or false
+    flavors_dir = _flavor_with_layers(
+        tmp_path, f"[layers.base.agents]\nenv = {{ EDITOR = {value} }}\n"
+    )
+
+    # when loading the config
+    with pytest.raises(ConfigError) as error:
+        load(flavors_dir)
+
+    # then the value is reported by the path it has in the TOML file
+    assert error.value.problems == [
+        "layers.base.agents.env.EDITOR: Input should be a valid string or false"
+    ]
+
+
 def test_load_rejects_agent_options_of_the_wrong_type(tmp_path: Path) -> None:
     # given a layer agent table with a non-boolean option
     flavors_dir = _flavor_with_layers(

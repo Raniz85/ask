@@ -19,6 +19,7 @@ from pydantic_core import ErrorDetails, PydanticCustomError
 
 from ask import agent
 from ask.agent import AgentTable
+from ask.env import Env
 from ask.errors import AskError
 from ask.incus import known_distributions
 from ask.problems import unknown_name
@@ -182,6 +183,7 @@ class Layer:
     agents: Annotated[AgentTable, BeforeValidator(agent.to_table)] = field(
         default_factory=AgentTable
     )
+    env: Env = field(default_factory=dict)
     order: StrictInt = 0
     when: LayerWhen | None = None
 

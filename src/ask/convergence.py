@@ -29,9 +29,13 @@ def _dump[T](schema: type[T], value: T) -> object:
 def _layer(name: str, layer: Layer) -> dict[str, object]:
     dumped = _dump(Layer, layer)
     assert isinstance(dumped, dict)
-    # the default agent only matters when an agent is launched, it does not
-    # affect the provisioned state of the container
-    dumped["agents"].pop("default")
+    # the default agent and agent variables only matter when an agent is
+    # launched, they do not affect the provisioned state of the container
+    agents = dumped["agents"]
+    agents.pop("default")
+    agents.pop("env")
+    for settings in agents["entries"].values():
+        settings.pop("env")
     return {"name": name, **dumped}
 
 

@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BeforeValidator, StrictBool, StrictStr
 from pydantic_core import PydanticCustomError
 
+from ask.env import Env
 from ask.errors import AskError
 from ask.incus import Mount
 from ask.module import resolve_packages
@@ -159,13 +160,19 @@ class AgentSettings:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
     enabled: StrictBool = True
     options: dict[str, StrictBool] = field(default_factory=dict)
+    env: Env = field(default_factory=dict)
+
+
+_ENV = "env"
 
 
 def _to_settings(value: object) -> object:
     if isinstance(value, bool):
         return {"enabled": value}
     if isinstance(value, dict):
-        return {"options": value}
+        env = {_ENV: value[_ENV]} if _ENV in value else {}
+        options = {key: option for key, option in value.items() if key != _ENV}
+        return {"options": options} | env
     raise PydanticCustomError(
         "bool_or_table", "Input should be a valid boolean or table"
     )
@@ -189,13 +196,14 @@ ENTRIES = "entries"
 class AgentTable:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
     default: AgentName | None = None
+    env: Env = field(default_factory=dict)
     entries: Annotated[
         dict[AgentName, Annotated[AgentSettings, BeforeValidator(_to_settings)]],
         AfterValidator(_check_options),
     ] = field(default_factory=dict)
 
 
-_RESERVED_KEYS = {"default"}
+_RESERVED_KEYS = {"default", _ENV}
 
 
 def to_table(value: object) -> object:

@@ -55,6 +55,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
                 "bind_mounts": [],
                 "packages": ["git"],
                 "agents": {"entries": {"claude": {"enabled": True, "options": {}}}},
+                "env": {},
                 "services": {},
                 "order": 0,
                 "when": None,
@@ -65,6 +66,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
             "bind_mounts": ["/src"],
             "tool_managers": ["mise"],
             "services": {},
+            "env": {},
         },
         "tool_manager_configs": {},
     }
@@ -127,6 +129,51 @@ def test_effective_configuration_ignores_the_default_agent(tmp_path: Path) -> No
     # then they are identical, as the default agent only matters when an
     # agent is launched
     assert configurations[0] == configurations[1]
+
+
+def test_effective_configuration_ignores_agent_environment_variables(
+    tmp_path: Path,
+) -> None:
+    # given flavours that differ only in the variables they set for agents
+    def flavor(value: str) -> Flavor:
+        return Flavor(
+            distribution="arch",
+            layers={
+                "base": Layer(
+                    agents=AgentTable(
+                        env={"FOO": value},
+                        entries={"claude": AgentSettings(env={"BAR": value})},
+                    )
+                )
+            },
+        )
+
+    # when building the effective configuration for both
+    configurations = (
+        effective_configuration(ResolvedManifest(Manifest(), flavor("a"), tmp_path)),
+        effective_configuration(ResolvedManifest(Manifest(), flavor("b"), tmp_path)),
+    )
+
+    # then they are identical, as agent variables only matter when an agent is
+    # launched
+    assert configurations[0] == configurations[1]
+
+
+def test_effective_configuration_changes_with_instance_environment_variables(
+    tmp_path: Path,
+) -> None:
+    # given a layer and a manifest setting instance variables
+    flavor = Flavor(distribution="arch", layers={"base": Layer(env={"A": "1"})})
+    m = Manifest(env={"B": "2"})
+
+    # when building the effective configuration
+    configuration = json.loads(
+        effective_configuration(ResolvedManifest(m, flavor, tmp_path))
+    )
+
+    # then it holds the variables, as they are provisioned on the instance
+    assert configuration["layers"][0]["env"] == {"A": "1"}
+    assert configuration["manifest"]["env"] == {"B": "2"}
 
 
 def test_effective_configuration_changes_when_a_layer_starts_to_apply(

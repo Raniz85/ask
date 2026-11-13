@@ -5,7 +5,7 @@ from typing import Annotated
 from pydantic import AfterValidator, StrictStr
 from pydantic_core import PydanticCustomError
 
-from ask import agent, tool_manager
+from ask import agent, env, tool_manager
 from ask.agent import Agent
 from ask.config import (
     BASE_LAYER,
@@ -16,6 +16,7 @@ from ask.config import (
     _validate,
     read_toml,
 )
+from ask.env import Env
 from ask.incus import Mount
 from ask.removal import is_removal, removals
 from ask.schema import FORBID_UNKNOWN_KEYS
@@ -53,6 +54,7 @@ class Manifest:
     scripts: Annotated[
         dict[StrictStr, StrictStr], AfterValidator(_validate_scripts)
     ] = field(default_factory=dict)
+    env: Env = field(default_factory=dict)
 
 
 def load(path: Path) -> Manifest:
@@ -66,6 +68,7 @@ def load(path: Path) -> Manifest:
 class _MergedAgent:
     name: str
     options: dict[str, bool] = field(default_factory=dict)
+    envs: list[Env] = field(default_factory=list)
 
 
 @dataclass
@@ -123,6 +126,7 @@ class ResolvedManifest:
                     continue
                 entry = merged.setdefault(name, _MergedAgent(name))
                 entry.options.update(settings.options)
+                entry.envs.append(settings.env)
         return list(merged.values())
 
     @property
@@ -144,6 +148,22 @@ class ResolvedManifest:
                 "layers that apply to this project."
             )
         return defaults[-1]
+
+    @property
+    def instance_env(self) -> dict[str, str]:
+        return env.merge(layer.env for layer in self._configured_layers())
+
+    def agent_env(self, name: str) -> dict[str, str]:
+        own_envs = next(
+            (entry.envs for entry in self._merged_agents() if entry.name == name), []
+        )
+        return env.merge(
+            [
+                *(layer.env for layer in self._configured_layers()),
+                *(layer.agents.env for layer in self._flavor_layers()),
+                *own_envs,
+            ]
+        )
 
     @property
     def agents(self) -> list[Agent]:

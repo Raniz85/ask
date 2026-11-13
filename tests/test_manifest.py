@@ -107,6 +107,19 @@ def test_load_rejects_an_empty_script_command(tmp_path: Path) -> None:
     ]
 
 
+def test_load_reads_environment_variables_from_toml(tmp_path: Path) -> None:
+    # given a manifest file setting one variable and removing another
+    manifest_path = _manifest_file(
+        tmp_path, 'env = { EDITOR = "nvim", PAGER = false }\n'
+    )
+
+    # when loading the manifest
+    manifest = load(manifest_path)
+
+    # then both are read
+    assert manifest == Manifest(env={"EDITOR": "nvim", "PAGER": False})
+
+
 def test_load_rejects_keys_that_belong_to_flavors_and_layers(tmp_path: Path) -> None:
     # given a manifest file declaring keys that only flavours and their layers have
     manifest_path = _manifest_file(
@@ -582,6 +595,89 @@ def test_default_agent_rejects_a_default_that_is_not_enabled() -> None:
         "The default agent 'codex' is not enabled in the flavour layers that "
         "apply to this project."
     )
+
+
+def test_instance_env_merges_layers_then_the_manifest() -> None:
+    # given two layers and a manifest setting, overriding and removing
+    # variables
+    resolved = _resolved(
+        {
+            "base": Layer(env={"EDITOR": "vi", "PAGER": "less", "LANG": "C"}),
+            "python": Layer(env={"EDITOR": "nvim", "PAGER": False}),
+        },
+        Manifest(env={"LANG": "C.UTF-8"}),
+    )
+
+    # when resolving the instance environment
+    env = resolved.instance_env
+
+    # then later layers win, and the manifest wins over every layer
+    assert env == {"EDITOR": "nvim", "LANG": "C.UTF-8"}
+
+
+def test_agent_env_layers_every_agent_and_the_agent_over_the_instance() -> None:
+    # given variables set for the instance, every agent and one agent, across
+    # two layers
+    resolved = _resolved(
+        {
+            "base": Layer(
+                env={"A": "instance", "B": "instance", "C": "instance"},
+                agents=AgentTable(
+                    env={"B": "agents", "D": "agents"},
+                    entries={"claude": AgentSettings(env={"C": "claude"})},
+                ),
+            ),
+            "python": Layer(
+                agents=AgentTable(
+                    env={"D": "python agents"},
+                    entries={"claude": AgentSettings(env={"A": False})},
+                ),
+            ),
+        }
+    )
+
+    # when resolving the environment of the agent
+    env = resolved.agent_env("claude")
+
+    # then every agent's variables win over the instance's, the agent's own
+    # win over both, and removing a variable removes it from every level
+    assert env == {"B": "agents", "C": "claude", "D": "python agents"}
+
+
+def test_agent_env_forgets_the_variables_of_removed_agents() -> None:
+    # given a layer setting a variable for an agent, a second layer removing
+    # that agent, and a third layer enabling it again
+    resolved = _resolved(
+        {
+            "base": Layer(
+                agents=AgentTable(entries={"claude": AgentSettings(env={"FOO": "1"})})
+            ),
+            "no-claude": Layer(
+                agents=AgentTable(entries={"claude": AgentSettings(enabled=False)})
+            ),
+            "claude-again": Layer(agents=_enabling("claude")),
+        }
+    )
+
+    # when resolving the environment of the agent
+    env = resolved.agent_env("claude")
+
+    # then the re-enabled agent does not inherit the removed agent's variables
+    assert env == {}
+
+
+def test_agent_env_of_an_agent_that_is_not_enabled_is_that_of_every_agent() -> None:
+    # given a layer setting variables for the instance and for every agent,
+    # without enabling the agent
+    resolved = _resolved(
+        {"base": Layer(env={"A": "instance"}, agents=AgentTable(env={"B": "agents"}))}
+    )
+
+    # when resolving the environment of the agent
+    env = resolved.agent_env("claude")
+
+    # then it has the instance's and every agent's variables
+    assert env == {"A": "instance", "B": "agents"}
 
 
 def _user() -> ResolvedUser:
