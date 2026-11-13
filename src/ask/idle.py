@@ -14,7 +14,7 @@ TIMER_UNIT_PATH = Path("/etc/systemd/system/ask-idle-shutdown.timer")
 TIMER_NAME = "ask-idle-shutdown.timer"
 
 # Packages the watchdog script needs inside the instance.
-WATCH_PACKAGES = ["curl", "jq"]
+WATCH_PACKAGES = ["curl"]
 
 
 def shutdown_script(user: ResolvedUser, socket: Path = SOCKET_PATH) -> str:
@@ -31,11 +31,17 @@ invocation_key='{INVOCATION_AT_CONFIG_KEY}'
 now=$(date +%s)
 
 # The last Ask invocation is recorded on this instance's own user.*
-# config, readable through the in-instance Incus socket. If it cannot
-# be read, stay up rather than risk shutting down a busy instance.
-if ! last_invocation=$(curl -fsS --unix-socket "$socket" http://localhost/1.0 \\
-    | jq -r --arg key "$invocation_key" '.metadata.config[$key] // empty'); then
-    exit 0
+# config, readable through the in-instance Incus socket at
+# /1.0/config/<key>. If the config cannot be read, stay up rather than
+# risk shutting down a busy instance.
+if ! last_invocation=$(curl -fs --unix-socket "$socket" \\
+    "http://localhost/1.0/config/$invocation_key"); then
+    # A 404 just means no Ask invocation has been recorded yet; any
+    # other failure means the config is unreadable and we stay up.
+    status=$(curl -sS -o /dev/null -w '%{{http_code}}' --unix-socket "$socket" \\
+        "http://localhost/1.0/config/$invocation_key") || exit 0
+    [ "$status" = 404 ] || exit 0
+    last_invocation=""
 fi
 
 if [ -n "$last_invocation" ]; then

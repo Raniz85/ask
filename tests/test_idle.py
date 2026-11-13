@@ -1,4 +1,3 @@
-import json
 import shutil
 import subprocess
 import tempfile
@@ -38,6 +37,7 @@ class _FakeInstance:
 
     def __init__(self, directory: Path, socket: Path) -> None:
         self.config: dict[str, str] = {}
+        self.config_status: int | None = None
         self._directory = directory
         self._socket = socket
         self._bin = directory / "bin"
@@ -101,12 +101,20 @@ def _serve_instance_config(
 ) -> ThreadingUnixStreamServer:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path != "/1.0":
+            prefix = "/1.0/config/"
+            if instance.config_status is not None:
+                self.send_error(instance.config_status)
+                return
+            if not self.path.startswith(prefix):
                 self.send_error(404)
                 return
-            body = json.dumps({"metadata": {"config": instance.config}}).encode()
+            key = self.path[len(prefix) :]
+            if key not in instance.config:
+                self.send_error(404)
+                return
+            body = instance.config[key].encode()
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", "text/plain")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -263,6 +271,22 @@ def test_stays_up_when_the_instance_config_cannot_be_read(
 
     # then the instance stays up
     assert (result.returncode, unreachable_instance.powered_off()) == (0, False)
+
+
+@requires_script_tools
+def test_stays_up_when_the_config_endpoint_returns_an_error(
+    instance: _FakeInstance,
+) -> None:
+    # given an idle instance whose config endpoint answers with an error
+    # other than "not found"
+    instance.record_invocation(ago=_LONG_IDLE)
+    instance.config_status = 500
+
+    # when the watchdog runs
+    result = instance.run_watchdog()
+
+    # then the instance stays up
+    assert (result.returncode, result.stderr, instance.powered_off()) == (0, "", False)
 
 
 def test_service_unit_runs_the_script_once_per_trigger() -> None:

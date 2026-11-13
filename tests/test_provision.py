@@ -1391,12 +1391,12 @@ def test_provision_idle_shutdown_installs_the_watch_and_enables_the_timer() -> N
     ):
         provisioner.provision_idle_shutdown("arch", user)
 
-    # then curl and jq are installed for the watchdog script, the script and
+    # then curl is installed for the watchdog script, the script and
     # the systemd units are put in place, systemd is reloaded, and the timer
     # is enabled and started
     state = state_cls.return_value
     calls = add_op.call_args_list
-    assert calls[0] == call(state, pacman.packages, packages=["curl", "jq"])
+    assert calls[0] == call(state, pacman.packages, packages=["curl"])
     put_calls = [c for c in calls if c.args[1] == files.put]
     assert [(c.kwargs["dest"], c.kwargs["mode"]) for c in put_calls] == [
         ("/usr/local/bin/ask-idle-shutdown", "755"),
