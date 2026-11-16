@@ -23,6 +23,15 @@ def load_config(directory: Path) -> Config:
     return config.load(directory)
 
 
+def find_project_dir(start: Path) -> Path:
+    current = start
+    while not (current / "ask.toml").exists():
+        if current.parent == current:
+            return start
+        current = current.parent
+    return current
+
+
 def _missing_bind_mounts(location: str, bind_mounts: list[Path]) -> list[str]:
     return [
         f"{location}bind_mounts.{index}: path {path} does not exist"

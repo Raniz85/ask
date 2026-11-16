@@ -38,6 +38,7 @@ from ask.incus import (
 from ask.manifest import Manifest, ResolvedManifest
 from ask.manifest import load as load_manifest
 from ask.user import ResolvedUser
+from ask.validation import ManifestNotFoundError
 
 _WAYLAND_MOUNT = Mount(
     host_path=Path("/run/user/1000/wayland-0"),
@@ -200,6 +201,111 @@ def test_variables_ask_sets_win_over_configured_ones(tmp_path: Path) -> None:
     # then the shell runs with the HOME Ask sets
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+    )
+
+
+def _run_in_child_dir(
+    tmp_path: Path, command: Callable[[], None]
+) -> tuple[Path, Path, Mock, Mock]:
+    project_dir = tmp_path / "my-project"
+    child_dir = project_dir / "src" / "deep"
+    child_dir.mkdir(parents=True)
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR + "[layers.base]\nagents = { claude = true }\n"
+        '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+    with (
+        patch("ask.cli.Path.cwd", return_value=child_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.converge"),
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+        command()
+    return project_dir, child_dir, container, container_cls
+
+
+def test_exec_from_a_child_directory_runs_with_the_child_directory_as_cwd(
+    tmp_path: Path,
+) -> None:
+    # given a project whose ask.toml is in a parent of the current directory
+    # when running a command in the project's container from the child
+    project_dir, child_dir, container, container_cls = _run_in_child_dir(
+        tmp_path, lambda: exec("erl")
+    )
+
+    # then the container is named after the project directory, and the command
+    # runs with the child directory as its working directory
+    assert project_dir != child_dir
+    container_cls.assert_called_with("my-project")
+    container.exec_command.assert_called_once_with(
+        1000, 1000, child_dir, ["erl"], env=_HOME_ENV
+    )
+
+
+def test_enter_from_a_child_directory_enters_with_the_child_directory_as_cwd(
+    tmp_path: Path,
+) -> None:
+    # given a project whose ask.toml is in a parent of the current directory
+    # when entering the project's container from the child
+    _, child_dir, container, _ = _run_in_child_dir(tmp_path, lambda: enter())
+
+    # then the shell runs with the child directory as its working directory
+    container.exec_command.assert_called_once_with(
+        1000, 1000, child_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+    )
+
+
+def test_destroy_from_a_child_directory_targets_the_project_container(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a stopped container, and a child directory
+    project_dir = tmp_path / "my-project"
+    child_dir = project_dir / "src"
+    child_dir.mkdir(parents=True)
+    (project_dir / "ask.toml").write_text("")
+
+    # when destroying from the child directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=child_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
+
+        destroy()
+
+    # then the container named after the project directory is deleted
+    container_cls.assert_called_once_with("my-project")
+    assert container.method_calls == [call.snapshot(), call.delete()]
+
+
+def test_commands_from_a_directory_without_any_ask_toml_report_the_missing_manifest(
+    tmp_path: Path,
+) -> None:
+    # given a directory tree without any ask.toml up to the root
+    orphan = tmp_path / "orphan"
+    orphan.mkdir()
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR)
+
+    # when running a command from there
+    with (
+        patch("ask.cli.Path.cwd", return_value=orphan),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        pytest.raises(ManifestNotFoundError) as error,
+    ):
+        exec("erl")
+
+    # then the error points at the directory ask was called from
+    assert str(error.value) == (
+        f"No ask.toml found in {orphan}. "
+        "Run `ask init` to create one, or run ask from a project directory "
+        "containing ask.toml."
     )
 
 

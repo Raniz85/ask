@@ -8,6 +8,7 @@ from ask.shell import ShellOption
 from ask.validation import (
     ManifestNotFoundError,
     check_manifest,
+    find_project_dir,
     load_config,
     load_manifest,
     resolve_project,
@@ -59,6 +60,49 @@ def test_load_manifest_reports_a_missing_manifest(tmp_path: Path) -> None:
         "Run `ask init` to create one, or run ask from a project directory "
         "containing ask.toml."
     )
+
+
+def test_find_project_dir_returns_the_start_dir_when_it_contains_ask_toml(
+    tmp_path: Path,
+) -> None:
+    # given a directory containing an ask.toml
+    (tmp_path / "ask.toml").write_text("")
+
+    # when finding the project directory from it
+    project_dir = find_project_dir(tmp_path)
+
+    # then it is the directory itself
+    assert project_dir == tmp_path
+
+
+def test_find_project_dir_traverses_parents_until_it_finds_ask_toml(
+    tmp_path: Path,
+) -> None:
+    # given an ask.toml in a parent directory, and a child directory below it
+    (tmp_path / "ask.toml").write_text("")
+    child = tmp_path / "src" / "ask"
+    child.mkdir(parents=True)
+
+    # when finding the project directory from the child
+    project_dir = find_project_dir(child)
+
+    # then it is the parent directory containing the ask.toml
+    assert project_dir == tmp_path
+
+
+def test_find_project_dir_returns_the_start_dir_when_no_ask_toml_exists(
+    tmp_path: Path,
+) -> None:
+    # given a directory tree without any ask.toml up to the root
+    child = tmp_path / "src" / "ask"
+    child.mkdir(parents=True)
+
+    # when finding the project directory from the child
+    project_dir = find_project_dir(child)
+
+    # then it falls back to the start directory, so load_manifest reports the
+    # missing manifest against it
+    assert project_dir == child
 
 
 def test_check_manifest_reports_missing_bind_mount_sources(tmp_path: Path) -> None:

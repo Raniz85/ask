@@ -132,7 +132,7 @@ def setup() -> None:
 
 
 def create() -> None:
-    project_dir = Path.cwd()
+    project_dir = validation.find_project_dir(Path.cwd())
     resolved = _resolve_project(project_dir)
     container_name = slug.slugify(project_dir.name)
     if incus.Container(container_name).snapshot() is not None:
@@ -148,7 +148,7 @@ def converge(
     *,
     create_missing: CreateMissing = False,
 ) -> None:
-    project_dir = Path.cwd()
+    project_dir = validation.find_project_dir(Path.cwd())
     resolved = _resolve_project(project_dir)
     distribution = resolved.flavor.distribution
     slug.slugify(project_dir.name)
@@ -244,7 +244,8 @@ def enter(
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
-    project_dir = Path.cwd()
+    cwd = Path.cwd()
+    project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
     user = config.resolve_user(resolved.flavor)
     container = _converged_container(
@@ -255,7 +256,7 @@ def enter(
         returncode = container.exec_command(
             user.uid,
             user.gid,
-            project_dir,
+            cwd,
             [user.shell],
             env=resolved.instance_env | home_env(user) | FAKE_SSH_ENV | gui_env,
         )
@@ -270,7 +271,8 @@ def agent(
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
-    project_dir = Path.cwd()
+    cwd = Path.cwd()
+    project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
     if name is not None and name.startswith("-"):
         args = (name, *args)
@@ -290,6 +292,7 @@ def agent(
         project_dir,
         resolved,
         [resolved_agent.name, *args],
+        cwd,
         resolved.agent_env(resolved_agent.name),
         gui,
         create_missing,
@@ -298,7 +301,7 @@ def agent(
 
 
 def resolve_shortcut(name: str) -> str:
-    resolved = _resolve_project(Path.cwd())
+    resolved = _resolve_project(validation.find_project_dir(Path.cwd()))
     matches = [
         command
         for command, matched in (
@@ -321,7 +324,8 @@ def run(
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
-    project_dir = Path.cwd()
+    cwd = Path.cwd()
+    project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
     if name not in resolved.scripts:
         raise AskError(f"Script '{name}' is not defined in ask.toml.")
@@ -330,6 +334,7 @@ def run(
         project_dir,
         resolved,
         command,
+        cwd,
         resolved.instance_env,
         gui,
         create_missing,
@@ -343,12 +348,14 @@ def exec(
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
-    project_dir = Path.cwd()
+    cwd = Path.cwd()
+    project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
     _exec_in_container(
         project_dir,
         resolved,
         list(command),
+        cwd,
         resolved.instance_env,
         gui,
         create_missing,
@@ -357,7 +364,7 @@ def exec(
 
 
 def destroy() -> None:
-    project_dir = Path.cwd()
+    project_dir = validation.find_project_dir(Path.cwd())
     container = incus.Container(project_dir.name)
     snapshot = container.snapshot()
     if snapshot is None:
@@ -368,7 +375,7 @@ def destroy() -> None:
 
 
 def stop() -> None:
-    project_dir = Path.cwd()
+    project_dir = validation.find_project_dir(Path.cwd())
     container = incus.Container(project_dir.name)
     snapshot = container.snapshot()
     if snapshot is None:
@@ -380,7 +387,7 @@ def stop() -> None:
 
 
 def restart() -> None:
-    project_dir = Path.cwd()
+    project_dir = validation.find_project_dir(Path.cwd())
     container = incus.Container(project_dir.name)
     snapshot = container.snapshot()
     if snapshot is None:
@@ -464,6 +471,7 @@ def _exec_in_container(
     project_dir: Path,
     resolved: manifest.ResolvedManifest,
     command: list[str],
+    cwd: Path,
     variables: dict[str, str],
     gui: bool,
     create_missing: bool,
@@ -478,7 +486,7 @@ def _exec_in_container(
         returncode = container.exec_command(
             user.uid,
             user.gid,
-            project_dir,
+            cwd,
             command,
             env=variables | home_env(user) | gui_env,
         )
