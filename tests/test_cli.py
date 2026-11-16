@@ -558,6 +558,74 @@ def test_converge_provisions_the_resolved_packages(tmp_path: Path) -> None:
     )
 
 
+def test_converge_provisions_the_resolved_pi_extensions(tmp_path: Path) -> None:
+    # given a project directory, and a config declaring extensions for pi
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + '[layers.base.agents.pi]\nextensions = ["@foo/bar", "@baz/qux"]\n'
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the pi extensions are provisioned for the resolved user
+    provisioner_cls.return_value.provision_pi_extensions.assert_called_once_with(
+        ResolvedUser(
+            name="raniz",
+            uid=1000,
+            shell="bash",
+            group_name="raniz",
+            gid=1000,
+            extra_groups=[],
+        ),
+        ["@foo/bar", "@baz/qux"],
+    )
+
+
+def test_converge_does_not_provision_pi_extensions_without_any(tmp_path: Path) -> None:
+    # given a project directory, and a config enabling pi without extensions
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + "[layers.base.agents]\npi = true\n"
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then no pi extensions are provisioned
+    provisioner_cls.return_value.provision_pi_extensions.assert_not_called()
+
+
 def test_converge_provisions_services_from_layers(tmp_path: Path) -> None:
     # given a project with services configured
     project_dir = tmp_path / "my-project"

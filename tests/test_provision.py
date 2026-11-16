@@ -692,6 +692,63 @@ def _exec_commands(exec_command: MagicMock) -> list[list[str]]:
     return [c.args[3] for c in exec_command.call_args_list]
 
 
+def _provisioner_user() -> ResolvedUser:
+    return ResolvedUser(
+        name="raniz",
+        uid=1000,
+        shell="bash",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
+    )
+
+
+def test_provision_pi_extensions_installs_each_extension_as_the_user() -> None:
+    # given a provisioner, a resolved user, and pi extensions
+    provisioner = Provisioner(Container("my-project"))
+    user = _provisioner_user()
+
+    # when provisioning the extensions
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.provision_pi_extensions(
+            user, ["@foo/bar", "https://example.com/ext.git"]
+        )
+
+    # then `pi install` runs for each extension, as the user, in their home
+    # directory, with HOME set
+    assert _exec_commands(exec_command) == [
+        ["pi", "install", "@foo/bar"],
+        ["pi", "install", "https://example.com/ext.git"],
+    ]
+    for c in exec_command.call_args_list:
+        assert c.args[:3] == (1000, 1000, Path("/home/raniz"))
+        assert c.kwargs["env"] == {"HOME": "/home/raniz"}
+
+
+def test_provision_pi_extensions_does_nothing_without_extensions() -> None:
+    # given a provisioner, a resolved user, and no extensions
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning them
+    with patch.object(Container, "exec_command") as exec_command:
+        provisioner.provision_pi_extensions(_provisioner_user(), [])
+
+    # then no command runs in the container
+    exec_command.assert_not_called()
+
+
+def test_provision_pi_extensions_raises_when_an_install_fails() -> None:
+    # given a provisioner, a resolved user, an extension, and a failing install
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning the extension
+    with (
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError, match=r"`pi install @foo/bar`"),
+    ):
+        provisioner.provision_pi_extensions(_provisioner_user(), ["@foo/bar"])
+
+
 def test_ensure_paru_clones_reviews_and_builds_paru_bin_when_approved() -> None:
     # given a container without paru that has never cloned paru-bin, and a
     # user who approves the build after reviewing the PKGBUILD

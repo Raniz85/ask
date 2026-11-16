@@ -109,6 +109,22 @@ class Provisioner:
         with self.session() as state:
             add_op(state, operation, packages=packages, present=False)
 
+    def provision_pi_extensions(
+        self, user: ResolvedUser, extensions: list[str]
+    ) -> None:
+        if not extensions:
+            return
+        home = Path(f"/home/{user.name}")
+        for extension in extensions:
+            _run_checked(
+                self.container,
+                user.uid,
+                user.gid,
+                home,
+                ["pi", "install", extension],
+                env=home_env(user),
+            )
+
     def fix_bind_mount_ownership(
         self, bind_mounts: list[Path], user: ResolvedUser
     ) -> None:

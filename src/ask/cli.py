@@ -197,6 +197,11 @@ def _converge_container(
     provisioner.provision_packages(distribution, official_packages)
     aur_builder.install_packages(distribution, aur_packages)
 
+    # Provision pi extensions once the pi package is installed
+    pi_extensions = resolved.pi_extensions
+    if pi_extensions:
+        provisioner.provision_pi_extensions(user, pi_extensions)
+
     # Provision systemd services
     services = resolved.services
     if services:

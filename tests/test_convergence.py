@@ -54,7 +54,11 @@ def test_effective_configuration_contains_everything_that_converge_uses(
                 "name": "base",
                 "bind_mounts": [],
                 "packages": ["git"],
-                "agents": {"entries": {"claude": {"enabled": True, "options": {}}}},
+                "agents": {
+                    "entries": {
+                        "claude": {"enabled": True, "options": {}, "extensions": []}
+                    }
+                },
                 "env": {},
                 "services": {},
                 "order": 0,
@@ -228,6 +232,60 @@ def test_effective_configuration_leaves_out_config_of_tool_managers_not_opted_in
 
     # then the mise config is not part of it
     assert json.loads(configuration)["tool_manager_configs"] == {}
+
+
+def test_effective_configuration_contains_the_pi_extensions(tmp_path: Path) -> None:
+    # given a layer declaring extensions for pi
+    flavor = Flavor(
+        distribution="arch",
+        layers={
+            "base": Layer(
+                agents=AgentTable(
+                    entries={"pi": AgentSettings(extensions=["@foo/bar"])}
+                )
+            )
+        },
+    )
+
+    # when building the effective configuration
+    configuration = json.loads(
+        effective_configuration(ResolvedManifest(Manifest(), flavor, tmp_path))
+    )
+
+    # then it holds the extensions, as they are provisioned on the instance
+    assert configuration["layers"][0]["agents"]["entries"]["pi"]["extensions"] == [
+        "@foo/bar"
+    ]
+
+
+def test_effective_configuration_changes_with_the_pi_extensions(
+    tmp_path: Path,
+) -> None:
+    # given flavours that differ only in the extensions declared for pi
+    def flavor(extensions: list[str]) -> Flavor:
+        return Flavor(
+            distribution="arch",
+            layers={
+                "base": Layer(
+                    agents=AgentTable(
+                        entries={"pi": AgentSettings(extensions=extensions)}
+                    )
+                )
+            },
+        )
+
+    # when building the effective configuration for both
+    configurations = (
+        effective_configuration(
+            ResolvedManifest(Manifest(), flavor(["@foo/bar"]), tmp_path)
+        ),
+        effective_configuration(
+            ResolvedManifest(Manifest(), flavor(["@foo/baz"]), tmp_path)
+        ),
+    )
+
+    # then they are different
+    assert configurations[0] != configurations[1]
 
 
 def test_fingerprint_is_the_installed_version_and_a_hash_of_the_configuration() -> None:

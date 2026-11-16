@@ -68,6 +68,7 @@ def load(path: Path) -> Manifest:
 class _MergedAgent:
     name: str
     options: dict[str, bool] = field(default_factory=dict)
+    extensions: list[str] = field(default_factory=list)
     envs: list[Env] = field(default_factory=list)
 
 
@@ -126,6 +127,9 @@ class ResolvedManifest:
                     continue
                 entry = merged.setdefault(name, _MergedAgent(name))
                 entry.options.update(settings.options)
+                entry.extensions = list(
+                    dict.fromkeys([*entry.extensions, *settings.extensions])
+                )
                 entry.envs.append(settings.env)
         return list(merged.values())
 
@@ -168,6 +172,13 @@ class ResolvedManifest:
     @property
     def agents(self) -> list[Agent]:
         return [agent.resolve(name) for name in self.agent_names]
+
+    @property
+    def pi_extensions(self) -> list[str]:
+        for entry in self._merged_agents():
+            if entry.name == agent.EXTENSIONS_AGENT:
+                return entry.extensions
+        return []
 
     @property
     def tool_managers(self) -> list[Mise]:

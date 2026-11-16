@@ -160,10 +160,15 @@ class AgentSettings:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
     enabled: StrictBool = True
     options: dict[str, StrictBool] = field(default_factory=dict)
+    extensions: list[StrictStr] = field(default_factory=list)
     env: Env = field(default_factory=dict)
 
 
 _ENV = "env"
+_EXTENSIONS = "extensions"
+
+# pi is the only agent whose extensions ask provisions
+EXTENSIONS_AGENT = "pi"
 
 
 def _to_settings(value: object) -> object:
@@ -171,8 +176,13 @@ def _to_settings(value: object) -> object:
         return {"enabled": value}
     if isinstance(value, dict):
         env = {_ENV: value[_ENV]} if _ENV in value else {}
-        options = {key: option for key, option in value.items() if key != _ENV}
-        return {"options": options} | env
+        extensions = {_EXTENSIONS: value[_EXTENSIONS]} if _EXTENSIONS in value else {}
+        options = {
+            key: option
+            for key, option in value.items()
+            if key not in (_ENV, _EXTENSIONS)
+        }
+        return {"options": options} | env | extensions
     raise PydanticCustomError(
         "bool_or_table", "Input should be a valid boolean or table"
     )
@@ -189,6 +199,19 @@ def _check_options(
     return entries
 
 
+def _check_extensions(
+    entries: dict[str, AgentSettings],
+) -> dict[str, AgentSettings]:
+    for name, settings in entries.items():
+        if name != EXTENSIONS_AGENT and settings.extensions:
+            raise PydanticCustomError(
+                "unsupported_extensions",
+                "extensions are only supported for the pi agent, not {name}",
+                {"name": repr(name)},
+            )
+    return entries
+
+
 ENTRIES = "entries"
 
 
@@ -200,6 +223,7 @@ class AgentTable:
     entries: Annotated[
         dict[AgentName, Annotated[AgentSettings, BeforeValidator(_to_settings)]],
         AfterValidator(_check_options),
+        AfterValidator(_check_extensions),
     ] = field(default_factory=dict)
 
 

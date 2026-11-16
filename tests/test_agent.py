@@ -372,3 +372,59 @@ def test_loading_a_config_rejects_an_unknown_default_agent(tmp_path: Path) -> No
     assert problems == [
         "layers.base.agents.default: unknown agent 'hal' (known: claude, codex, opencode, pi)"
     ]
+
+
+def test_loading_a_config_reads_pi_extensions(tmp_path: Path) -> None:
+    # given a layer declaring extensions for pi
+    toml = (
+        "[layers.base.agents.pi]\n"
+        'extensions = ["@foo/bar", "https://example.com/ext.git"]\n'
+    )
+
+    # when loading it
+    flavors_dir = tmp_path / "flavors"
+    flavors_dir.mkdir()
+    (flavors_dir / "arch.toml").write_text('distribution = "arch"\n' + toml)
+    cfg = config.load(flavors_dir)
+
+    # then the extensions are read, in order
+    assert cfg.flavors["arch"].layers["base"].agents.entries["pi"].extensions == [
+        "@foo/bar",
+        "https://example.com/ext.git",
+    ]
+
+
+def test_loading_a_config_reads_pi_extensions_from_an_inline_table(
+    tmp_path: Path,
+) -> None:
+    # given a layer declaring extensions for pi inline
+    toml = '[layers.base.agents]\npi = { extensions = ["@foo/bar"] }\n'
+
+    # when loading it
+    flavors_dir = tmp_path / "flavors"
+    flavors_dir.mkdir()
+    (flavors_dir / "arch.toml").write_text('distribution = "arch"\n' + toml)
+    cfg = config.load(flavors_dir)
+
+    # then the extensions are read
+    assert cfg.flavors["arch"].layers["base"].agents.entries["pi"].extensions == [
+        "@foo/bar"
+    ]
+
+
+def test_loading_a_config_rejects_extensions_for_agents_that_do_not_support_them(
+    tmp_path: Path,
+) -> None:
+    # given a layer declaring extensions for claude
+    toml = '[layers.base.agents.claude]\nextensions = ["@foo/bar"]\n'
+
+    # when loading it
+    problems = _load_problems(tmp_path, toml)
+
+    # then the problem is reported, naming the agent
+    assert problems == [
+        (
+            "layers.base.agents: extensions are only supported for the pi agent, "
+            "not 'claude'"
+        )
+    ]

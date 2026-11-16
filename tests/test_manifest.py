@@ -510,6 +510,64 @@ def test_agent_names_removes_disabled_agents_from_lower_layers() -> None:
     assert agent_names == ["codex"]
 
 
+def test_pi_extensions_combines_extensions_from_every_applied_layer() -> None:
+    # given two layers enabling pi, each declaring extensions, one repeating
+    # an extension of the other
+    resolved = _resolved(
+        {
+            "base": Layer(
+                agents=AgentTable(entries={"pi": AgentSettings(extensions=["@a/one"])})
+            ),
+            "python": Layer(
+                agents=AgentTable(
+                    entries={
+                        "pi": AgentSettings(extensions=["@b/two", "@a/one"]),
+                        "claude": AgentSettings(),
+                    }
+                )
+            ),
+        }
+    )
+
+    # when resolving the pi extensions
+    extensions = resolved.pi_extensions
+
+    # then the extensions of both layers are included, in order, without
+    # duplicates
+    assert extensions == ["@a/one", "@b/two"]
+
+
+def test_pi_extensions_is_empty_when_pi_is_not_enabled() -> None:
+    # given a layer enabling an agent other than pi
+    resolved = _resolved({"base": Layer(agents=_enabling("claude"))})
+
+    # when resolving the pi extensions
+    extensions = resolved.pi_extensions
+
+    # then there are none
+    assert extensions == []
+
+
+def test_pi_extensions_is_empty_when_pi_is_disabled_in_a_later_layer() -> None:
+    # given a layer enabling pi with extensions, and a later layer disabling pi
+    resolved = _resolved(
+        {
+            "base": Layer(
+                agents=AgentTable(entries={"pi": AgentSettings(extensions=["@a/one"])})
+            ),
+            "python": Layer(
+                agents=AgentTable(entries={"pi": AgentSettings(enabled=False)})
+            ),
+        }
+    )
+
+    # when resolving the pi extensions
+    extensions = resolved.pi_extensions
+
+    # then there are none
+    assert extensions == []
+
+
 def test_agents_resolves_each_configured_agent_name_in_order() -> None:
     # given a flavour with two layers, each enabling an agent
     resolved = _resolved(
