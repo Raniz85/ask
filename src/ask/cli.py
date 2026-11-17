@@ -197,6 +197,9 @@ def _converge_container(
 
     provisioner.provision_user(user)
     container.converge(mounts)
+    provisioner.fix_bind_mount_ownership(
+        [mount.container_path for mount in mounts], user
+    )
 
     provisioner.provision_packages(distribution, official_packages)
     aur_builder.install_packages(distribution, aur_packages)
@@ -219,10 +222,6 @@ def _converge_container(
     if stale:
         provisioner.remove_packages(distribution, stale)
     container.set_managed_packages(resolved_packages)
-
-    provisioner.fix_bind_mount_ownership(
-        [mount.container_path for mount in mounts], user
-    )
 
     mise_provisioner = provision.MiseProvisioner(container)
     path_entries: list[Path] = []

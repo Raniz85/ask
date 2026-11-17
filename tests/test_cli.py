@@ -569,7 +569,7 @@ def test_converge_provisions_the_resolved_user(tmp_path: Path) -> None:
     )
 
 
-def test_converge_provisions_the_user_before_mounting_home_relative_paths(
+def test_converge_prepares_the_user_and_mounts_before_installing_packages(
     tmp_path: Path,
 ) -> None:
     # given a project directory, and a config declaring a user
@@ -592,9 +592,15 @@ def test_converge_provisions_the_user_before_mounting_home_relative_paths(
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
         container.converge.side_effect = lambda *a, **k: call_order.append("converge")
-        provisioner_cls.return_value.provision_user.side_effect = lambda *a, **k: (
-            call_order.append("provision_user")
-        )
+        provisioner = provisioner_cls.return_value
+        for step in (
+            "provision_user",
+            "fix_bind_mount_ownership",
+            "provision_packages",
+        ):
+            getattr(provisioner, step).side_effect = lambda *a, step=step, **k: (
+                call_order.append(step)
+            )
 
         converge()
 
@@ -602,7 +608,14 @@ def test_converge_provisions_the_user_before_mounting_home_relative_paths(
     # before any home-relative path (shell rc, agent state) is mounted into
     # the container, since the mount's container-side ancestor directories
     # must already exist
-    assert call_order == ["provision_user", "converge"]
+    # and the mounts' ancestors are handed to the user before anything else
+    # runs, so packages installed afterwards can write beneath them
+    assert call_order == [
+        "provision_user",
+        "converge",
+        "fix_bind_mount_ownership",
+        "provision_packages",
+    ]
 
 
 def test_converge_provisions_the_instance_environment_variables(
