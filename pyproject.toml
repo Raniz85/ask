@@ -1,8 +1,31 @@
 [project]
 name = "ask"
 version = "0.1.0"
-description = "Add your description here"
+description = "Persistent containers for projects"
 readme = "README.md"
+authors = [
+  { name = "Daniel Raniz Raneland", email = "raniz@raneland.se" },
+]
+maintainers = [
+  { name = "Daniel Raniz Raneland", email = "raniz@raneland.se" },
+]
+license = "MIT"
+keywords = [
+  "development-environment",
+  "containers",
+  "linux",
+  "devcontainer",
+  "isolation",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: Utilities",
+]
+
 requires-python = ">=3.13"
 dependencies = [
   "cyclopts>=5.3.3",
@@ -11,6 +34,10 @@ dependencies = [
   "pyinfrincus>=0.8.1",
   "rich>=15.0.0",
 ]
+[project.urls]
+Homepage = "https://github.com/raniz85/ask"
+Repository = "https://github.com/raniz85/ask"
+Issues = "https://github.com/raniz85/ask/issues"
 
 [project.scripts]
 ask = "ask:main"
