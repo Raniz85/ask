@@ -74,15 +74,23 @@ def _command_succeeds(command: list[str]) -> bool:
         return False
 
 
-def _host_distribution(path: Path = Path("/etc/os-release")) -> str:
+def _os_release_field(name: str, path: Path = Path("/etc/os-release")) -> str:
     try:
         lines = path.read_text().splitlines()
     except OSError:
         return ""
     for line in lines:
-        if line.startswith("ID="):
-            return line.removeprefix("ID=").strip('"')
+        if line.startswith(f"{name}="):
+            return line.removeprefix(f"{name}=").strip('"')
     return ""
+
+
+def _host_distribution(path: Path = Path("/etc/os-release")) -> str:
+    return _os_release_field("ID", path)
+
+
+def _host_codename(path: Path = Path("/etc/os-release")) -> str:
+    return _os_release_field("VERSION_CODENAME", path)
 
 
 def _command_output(command: list[str]) -> str:
@@ -105,21 +113,92 @@ def _has_sufficient_subid_range(path: Path, name: str) -> bool:
     return False
 
 
-def incus_install_steps(distribution: str) -> list[SetupStep]:
-    if distribution != "arch":
-        return []
+ZABBLY_KEY_URL = "https://pkgs.zabbly.com/key.asc"
+ZABBLY_KEY_PATH = Path("/etc/apt/keyrings/zabbly.asc")
+ZABBLY_SOURCES_PATH = Path("/etc/apt/sources.list.d/zabbly-incus-stable.list")
+
+
+def _zabbly_sources_line(codename: str) -> str:
+    return (
+        f"deb [signed-by={ZABBLY_KEY_PATH}] "
+        f"https://pkgs.zabbly.com/incus/stable {codename} main"
+    )
+
+
+def _sources_file_matches(path: Path, line: str) -> bool:
+    try:
+        return line in path.read_text().splitlines()
+    except OSError:
+        return False
+
+
+def _init_incus_step() -> SetupStep:
+    return SetupStep(
+        description="Initialise Incus on this machine.",
+        command=["sudo", "incus", "admin", "init"],
+        done=lambda: _command_succeeds(["incus", "list"]),
+    )
+
+
+def _arch_install_steps() -> list[SetupStep]:
     return [
         SetupStep(
             description="Install Incus with pacman.",
             command=["sudo", "pacman", "-S", "--needed", "--noconfirm", "incus"],
             done=lambda: shutil.which("incus") is not None,
         ),
-        SetupStep(
-            description="Initialise Incus on this machine.",
-            command=["sudo", "incus", "admin", "init"],
-            done=lambda: _command_succeeds(["incus", "list"]),
-        ),
+        _init_incus_step(),
     ]
+
+
+def _debian_install_steps(codename: str) -> list[SetupStep]:
+    sources_line = _zabbly_sources_line(codename)
+    return [
+        SetupStep(
+            description="Install the Zabbly package repository signing key.",
+            command=[
+                "sudo",
+                "sh",
+                "-c",
+                (
+                    f"install -d -m 0755 /etc/apt/keyrings && "
+                    f"curl -fsSL {ZABBLY_KEY_URL} -o {ZABBLY_KEY_PATH}"
+                ),
+            ],
+            done=lambda: ZABBLY_KEY_PATH.is_file(),
+        ),
+        SetupStep(
+            description=f"Add the Zabbly Incus repository for Debian {codename!r}.",
+            command=[
+                "sudo",
+                "sh",
+                "-c",
+                f"echo {shlex.quote(sources_line)} > {ZABBLY_SOURCES_PATH}",
+            ],
+            done=lambda: _sources_file_matches(ZABBLY_SOURCES_PATH, sources_line),
+        ),
+        SetupStep(
+            description="Update the apt package lists.",
+            command=["sudo", "apt-get", "update"],
+            done=lambda: False,
+        ),
+        SetupStep(
+            description="Install Incus with apt.",
+            command=["sudo", "apt-get", "install", "-y", "incus"],
+            done=lambda: shutil.which("incus") is not None,
+        ),
+        _init_incus_step(),
+    ]
+
+
+def incus_install_steps(distribution: str) -> list[SetupStep]:
+    if distribution == "arch":
+        return _arch_install_steps()
+    if distribution == "debian":
+        codename = _host_codename()
+        if codename:
+            return _debian_install_steps(codename)
+    return []
 
 
 def incus_steps(username: str, uid: int) -> list[SetupStep]:

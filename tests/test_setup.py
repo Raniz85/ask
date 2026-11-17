@@ -9,7 +9,10 @@ from ask.errors import AskError
 from ask.setup import (
     SetupStep,
     _command_succeeds,
+    _host_codename,
     _host_distribution,
+    _sources_file_matches,
+    _zabbly_sources_line,
     example_config_path,
     incus_install_steps,
     incus_steps,
@@ -367,8 +370,136 @@ def test_incus_install_steps_are_empty_for_unsupported_distributions() -> None:
     # when building the installation steps for a distribution ask does not
     # support yet
     # then there are no steps
-    assert incus_install_steps("debian") == []
+    assert incus_install_steps("fedora") == []
     assert incus_install_steps("") == []
+
+
+def test_incus_install_steps_for_debian_use_the_zabbly_repo_and_apt() -> None:
+    # when building the incus installation steps for a Debian trixie host
+    with patch("ask.setup._host_codename", return_value="trixie"):
+        steps = incus_install_steps("debian")
+
+    # then the zabbly signing key and repository are added for the host
+    # codename, apt installs incus, and incus is initialised
+    commands = [shlex.join(step.command) for step in steps]
+    assert any(
+        "https://pkgs.zabbly.com/key.asc" in command
+        and "/etc/apt/keyrings/zabbly.asc" in command
+        for command in commands
+    )
+    assert any(
+        "zabbly-incus-stable.list" in command
+        and "https://pkgs.zabbly.com/incus/stable trixie main" in command
+        for command in commands
+    )
+    assert ["sudo", "apt-get", "update"] in [step.command for step in steps]
+    assert ["sudo", "apt-get", "install", "-y", "incus"] in [
+        step.command for step in steps
+    ]
+    assert ["sudo", "incus", "admin", "init"] in [step.command for step in steps]
+
+    # and the steps run in dependency order: key, repo, update, install, init
+    order = [
+        next(i for i, c in enumerate(commands) if "key.asc" in c),
+        next(i for i, c in enumerate(commands) if "zabbly-incus-stable.list" in c),
+        next(i for i, c in enumerate(commands) if c == "sudo apt-get update"),
+        next(i for i, c in enumerate(commands) if c == "sudo apt-get install -y incus"),
+        next(i for i, c in enumerate(commands) if c == "sudo incus admin init"),
+    ]
+    assert order == sorted(order)
+
+
+def test_incus_install_steps_for_debian_without_codename_are_empty() -> None:
+    # given a Debian host whose os-release has no VERSION_CODENAME
+    with patch("ask.setup._host_codename", return_value=""):
+        # when building the installation steps
+        # then there are none, rather than a broken repository line
+        assert incus_install_steps("debian") == []
+
+
+def test_debian_install_step_done_checks(tmp_path: Path) -> None:
+    # given the debian installation steps for a bookworm host
+    with patch("ask.setup._host_codename", return_value="bookworm"):
+        key, repo, update, install, init = incus_install_steps("debian")
+    key_path = tmp_path / "zabbly.asc"
+    sources_path = tmp_path / "zabbly-incus-stable.list"
+    sources_line = _zabbly_sources_line("bookworm")
+
+    with (
+        patch("ask.setup.ZABBLY_KEY_PATH", key_path),
+        patch("ask.setup.ZABBLY_SOURCES_PATH", sources_path),
+        patch("ask.setup.shutil.which", return_value=None),
+        patch("ask.setup.subprocess.run") as run,
+    ):
+        run.return_value = _completed(1)
+
+        # when nothing is set up yet, every step is pending
+        assert [
+            key.done(),
+            repo.done(),
+            update.done(),
+            install.done(),
+            init.done(),
+        ] == [
+            False,
+            False,
+            False,
+            False,
+            False,
+        ]
+
+        # when the key and repository are in place and incus is installed and
+        # initialised, only the apt update step remains pending
+        key_path.write_text("key")
+        sources_path.write_text(sources_line + "\n")
+        with (
+            patch("ask.setup.shutil.which", return_value="/usr/bin/incus"),
+        ):
+            run.return_value = _completed(0)
+            assert [
+                key.done(),
+                repo.done(),
+                update.done(),
+                install.done(),
+                init.done(),
+            ] == [True, True, False, True, True]
+
+
+def test_zabbly_sources_line_targets_the_host_codename() -> None:
+    assert _zabbly_sources_line("trixie") == (
+        "deb [signed-by=/etc/apt/keyrings/zabbly.asc] "
+        "https://pkgs.zabbly.com/incus/stable trixie main"
+    )
+
+
+def test_sources_file_match_requires_the_exact_line(tmp_path: Path) -> None:
+    sources = tmp_path / "zabbly-incus-stable.list"
+    line = _zabbly_sources_line("trixie")
+    assert _sources_file_matches(sources, line) is False
+    sources.write_text("# comment\n" + line + "\n")
+    assert _sources_file_matches(sources, line) is True
+    sources.write_text(line + " extra\n")
+    assert _sources_file_matches(sources, line) is False
+
+
+def test_host_codename_reads_version_codename_from_os_release(tmp_path: Path) -> None:
+    # given an os-release file
+    os_release = tmp_path / "os-release"
+    os_release.write_text(
+        'NAME="Debian GNU/Linux"\nID=debian\nVERSION_CODENAME=trixie\n'
+    )
+
+    # when detecting the host release codename
+    # then VERSION_CODENAME is returned, unquoted
+    assert _host_codename(os_release) == "trixie"
+
+    os_release.write_text('NAME="Debian"\nID="debian"\nVERSION_CODENAME="bookworm"\n')
+    assert _host_codename(os_release) == "bookworm"
+
+    # and a file without the field, or a missing file, yields an empty string
+    os_release.write_text('NAME="Arch Linux"\nID=arch\n')
+    assert _host_codename(os_release) == ""
+    assert _host_codename(tmp_path / "missing") == ""
 
 
 def test_install_step_done_check_detects_whether_incus_is_installed() -> None:
