@@ -1,3 +1,4 @@
+import logging
 import os
 import pwd
 import shlex
@@ -32,6 +33,8 @@ from ask import (
 from ask.errors import AskError
 from ask.module import Module
 from ask.user import home_env
+
+logger = logging.getLogger(__name__)
 
 # How often a running Ask command refreshes the recorded invocation, so the
 # in-instance idle watch keeps the instance up while Ask is using it. Must
@@ -154,6 +157,7 @@ def converge(
     slug.slugify(project_dir.name)
     container, _ = _running_container(project_dir, create_missing)
     with _keep_invocation_fresh(container):
+        logger.debug("converging container %r", container.name)
         _converge_container(container, project_dir, resolved, distribution)
 
 
@@ -229,12 +233,18 @@ def _converge_container(
     container.set_path_prefix(path_entries)
 
     configuration = convergence.effective_configuration(resolved)
+    fingerprint = convergence.fingerprint(configuration)
     container.set_converged_state(
         incus.ConvergedState(
-            fingerprint=convergence.fingerprint(configuration),
+            fingerprint=fingerprint,
             configuration=configuration,
             at=datetime.now(UTC),
         )
+    )
+    logger.debug(
+        "container %r converged (config hash %s)",
+        container.name,
+        fingerprint.config_hash,
     )
 
 
@@ -423,10 +433,14 @@ def _running_container(
             raise incus.ContainerNotFoundError(
                 f"No container named {container_name!r}. Run `ask create` first."
             )
+        logger.debug("container %r does not exist; creating it", container_name)
         create()
         return container, None
     if not snapshot.is_running():
+        logger.debug("starting stopped container %r", container_name)
         container.start()
+    else:
+        logger.debug("container %r is already running", container_name)
     _record_invocation(container)
     return container, snapshot
 
@@ -437,7 +451,16 @@ def _configuration_changed(
     if snapshot is None:
         return False
     configuration = convergence.effective_configuration(resolved)
-    return snapshot.converged_fingerprint() != convergence.fingerprint(configuration)
+    current = convergence.fingerprint(configuration)
+    converged = snapshot.converged_fingerprint()
+    changed = converged != current
+    logger.debug(
+        "container converged fingerprint %s, current %s: configuration %s",
+        converged,
+        current,
+        "changed" if changed else "unchanged",
+    )
+    return changed
 
 
 def _should_converge(converge_changed: bool | None) -> bool:
@@ -460,10 +483,12 @@ def _converged_container(
         freshly_created = snapshot is None
         if not freshly_created:
             assert snapshot is not None
-            if _configuration_changed(snapshot, resolved) and _should_converge(
-                converge_changed
-            ):
-                converge()
+            if _configuration_changed(snapshot, resolved):
+                if _should_converge(converge_changed):
+                    logger.debug("converging container %r", container.name)
+                    converge()
+                else:
+                    logger.debug("skipping convergence of container %r", container.name)
     return container
 
 

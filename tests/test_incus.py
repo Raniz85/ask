@@ -1,4 +1,5 @@
 import json
+import logging
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from ask.incus import (
     InstanceSnapshot,
     Mount,
     _diff_devices,
+    _incus,
     device_name_for,
     ensure_storage_volume,
     image_for,
@@ -1134,3 +1136,53 @@ def test_set_invocation_at_stores_the_timestamp_under_a_user_key() -> None:
         ],
         check=True,
     )
+
+
+def test_incus_logs_each_executed_command_at_debug_level(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # given a mocked subprocess.run
+    with (
+        patch("ask.incus.subprocess.run"),
+        caplog.at_level(logging.DEBUG, logger="ask.incus"),
+    ):
+        # when an incus command is executed
+        _incus(["incus", "list", "my-project", "--format", "json"], capture=True)
+
+    # then the full command line is logged at debug level
+    assert "incus list my-project --format json" in caplog.text
+
+
+def test_exec_command_logs_the_executed_command_at_debug_level(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # given a mocked subprocess.run and a container
+    container = Container("my-project")
+    with (
+        patch("ask.incus.subprocess.run") as run,
+        caplog.at_level(logging.DEBUG, logger="ask.incus"),
+    ):
+        run.return_value.returncode = 0
+        # when executing a command in the container
+        container.exec_command(1000, 1000, Path("/project"), ["make", "test"])
+
+    # then the full incus exec command line is logged at debug level
+    assert "incus exec my-project" in caplog.text
+    assert "make test" in caplog.text
+
+
+def test_run_command_logs_the_executed_command_at_debug_level(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # given a mocked subprocess.run and a container
+    container = Container("my-project")
+    with (
+        patch("ask.incus.subprocess.run"),
+        caplog.at_level(logging.DEBUG, logger="ask.incus"),
+    ):
+        # when running a command in the container
+        container.run_command(["id", "-u"])
+
+    # then the full incus exec command line is logged at debug level
+    assert "incus exec my-project" in caplog.text
+    assert "id -u" in caplog.text

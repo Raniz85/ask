@@ -1,4 +1,5 @@
 import io
+import logging
 import subprocess
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
@@ -1503,3 +1504,68 @@ def test_provision_instance_env_puts_the_profile_script_in_place() -> None:
     assert add_op.call_args.kwargs["src"].getvalue() == profile_script(
         {"EDITOR": "nvim"}
     )
+
+
+def test_provision_packages_logs_the_packages_being_installed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # given a provisioner targeting a named container
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning packages
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+        caplog.at_level(logging.DEBUG, logger="ask.provision"),
+    ):
+        provisioner.provision_packages("arch", ["uv", "python"])
+
+    # then the package list is logged at debug level
+    assert "uv" in caplog.text
+    assert "python" in caplog.text
+
+
+def test_remove_packages_logs_the_packages_being_removed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # given a provisioner targeting a named container
+    provisioner = Provisioner(Container("my-project"))
+
+    # when removing stale packages
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+        caplog.at_level(logging.DEBUG, logger="ask.provision"),
+    ):
+        provisioner.remove_packages("arch", ["old-package"])
+
+    # then the removed packages are logged at debug level
+    assert "removing packages" in caplog.text
+    assert "old-package" in caplog.text
+
+
+def test_provision_session_logs_the_target_container(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # given a provisioner targeting a named container
+    provisioner = Provisioner(Container("my-project"))
+
+    # when opening a provisioning session
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.run_ops"),
+        caplog.at_level(logging.DEBUG, logger="ask.provision"),
+        provisioner.session(),
+    ):
+        pass
+
+    # then the target container is logged at debug level
+    assert "my-project" in caplog.text

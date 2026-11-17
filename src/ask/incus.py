@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import shlex
 import subprocess
@@ -7,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ask.errors import AskError
+
+logger = logging.getLogger(__name__)
 
 _IMAGE_ALIASES = {
     "arch": "images:archlinux/current",
@@ -56,6 +59,7 @@ def _failure_message(error: subprocess.CalledProcessError) -> str:
 def _incus(
     command: list[str], capture: bool = False
 ) -> subprocess.CompletedProcess[str]:
+    logger.debug("executing %s", shlex.join(command))
     try:
         if capture:
             return subprocess.run(command, check=True, capture_output=True, text=True)
@@ -217,8 +221,10 @@ class Container:
         _incus(["incus", "delete", self.name])
 
     def run_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        full_command = ["incus", "exec", self.name, "--", *command]
+        logger.debug("executing %s", shlex.join(full_command))
         return subprocess.run(
-            ["incus", "exec", self.name, "--", *command],
+            full_command,
             check=False,
             capture_output=True,
             text=True,
@@ -237,21 +243,23 @@ class Container:
             for key, value in (env or {}).items()
             for arg in ("--env", f"{key}={value}")
         ]
+        full_command = [
+            "incus",
+            "exec",
+            self.name,
+            "--user",
+            str(uid),
+            "--group",
+            str(gid),
+            "--cwd",
+            str(cwd),
+            *env_args,
+            "--",
+            *command,
+        ]
+        logger.debug("executing %s", shlex.join(full_command))
         result = subprocess.run(
-            [
-                "incus",
-                "exec",
-                self.name,
-                "--user",
-                str(uid),
-                "--group",
-                str(gid),
-                "--cwd",
-                str(cwd),
-                *env_args,
-                "--",
-                *command,
-            ],
+            full_command,
             check=False,
         )
         return result.returncode

@@ -22,6 +22,7 @@ from ask.cli import (
 )
 from ask.cli import run as run_script
 from ask.errors import AskError
+from ask.log import configure_debug
 
 app = cyclopts.App()
 app.command(create)
@@ -38,6 +39,8 @@ app.command(run_script, name="run")
 
 
 def run(tokens: Sequence[str], debug: bool) -> None:
+    if debug:
+        configure_debug()
     try:
         app(_expand_shortcut(tokens))
     except (Exception, KeyboardInterrupt) as error:

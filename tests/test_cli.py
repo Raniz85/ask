@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -3526,3 +3527,62 @@ def test_init_refuses_to_overwrite_an_existing_ask_toml(tmp_path: Path) -> None:
 
     # then the existing file is left untouched
     assert path.read_text() == 'packages = ["uv"]\n'
+
+
+def test_enter_logs_that_the_configuration_changed_and_converges(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # given a project whose container was converged with a stale configuration
+    project_dir, config_path = _project(tmp_path)
+
+    # when entering the container and accepting to converge
+    with caplog.at_level(logging.DEBUG, logger="ask.cli"):
+        _enter_with(project_dir, config_path, _STALE_SNAPSHOT, tty=True, answer="y")
+
+    # then the changed configuration and the convergence are logged at debug level
+    assert "configuration changed" in caplog.text
+    assert "converging container" in caplog.text
+
+
+def test_enter_logs_that_the_configuration_is_unchanged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # given a project whose container was converged with its current configuration
+    project_dir, config_path = _project(tmp_path)
+    snapshot = _converged_snapshot(project_dir)
+
+    # when entering the container
+    with caplog.at_level(logging.DEBUG, logger="ask.cli"):
+        _enter_with(project_dir, config_path, snapshot, tty=True)
+
+    # then the unchanged configuration is logged at debug level
+    assert "configuration unchanged" in caplog.text
+
+
+def test_converge_logs_starting_a_stopped_container(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # given a project directory with a stopped container
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR)
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+        caplog.at_level(logging.DEBUG, logger="ask.cli"),
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then starting the stopped container is logged at debug level
+    assert "starting stopped container 'my-project'" in caplog.text

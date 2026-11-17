@@ -1,4 +1,5 @@
 import io
+import logging
 import shlex
 import sys
 from collections.abc import Callable, Iterator
@@ -20,6 +21,8 @@ from ask import env, idle, incus
 from ask.errors import AskError
 from ask.tool_manager import config_digest
 from ask.user import ResolvedUser, home_env
+
+logger = logging.getLogger(__name__)
 
 
 class ProvisioningError(AskError):
@@ -72,6 +75,9 @@ class Provisioner:
 
     @contextmanager
     def session(self) -> Iterator[State]:
+        logger.debug(
+            "opening provisioning session for container %r", self.container.name
+        )
         inventory = Inventory(([f"@incus/{self.container.name}"], {}))
         state = State(inventory, PyinfraConfig())
         state.print_output = True
@@ -86,6 +92,7 @@ class Provisioner:
             ) from error
 
     def provision_user(self, user: ResolvedUser) -> None:
+        logger.debug("provisioning user %r (uid %s)", user.name, user.uid)
         with self.session() as state:
             add_op(state, server.group, group=user.group_name, gid=user.gid)
             add_op(
@@ -100,11 +107,13 @@ class Provisioner:
             )
 
     def provision_packages(self, distribution: str, packages: list[str]) -> None:
+        logger.debug("installing packages on %s: %s", distribution, ", ".join(packages))
         operation = _package_operation_for(distribution)
         with self.session() as state:
             add_op(state, operation, packages=packages, update=True, upgrade=True)
 
     def remove_packages(self, distribution: str, packages: list[str]) -> None:
+        logger.debug("removing packages from %s: %s", distribution, ", ".join(packages))
         operation = _package_operation_for(distribution)
         with self.session() as state:
             add_op(state, operation, packages=packages, present=False)
@@ -147,6 +156,7 @@ class Provisioner:
                 )
 
     def provision_services(self, services: dict[str, str]) -> None:
+        logger.debug("provisioning services: %s", services)
         with self.session() as state:
             for service, state_desired in services.items():
                 if state_desired == "enabled":
@@ -175,6 +185,9 @@ class Provisioner:
                     )
 
     def provision_instance_env(self, variables: dict[str, str]) -> None:
+        logger.debug(
+            "provisioning instance environment variables: %s", sorted(variables)
+        )
         with self.session() as state:
             add_op(
                 state,
@@ -187,6 +200,7 @@ class Provisioner:
             )
 
     def provision_idle_shutdown(self, distribution: str, user: ResolvedUser) -> None:
+        logger.debug("provisioning idle shutdown for user %r", user.name)
         operation = _package_operation_for(distribution)
         with self.session() as state:
             add_op(state, operation, packages=idle.WATCH_PACKAGES)
@@ -393,6 +407,7 @@ class AurBuilder:
             return
         if distribution != "arch":
             raise ValueError(f"AUR packages are not supported on {distribution!r}")
+        logger.debug("installing AUR packages: %s", ", ".join(packages))
 
         self.provision_builder()
         self.share_paru_cache()

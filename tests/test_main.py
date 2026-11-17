@@ -114,6 +114,39 @@ def test_run_reraises_errors_when_debugging(error: Exception) -> None:
     assert raised.value is error
 
 
+def test_run_configures_debug_logging_when_debugging() -> None:
+    # given a command that fails
+    error = RuntimeError("boom")
+
+    # when running the CLI with debugging enabled
+    with (
+        _app_raising(error),
+        patch("ask.configure_debug") as configure,
+        pytest.raises(Exception) as raised,
+    ):
+        run([], debug=True)
+
+    # then the original error propagates and debug logging is configured
+    assert raised.value is error
+    configure.assert_called_once_with()
+
+
+def test_run_does_not_configure_debug_logging_without_debugging() -> None:
+    # given a command that fails
+    error = AskError("user error")
+
+    # when running the CLI without debugging enabled
+    with (
+        _app_raising(error),
+        patch("ask.configure_debug") as configure,
+        pytest.raises(SystemExit),
+    ):
+        run([], debug=False)
+
+    # then debug logging is not configured
+    configure.assert_not_called()
+
+
 def test_run_dispatches_an_unknown_command_that_matches_one_agent() -> None:
     # given an unknown command that resolves to the agent command
     with (
