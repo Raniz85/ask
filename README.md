@@ -135,9 +135,10 @@ Options following the agent name, or unknown options if no name is given, are pa
 To apply configuration changes explicitly, or to manage the container by hand:
 
 ```shell
-~/my-project $ ask converge   # apply ask.toml to the container
-~/my-project $ ask create     # create the container
-~/my-project $ ask restart    # restart the container
-~/my-project $ ask stop       # stop the container now instead of waiting for idle shutdown
-~/my-project $ ask destroy    # delete the container and its configuration entirely
+~/my-project $ ask converge              # apply ask.toml to the container
+~/my-project $ ask create                # create the container
+~/my-project $ ask restart               # restart the container
+~/my-project $ ask stop                  # stop the container now instead of waiting for idle shutdown
+~/my-project $ ask destroy               # delete the container and its configuration entirely
+~/ $ ask rename my-project your-project  # rename the ask and the project directory
 ```

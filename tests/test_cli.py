@@ -20,6 +20,7 @@ from ask.cli import (
     enter,
     exec,
     init,
+    rename,
     resolve_shortcut,
     restart,
     run,
@@ -3599,3 +3600,142 @@ def test_converge_logs_starting_a_stopped_container(
 
     # then starting the stopped container is logged at debug level
     assert "starting stopped container 'my-project'" in caplog.text
+
+
+def test_rename_renames_the_directory_and_the_container(tmp_path: Path) -> None:
+    # given a project directory "old-project" with a running container, and no
+    # "new-project" directory
+    old_dir = tmp_path / "old-project"
+    old_dir.mkdir()
+    new_dir = tmp_path / "new-project"
+
+    # when renaming the project
+    with (
+        patch("ask.cli.Path.cwd", return_value=tmp_path),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
+
+        rename("old-project", "new-project")
+
+    # then the directory is renamed, the container is stopped, renamed and its
+    # bind mount is moved to the new directory
+    assert not old_dir.exists()
+    assert new_dir.is_dir()
+    assert container.method_calls == [
+        call.snapshot(),
+        call.stop(),
+        call.rename("new-project"),
+        call.move_bind_mount(old_dir, new_dir),
+    ]
+
+
+def test_rename_leaves_a_stopped_container_running_state_alone(
+    tmp_path: Path,
+) -> None:
+    # given a project directory "old-project" with a stopped container
+    old_dir = tmp_path / "old-project"
+    old_dir.mkdir()
+
+    # when renaming the project
+    with (
+        patch("ask.cli.Path.cwd", return_value=tmp_path),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
+
+        rename("old-project", "new-project")
+
+    # then the container is renamed without being stopped first
+    assert container.method_calls == [
+        call.snapshot(),
+        call.rename("new-project"),
+        call.move_bind_mount(old_dir, tmp_path / "new-project"),
+    ]
+
+
+def test_rename_only_fixes_the_container_when_the_directory_is_already_renamed(
+    tmp_path: Path,
+) -> None:
+    # given no "old-project" directory, but a "new-project" directory, and a
+    # running container for the old name
+    old_dir = tmp_path / "old-project"
+    new_dir = tmp_path / "new-project"
+    new_dir.mkdir()
+
+    # when renaming the project
+    with (
+        patch("ask.cli.Path.cwd", return_value=tmp_path),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
+
+        rename("old-project", "new-project")
+
+    # then only the container is stopped, renamed and its bind mount moved
+    assert new_dir.is_dir()
+    assert container.method_calls == [
+        call.snapshot(),
+        call.stop(),
+        call.rename("new-project"),
+        call.move_bind_mount(old_dir, new_dir),
+    ]
+
+
+def test_rename_rejects_when_neither_directory_exists(tmp_path: Path) -> None:
+    # given neither an "old-project" nor a "new-project" directory
+    # when renaming the project
+    with (
+        patch("ask.cli.Path.cwd", return_value=tmp_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(AskError) as error,
+    ):
+        rename("old-project", "new-project")
+
+    # then the error names both missing directories, and no container is touched
+    assert str(error.value) == (
+        f"Neither {tmp_path / 'old-project'} nor {tmp_path / 'new-project'} exists."
+    )
+    container_cls.assert_not_called()
+
+
+def test_rename_rejects_when_both_directories_exist(tmp_path: Path) -> None:
+    # given both an "old-project" and a "new-project" directory
+    (tmp_path / "old-project").mkdir()
+    (tmp_path / "new-project").mkdir()
+
+    # when renaming the project
+    with (
+        patch("ask.cli.Path.cwd", return_value=tmp_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(AskError) as error,
+    ):
+        rename("old-project", "new-project")
+
+    # then the error says the target already exists, and no container is touched
+    assert "already exists" in str(error.value)
+    container_cls.assert_not_called()
+
+
+def test_rename_rejects_a_missing_container(tmp_path: Path) -> None:
+    # given a project directory "old-project" without a container
+    old_dir = tmp_path / "old-project"
+    old_dir.mkdir()
+
+    with (
+        patch("ask.cli.Path.cwd", return_value=tmp_path),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(ContainerNotFoundError) as error,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = None
+
+        # when renaming the project
+        rename("old-project", "new-project")
+
+    # then the error says the container does not exist, and nothing is renamed
+    assert str(error.value) == "No container named 'old-project'."
+    assert container.method_calls == [call.snapshot()]

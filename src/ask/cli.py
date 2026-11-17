@@ -409,6 +409,28 @@ def restart() -> None:
         container.start()
 
 
+def rename(old: str, new: str) -> None:
+    cwd = Path.cwd()
+    old_dir = cwd / old
+    new_dir = cwd / new
+    old_exists = old_dir.exists()
+    new_exists = new_dir.exists()
+    if not old_exists and not new_exists:
+        raise AskError(f"Neither {old_dir} nor {new_dir} exists.")
+    if old_exists and new_exists:
+        raise AskError(f"Cannot rename {old_dir} to {new_dir}: target already exists.")
+    if old_exists:
+        old_dir.rename(new_dir)
+    old_container = incus.Container(slug.slugify(old))
+    snapshot = old_container.snapshot()
+    if snapshot is None:
+        raise incus.ContainerNotFoundError(f"No container named {slug.slugify(old)!r}.")
+    if snapshot.is_running():
+        old_container.stop()
+    old_container.rename(slug.slugify(new))
+    incus.Container(slug.slugify(new)).move_bind_mount(old_dir, new_dir)
+
+
 def _confirm(prompt: str) -> bool:
     if not sys.stdin.isatty():
         return False

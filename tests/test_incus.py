@@ -1186,3 +1186,92 @@ def test_run_command_logs_the_executed_command_at_debug_level(
     # then the full incus exec command line is logged at debug level
     assert "incus exec my-project" in caplog.text
     assert "id -u" in caplog.text
+
+
+def test_rename_renames_the_named_container() -> None:
+    # given a container to rename
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when renaming it
+        container.rename("renamed-project")
+
+    # then incus is invoked to rename the container
+    run.assert_called_once_with(
+        ["incus", "rename", "my-project", "renamed-project"], check=True
+    )
+
+
+def test_move_bind_mount_replaces_the_device_for_the_old_path_with_one_for_the_new(
+    tmp_path: Path,
+) -> None:
+    # given a container with a bind-mount device for the old project path
+    old_path = tmp_path / "old-project"
+    new_path = tmp_path / "new-project"
+    container = Container("new-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result(device_name_for(old_path))
+
+        # when moving the bind mount to the new path
+        container.move_bind_mount(old_path, new_path)
+
+    # then the old device is removed and a shifted disk device is added for the
+    # new path, mounted at the same path inside the container
+    run.assert_any_call(
+        [
+            "incus",
+            "config",
+            "device",
+            "remove",
+            "new-project",
+            device_name_for(old_path),
+        ],
+        check=True,
+    )
+    run.assert_any_call(
+        [
+            "incus",
+            "config",
+            "device",
+            "add",
+            "new-project",
+            device_name_for(new_path),
+            "disk",
+            f"source={new_path}",
+            f"path={new_path}",
+            "shift=true",
+        ],
+        check=True,
+    )
+
+
+def test_move_bind_mount_adds_the_device_when_the_old_one_is_absent(
+    tmp_path: Path,
+) -> None:
+    # given a container without a bind-mount device for the old path
+    old_path = tmp_path / "old-project"
+    new_path = tmp_path / "new-project"
+    container = Container("new-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _list_devices_result()
+
+        # when moving the bind mount to the new path
+        container.move_bind_mount(old_path, new_path)
+
+    # then no device is removed, only the new device is added
+    remove_calls = [c for c in run.call_args_list if "remove" in c.args[0]]
+    assert remove_calls == []
+    run.assert_any_call(
+        [
+            "incus",
+            "config",
+            "device",
+            "add",
+            "new-project",
+            device_name_for(new_path),
+            "disk",
+            f"source={new_path}",
+            f"path={new_path}",
+            "shift=true",
+        ],
+        check=True,
+    )

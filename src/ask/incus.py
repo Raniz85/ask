@@ -220,6 +220,19 @@ class Container:
     def delete(self) -> None:
         _incus(["incus", "delete", self.name])
 
+    def rename(self, new_name: str) -> None:
+        _incus(["incus", "rename", self.name, new_name])
+
+    def move_bind_mount(self, old_path: Path, new_path: Path) -> None:
+        old_device = device_name_for(old_path)
+        if old_device in self._device_names():
+            _remove_device(self.name, old_device)
+        _add_disk_device(
+            self.name,
+            device_name_for(new_path),
+            Mount(host_path=new_path, container_path=new_path),
+        )
+
     def run_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         full_command = ["incus", "exec", self.name, "--", *command]
         logger.debug("executing %s", shlex.join(full_command))
