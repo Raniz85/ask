@@ -8,7 +8,10 @@ import pytest
 from ask.errors import AskError
 from ask.setup import (
     SetupStep,
+    _command_succeeds,
+    _host_distribution,
     example_config_path,
+    incus_install_steps,
     incus_steps,
     run_setup,
     run_step,
@@ -126,6 +129,7 @@ def test_run_setup_creates_example_config_and_runs_all_steps(
     # when running the full setup, accepting every prompt
     with (
         patch("subprocess.run") as run,
+        patch("ask.setup.incus_install_steps", return_value=[]),
         patch("ask.setup.incus_steps", return_value=steps),
     ):
         run_setup(
@@ -156,7 +160,10 @@ def test_run_setup_does_not_overwrite_an_existing_example_config(
     example.write_text("# my own configuration\n")
 
     # when running the setup
-    with patch("ask.setup.incus_steps", return_value=[]):
+    with (
+        patch("ask.setup.incus_install_steps", return_value=[]),
+        patch("ask.setup.incus_steps", return_value=[]),
+    ):
         run_setup(
             config_dir=config_dir,
             username="raniz",
@@ -180,7 +187,10 @@ def test_run_setup_prompts_for_the_config_file_too(
         return False
 
     # when running the setup but declining everything
-    with patch("ask.setup.incus_steps", return_value=[_step(["incus", "list"])]):
+    with (
+        patch("ask.setup.incus_install_steps", return_value=[]),
+        patch("ask.setup.incus_steps", return_value=[_step(["incus", "list"])]),
+    ):
         run_setup(config_dir=config_dir, username="raniz", uid=1000, confirm=confirm)
 
     # then both the config file and the step were offered, and nothing was created
@@ -341,3 +351,96 @@ def test_config_dir_honours_xdg_config_home(
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert config_dir() == tmp_path / "ask"
+
+
+def test_incus_install_steps_for_arch_install_and_init_via_pacman() -> None:
+    # when building the incus installation steps for Arch Linux
+    steps = incus_install_steps("arch")
+
+    # then incus is installed with pacman and initialised with incus admin init
+    commands = [step.command for step in steps]
+    assert ["sudo", "pacman", "-S", "--needed", "--noconfirm", "incus"] in commands
+    assert ["sudo", "incus", "admin", "init"] in commands
+
+
+def test_incus_install_steps_are_empty_for_unsupported_distributions() -> None:
+    # when building the installation steps for a distribution ask does not
+    # support yet
+    # then there are no steps
+    assert incus_install_steps("debian") == []
+    assert incus_install_steps("") == []
+
+
+def test_install_step_done_check_detects_whether_incus_is_installed() -> None:
+    # given the arch installation steps
+    install, init = incus_install_steps("arch")
+
+    # when incus is not on PATH
+    with patch("ask.setup.shutil.which", return_value=None):
+        # then the install step is pending
+        assert install.done() is False
+
+    # when incus is on PATH
+    with patch("ask.setup.shutil.which", return_value="/usr/bin/incus"):
+        # then the install step is done
+        assert install.done() is True
+
+    # and the init step is done only when incus list succeeds
+    with (
+        patch("ask.setup.shutil.which", return_value="/usr/bin/incus"),
+        patch("ask.setup.subprocess.run") as run,
+    ):
+        run.return_value = _completed(1)
+        assert init.done() is False
+        run.return_value = _completed(0)
+        assert init.done() is True
+        run.assert_called_with(["incus", "list"], check=False, capture_output=True)
+
+
+def test_command_succeeds_is_false_when_the_command_is_missing() -> None:
+    # given a command that is not installed
+    with patch("ask.setup.subprocess.run", side_effect=FileNotFoundError(2, "missing")):
+        # when checking whether it succeeds
+        # then the check reports False instead of raising
+        assert _command_succeeds(["incus", "list"]) is False
+
+
+def test_host_distribution_reads_the_id_from_os_release(tmp_path: Path) -> None:
+    # given an os-release file
+    os_release = tmp_path / "os-release"
+    os_release.write_text('NAME="Arch Linux"\nID=arch\nID_LIKE=archlinux\n')
+
+    # when detecting the host distribution
+    # then the ID is returned, unquoted
+    assert _host_distribution(os_release) == "arch"
+
+    os_release.write_text('NAME="Debian"\nID="debian"\n')
+    assert _host_distribution(os_release) == "debian"
+
+
+def test_host_distribution_tolerates_a_missing_os_release(tmp_path: Path) -> None:
+    assert _host_distribution(tmp_path / "os-release") == ""
+
+
+def test_run_setup_runs_install_steps_before_the_incus_steps(
+    tmp_path: Path,
+) -> None:
+    # given a fresh config directory on an Arch host, with one install step
+    # and one incus step
+    config_dir = tmp_path / "ask"
+    install = _step(["sudo", "pacman", "-S", "--needed", "--noconfirm", "incus"])
+    incus = _step(["sudo", "incus", "project", "create", "user-1000"])
+
+    # when running the full setup
+    with (
+        patch("ask.setup._host_distribution", return_value="arch"),
+        patch("ask.setup.incus_install_steps", return_value=[install]),
+        patch("ask.setup.incus_steps", return_value=[incus]),
+        patch("ask.setup.run_step") as run_step_mock,
+    ):
+        run_setup(
+            config_dir=config_dir, username="raniz", uid=1000, confirm=lambda p: True
+        )
+
+    # then the install step runs before the incus step
+    assert [c.args[0] for c in run_step_mock.call_args_list] == [install, incus]

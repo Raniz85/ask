@@ -34,6 +34,9 @@ $ pipx install git+https://github.com/raniz85/ask.git
 You also need [Incus](https://linuxcontainers.org/incus) installed and initialised
 (i.e. run `incus admin init`)
 on your host.
+`ask setup` will attempt to install and help you set up Incus,
+but to get everyting right,
+it is best if you [do it yourself](https://linuxcontainers.org/incus/docs/main/installing/).
 
 ## Getting started
 

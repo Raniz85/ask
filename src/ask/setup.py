@@ -1,5 +1,6 @@
 import os
 import shlex
+import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -67,7 +68,21 @@ def example_config_path(base: Path) -> Path:
 
 
 def _command_succeeds(command: list[str]) -> bool:
-    return subprocess.run(command, check=False, capture_output=True).returncode == 0
+    try:
+        return subprocess.run(command, check=False, capture_output=True).returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def _host_distribution(path: Path = Path("/etc/os-release")) -> str:
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        if line.startswith("ID="):
+            return line.removeprefix("ID=").strip('"')
+    return ""
 
 
 def _command_output(command: list[str]) -> str:
@@ -88,6 +103,23 @@ def _has_sufficient_subid_range(path: Path, name: str) -> bool:
             except ValueError:
                 return False
     return False
+
+
+def incus_install_steps(distribution: str) -> list[SetupStep]:
+    if distribution != "arch":
+        return []
+    return [
+        SetupStep(
+            description="Install Incus with pacman.",
+            command=["sudo", "pacman", "-S", "--needed", "--noconfirm", "incus"],
+            done=lambda: shutil.which("incus") is not None,
+        ),
+        SetupStep(
+            description="Initialise Incus on this machine.",
+            command=["sudo", "incus", "admin", "init"],
+            done=lambda: _command_succeeds(["incus", "list"]),
+        ),
+    ]
 
 
 def incus_steps(username: str, uid: int) -> list[SetupStep]:
@@ -165,5 +197,9 @@ def run_setup(
     confirm: Callable[[str], bool],
 ) -> None:
     _ensure_example_config(config_dir, confirm)
-    for step in incus_steps(username, uid):
+    distribution = _host_distribution()
+    install_steps = incus_install_steps(distribution)
+    if distribution and not install_steps:
+        print(f"Ask does not know how to install Incus on {distribution!r}; skipping.")
+    for step in [*install_steps, *incus_steps(username, uid)]:
         run_step(step, confirm)
