@@ -39,7 +39,7 @@ def test_image_for_debian_returns_the_debian_image_alias() -> None:
     image = image_for("debian")
 
     # then the known debian image alias is returned
-    assert image == "images:debian/12"
+    assert image == "images:debian/13"
 
 
 def test_known_distributions_lists_every_distribution_with_an_image() -> None:
