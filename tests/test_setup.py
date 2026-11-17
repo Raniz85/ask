@@ -444,3 +444,9 @@ def test_run_setup_runs_install_steps_before_the_incus_steps(
 
     # then the install step runs before the incus step
     assert [c.args[0] for c in run_step_mock.call_args_list] == [install, incus]
+
+
+def test_host_distribution_is_empty_when_os_release_has_no_id(tmp_path: Path) -> None:
+    os_release = tmp_path / "os-release"
+    os_release.write_text('NAME="Something"\nVERSION_ID="1"\n')
+    assert _host_distribution(os_release) == ""
