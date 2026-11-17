@@ -33,13 +33,22 @@ def test_image_for_known_distribution_returns_image_alias() -> None:
     assert image == "images:archlinux/current"
 
 
+def test_image_for_debian_returns_the_debian_image_alias() -> None:
+    # given the "debian" distribution
+    # when resolving its Incus image alias
+    image = image_for("debian")
+
+    # then the known debian image alias is returned
+    assert image == "images:debian/12"
+
+
 def test_known_distributions_lists_every_distribution_with_an_image() -> None:
     # given the distributions ask has Incus images for
     # when listing the known distributions
     distributions = known_distributions()
 
     # then every distribution with an image is listed, sorted by name
-    assert distributions == ["arch"]
+    assert distributions == ["arch", "debian"]
 
 
 def test_image_for_unknown_distribution_raises() -> None:

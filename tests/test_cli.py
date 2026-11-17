@@ -416,7 +416,7 @@ def test_create_rejects_an_unknown_distribution_before_launching(
 
     # then the distribution is reported and no container is launched
     assert error.value.problems == [
-        "distribution: unknown distribution 'gentoo' (known: arch)"
+        "distribution: unknown distribution 'gentoo' (known: arch, debian)"
     ]
     container_create.assert_not_called()
 

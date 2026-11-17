@@ -9,7 +9,7 @@ from unittest.mock import ANY, MagicMock, call, patch
 import pytest
 from pyinfra.api.exceptions import PyinfraError
 from pyinfra.api.output import echo
-from pyinfra.operations import files, pacman, server, systemd
+from pyinfra.operations import apt, files, pacman, server, systemd
 
 from ask import idle
 from ask.env import profile_script
@@ -364,14 +364,39 @@ def test_provision_packages_enables_output_printing() -> None:
     assert state.print_input is True
 
 
+def test_provision_packages_installs_packages_on_debian_via_apt() -> None:
+    # given a provisioner, and a list of packages to install on debian
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning packages
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_packages("debian", ["zsh", "python"])
+
+    # then the debian package operation is used to ensure the packages are
+    # present, syncing the package database and upgrading all packages first
+    add_op.assert_any_call(
+        state_cls.return_value,
+        apt.packages,
+        packages=["zsh", "python"],
+        update=True,
+        upgrade=True,
+    )
+
+
 def test_provision_packages_raises_for_an_unsupported_distribution() -> None:
     # given a provisioner, and a distribution with no known package operation
     provisioner = Provisioner(Container("my-project"))
 
     # when provisioning packages
     # then a clear error is raised
-    with pytest.raises(ValueError, match="debian"):
-        provisioner.provision_packages("debian", ["zsh"])
+    with pytest.raises(ValueError, match="gentoo"):
+        provisioner.provision_packages("gentoo", ["zsh"])
 
 
 def test_remove_packages_removes_packages_via_the_distribution_operation() -> None:
@@ -437,14 +462,38 @@ def test_remove_packages_enables_output_printing() -> None:
     assert state.print_input is True
 
 
+def test_remove_packages_removes_packages_on_debian_via_apt() -> None:
+    # given a provisioner, and a list of packages no longer declared, to
+    # remove on debian
+    provisioner = Provisioner(Container("my-project"))
+
+    # when removing packages
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.remove_packages("debian", ["old-pkg"])
+
+    # then the debian package operation is used to ensure the packages are absent
+    add_op.assert_any_call(
+        state_cls.return_value,
+        apt.packages,
+        packages=["old-pkg"],
+        present=False,
+    )
+
+
 def test_remove_packages_raises_for_an_unsupported_distribution() -> None:
     # given a provisioner, and a distribution with no known package operation
     provisioner = Provisioner(Container("my-project"))
 
     # when removing packages
     # then a clear error is raised
-    with pytest.raises(ValueError, match="debian"):
-        provisioner.remove_packages("debian", ["old-pkg"])
+    with pytest.raises(ValueError, match="gentoo"):
+        provisioner.remove_packages("gentoo", ["old-pkg"])
 
 
 def test_split_aur_packages_separates_aur_prefixed_packages() -> None:

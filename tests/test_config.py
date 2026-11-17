@@ -194,7 +194,7 @@ def test_load_rejects_unknown_distributions(tmp_path: Path) -> None:
 
     # then the distribution is reported together with the known ones
     assert error.value.problems == [
-        "distribution: unknown distribution 'gentoo' (known: arch)"
+        "distribution: unknown distribution 'gentoo' (known: arch, debian)"
     ]
 
 

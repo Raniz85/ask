@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_ALIASES = {
     "arch": "images:archlinux/current",
+    "debian": "images:debian/12",
 }
 
 _DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

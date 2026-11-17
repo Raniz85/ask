@@ -15,7 +15,7 @@ from pyinfra.api.exceptions import PyinfraError
 from pyinfra.api.operation import add_op
 from pyinfra.api.operations import run_ops
 from pyinfra.api.output import set_echo
-from pyinfra.operations import files, pacman, server, systemd
+from pyinfra.operations import apt, files, pacman, server, systemd
 
 from ask import env, idle, incus
 from ask.errors import AskError
@@ -35,8 +35,9 @@ def _echo(message: object = "", *, err: bool = False, **_kwargs: Any) -> None:
 
 set_echo(_echo)
 
-_PACKAGE_OPERATIONS = {
+_PACKAGE_OPERATIONS: dict[str, Callable[..., Any]] = {
     "arch": pacman.packages,
+    "debian": apt.packages,
 }
 
 
