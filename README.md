@@ -75,6 +75,8 @@ Enter the project's container with a shell:
 raniz@my-project ~/my-project $ _
 ```
 
+Use `ask enter --root` for a root shell in the container.
+
 ### Run scripts
 
 Run a script defined in `ask.toml` without entering the container:

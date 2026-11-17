@@ -250,6 +250,7 @@ def _converge_container(
 def enter(
     gui: bool = False,
     *,
+    root: bool = False,
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
@@ -260,14 +261,16 @@ def enter(
     container = _converged_container(
         project_dir, resolved, create_missing, converge_changed
     )
+    uid, gid = (0, 0) if root else (user.uid, user.gid)
+    home = {"HOME": "/root"} if root else home_env(user)
     _record_invocation(container)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
-            user.uid,
-            user.gid,
+            uid,
+            gid,
             cwd,
             [user.shell],
-            env=resolved.instance_env | home_env(user) | FAKE_SSH_ENV | gui_env,
+            env=resolved.instance_env | home | FAKE_SSH_ENV | gui_env,
         )
     _record_invocation(container)
     sys.exit(returncode)

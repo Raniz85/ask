@@ -120,6 +120,33 @@ def test_enter_runs_the_shell_with_the_users_home_directory(tmp_path: Path) -> N
     )
 
 
+def test_enter_with_root_runs_the_shell_as_root(tmp_path: Path) -> None:
+    # given a project directory and a config declaring a user
+    # when entering the project's container with --root
+    project_dir, container = _run_in_project(tmp_path, lambda: enter(root=True))
+
+    # then the shell runs as root with root's home directory, alongside the
+    # variables that make it look like an SSH session
+    container.exec_command.assert_called_once_with(
+        0, 0, project_dir, ["bash"], env={"HOME": "/root"} | FAKE_SSH_ENV
+    )
+
+
+def test_enter_with_root_sets_home_to_root_even_when_a_layer_configures_it(
+    tmp_path: Path,
+) -> None:
+    # given a layer setting HOME for the instance
+    # when entering the project's container with --root
+    project_dir, container = _run_in_project(
+        tmp_path, lambda: enter(root=True), layer='env = { HOME = "/elsewhere" }\n'
+    )
+
+    # then the shell runs with HOME set to root's home directory
+    container.exec_command.assert_called_once_with(
+        0, 0, project_dir, ["bash"], env={"HOME": "/root"} | FAKE_SSH_ENV
+    )
+
+
 _ENV_LAYER = (
     'env = { EDITOR = "nvim", LANG = "C" }\n'
     "agents = { "
