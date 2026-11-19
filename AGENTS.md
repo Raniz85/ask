@@ -53,6 +53,11 @@ See `docs/adr/0001-record-architecture-decisions.md` for the rationale.
 - Keep changes scoped to the task at hand; file unrelated issues/ideas separately instead of
   fixing them inline.
 - Match existing style/formatting in the file you're editing.
+- Preferred package installation sources:
+  1. Official package manager repositories, search for the correct package, don't rely on training data or memory
+  2. Official package manager 3rd party repositories - i.e. Anthropics APT repository for claude, Mise's APT repository for mise
+  3. Relaiable package manager community-operated repositories - i.e. the AUR, listed PPAs
+  4. Official installation method that does not go through a package manager. This is a last resort
 
 ### Task Automation
 
