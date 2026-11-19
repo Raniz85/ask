@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 
-from ask.agent import AgentError
+from ask.agent import AgentError, Claude
 from ask.cli import (
     FAKE_SSH_ENV,
     _refresh_invocations,
@@ -841,6 +841,78 @@ def test_converge_installs_npm_agents_on_debian(tmp_path: Path) -> None:
         "debian", ["bash", "nodejs", "npm"]
     )
     provisioner.provision_npm_packages.assert_called_once_with(["@openai/codex"])
+
+
+def test_converge_installs_claude_from_anthropics_apt_repo_on_debian(
+    tmp_path: Path,
+) -> None:
+    # given a debian flavour enabling the claude agent, which Anthropic
+    # publishes through its own signed apt repository
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _DEBIAN_FLAVOR
+        + "[layers.base.agents]\nclaude = true\n"
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then Anthropic's apt repository is provisioned before the distro
+    # packages are installed, claude-code is installed via apt, and no
+    # npm install runs
+    provisioner = provisioner_cls.return_value
+    provisioner.provision_apt_repository.assert_called_once_with(
+        Claude().apt_repositories[0]
+    )
+    provisioner.provision_packages.assert_called_once_with(
+        "debian", ["bash", "claude-code"]
+    )
+    provisioner.provision_npm_packages.assert_not_called()
+    names = [c[0] for c in provisioner.method_calls]
+    assert names.index("provision_apt_repository") < names.index("provision_packages")
+
+
+def test_converge_does_not_provision_apt_repositories_on_arch(tmp_path: Path) -> None:
+    # given an arch flavour enabling the claude agent, which comes from the
+    # AUR there
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + "[layers.base.agents]\nclaude = true\n"
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container_cls.return_value.get_managed_packages.return_value = []
+
+        converge()
+
+    # then no apt repository is provisioned; the AUR package covers claude
+    provisioner_cls.return_value.provision_apt_repository.assert_not_called()
 
 
 def test_converge_does_not_install_npm_packages_on_arch(tmp_path: Path) -> None:

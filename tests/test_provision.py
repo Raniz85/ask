@@ -12,6 +12,7 @@ from pyinfra.api.output import echo
 from pyinfra.operations import apt, files, pacman, server, systemd
 
 from ask import idle
+from ask.agent import AptRepository
 from ask.env import profile_script
 from ask.incus import Container
 from ask.provision import (
@@ -953,6 +954,80 @@ def test_provision_mise_adds_the_signed_apt_repo_and_installs_mise() -> None:
         ),
         call(state_cls.return_value, apt.packages, packages=["mise"], update=True),
     ]
+
+
+def test_provision_apt_repository_adds_the_signing_key_and_repo() -> None:
+    # given a provisioner on a debian container and a vendor apt repository
+    provisioner = Provisioner(Container("my-project"))
+    repository = AptRepository(
+        key_url="https://downloads.claude.ai/keys/claude-code.asc",
+        keyring_path="/etc/apt/keyrings/claude-code.asc",
+        repo="deb [signed-by=/etc/apt/keyrings/claude-code.asc] "
+        "https://downloads.claude.ai/claude-code/apt/latest latest main",
+        filename="claude-code",
+    )
+
+    # when provisioning the repository
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_apt_repository(repository)
+
+    # then the keyring directory and signing key are installed, and the
+    # repository is added with signed-by pointing at the key
+    assert add_op.call_args_list == [
+        call(
+            state_cls.return_value,
+            files.directory,
+            path="/etc/apt/keyrings",
+            user="root",
+            group="root",
+            mode="755",
+        ),
+        call(
+            state_cls.return_value,
+            files.download,
+            src="https://downloads.claude.ai/keys/claude-code.asc",
+            dest="/etc/apt/keyrings/claude-code.asc",
+            user="root",
+            group="root",
+            mode="644",
+        ),
+        call(
+            state_cls.return_value,
+            apt.repo,
+            src="deb [signed-by=/etc/apt/keyrings/claude-code.asc] "
+            "https://downloads.claude.ai/claude-code/apt/latest latest main",
+            filename="claude-code",
+        ),
+    ]
+
+
+def test_provision_apt_repository_raises_when_the_session_fails() -> None:
+    # given a provisioner and a failing provisioning session
+    provisioner = Provisioner(Container("my-project"))
+    repository = AptRepository(
+        key_url="https://downloads.claude.ai/keys/claude-code.asc",
+        keyring_path="/etc/apt/keyrings/claude-code.asc",
+        repo="deb [signed-by=/etc/apt/keyrings/claude-code.asc] "
+        "https://downloads.claude.ai/claude-code/apt/latest latest main",
+        filename="claude-code",
+    )
+
+    # when provisioning the repository
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops", side_effect=PyinfraError("boom")),
+        pytest.raises(ProvisioningError, match="boom"),
+    ):
+        provisioner.provision_apt_repository(repository)
 
 
 def test_provision_mise_raises_when_the_repository_setup_fails() -> None:

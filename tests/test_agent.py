@@ -3,7 +3,16 @@ from pathlib import Path
 import pytest
 
 from ask import config
-from ask.agent import Agent, Claude, Codex, OpenCode, Pi, known_names, resolve
+from ask.agent import (
+    Agent,
+    AptRepository,
+    Claude,
+    Codex,
+    OpenCode,
+    Pi,
+    known_names,
+    resolve,
+)
 from ask.config import ConfigError
 from ask.incus import Mount
 from ask.user import ResolvedUser
@@ -19,8 +28,17 @@ def test_claude_has_its_packages_and_state_paths() -> None:
     assert claude.name == "claude"
     assert claude.packages == {
         "arch": ["aur:claude-code"],
-        "debian": ["nodejs", "npm", "npm:@anthropic-ai/claude-code"],
+        "debian": ["claude-code"],
     }
+    assert claude.apt_repositories == [
+        AptRepository(
+            key_url="https://downloads.claude.ai/keys/claude-code.asc",
+            keyring_path="/etc/apt/keyrings/claude-code.asc",
+            repo="deb [signed-by=/etc/apt/keyrings/claude-code.asc] "
+            "https://downloads.claude.ai/claude-code/apt/latest latest main",
+            filename="claude-code",
+        )
+    ]
     assert claude.agent_instructions_key == "claude_md"
     assert claude.agent_instructions_path == ".claude/CLAUDE.md"
     assert claude.auth_paths == [".claude/.credentials.json"]
@@ -125,6 +143,19 @@ def test_resolve_raises_for_unknown_agent() -> None:
     # then a clear error is raised
     with pytest.raises(ValueError, match="copilot"):
         resolve("copilot")
+
+
+def test_apt_repositories_for_returns_them_only_on_debian() -> None:
+    # given the claude agent, which installs from Anthropic's apt repository
+    # on debian, and the codex agent, which has no vendor apt repository
+    claude = Claude()
+    codex = Codex()
+
+    # when resolving their apt repositories per distribution
+    # then claude's repository is returned on debian only, and codex has none
+    assert claude.apt_repositories_for("debian") == claude.apt_repositories
+    assert claude.apt_repositories_for("arch") == []
+    assert codex.apt_repositories_for("debian") == []
 
 
 def test_packages_for_combines_common_and_distribution_packages() -> None:

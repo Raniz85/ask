@@ -18,6 +18,7 @@ from pyinfra.api.output import set_echo
 from pyinfra.operations import apt, files, pacman, server, systemd
 
 from ask import env, idle, incus
+from ask.agent import AptRepository
 from ask.errors import AskError
 from ask.tool_manager import config_digest
 from ask.user import ResolvedUser, home_env
@@ -158,27 +159,19 @@ class Provisioner:
             ["npm", "uninstall", "-g", *packages],
         )
 
+    def provision_apt_repository(self, repository: AptRepository) -> None:
+        logger.debug(
+            "adding apt repository %r in container %r",
+            repository.filename,
+            self.container.name,
+        )
+        with self.session() as state:
+            _add_apt_repository_ops(state, repository)
+
     def provision_mise(self) -> None:
         logger.debug("installing mise in container %r", self.container.name)
         with self.session() as state:
-            add_op(
-                state,
-                files.directory,
-                path="/etc/apt/keyrings",
-                user="root",
-                group="root",
-                mode="755",
-            )
-            add_op(
-                state,
-                files.download,
-                src=_MISE_KEY_URL,
-                dest=_MISE_KEYRING,
-                user="root",
-                group="root",
-                mode="644",
-            )
-            add_op(state, apt.repo, src=_MISE_REPO, filename="mise")
+            _add_apt_repository_ops(state, _MISE_APT_REPOSITORY)
             add_op(state, apt.packages, packages=["mise"], update=True)
 
     def provision_pi_extensions(
@@ -326,10 +319,35 @@ install -m 0755 pi/pi /usr/local/bin/pi
 """
 
 
+def _add_apt_repository_ops(state: State, repository: AptRepository) -> None:
+    add_op(
+        state,
+        files.directory,
+        path=str(Path(repository.keyring_path).parent),
+        user="root",
+        group="root",
+        mode="755",
+    )
+    add_op(
+        state,
+        files.download,
+        src=repository.key_url,
+        dest=repository.keyring_path,
+        user="root",
+        group="root",
+        mode="644",
+    )
+    add_op(state, apt.repo, src=repository.repo, filename=repository.filename)
+
+
 # Debian has no mise package; add mise's signed apt repository instead.
-_MISE_KEY_URL = "https://mise.jdx.dev/gpg-key.pub"
-_MISE_KEYRING = "/etc/apt/keyrings/mise-archive-keyring.asc"
-_MISE_REPO = f"deb [signed-by={_MISE_KEYRING}] https://mise.jdx.dev/deb stable main"
+_MISE_APT_REPOSITORY = AptRepository(
+    key_url="https://mise.jdx.dev/gpg-key.pub",
+    keyring_path="/etc/apt/keyrings/mise-archive-keyring.asc",
+    repo="deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] "
+    "https://mise.jdx.dev/deb stable main",
+    filename="mise",
+)
 
 
 def _run_checked(

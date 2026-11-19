@@ -202,6 +202,12 @@ def _converge_container(
         [mount.container_path for mount in mounts], user
     )
 
+    # vendor apt repositories must be registered before the packages they
+    # provide are installed
+    for agent in resolved.agents:
+        for repository in agent.apt_repositories_for(distribution):
+            provisioner.provision_apt_repository(repository)
+
     provisioner.provision_packages(distribution, official_packages)
     aur_builder.install_packages(distribution, aur_packages)
     if npm_packages:

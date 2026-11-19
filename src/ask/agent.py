@@ -19,9 +19,18 @@ class AgentError(AskError):
 
 
 @dataclass(frozen=True)
+class AptRepository:
+    key_url: str
+    keyring_path: str
+    repo: str
+    filename: str
+
+
+@dataclass(frozen=True)
 class Agent:
     name: str
     packages: dict[str, list[str]] = field(default_factory=dict)
+    apt_repositories: list[AptRepository] = field(default_factory=list)
     agent_instructions_key: str = "agents_md"
     agent_instructions_path: str | None = None
     auth_paths: list[str] = field(default_factory=list)
@@ -30,6 +39,9 @@ class Agent:
 
     def packages_for(self, distribution: str) -> list[str]:
         return resolve_packages(self.packages, distribution)
+
+    def apt_repositories_for(self, distribution: str) -> list[AptRepository]:
+        return self.apt_repositories if distribution == "debian" else []
 
     def option_keys(self) -> set[str]:
         keys = {"auth", "skills", "config"}
@@ -68,8 +80,21 @@ class Claude(Agent):
     packages: dict[str, list[str]] = field(
         default_factory=lambda: {
             "arch": ["aur:claude-code"],
-            "debian": ["nodejs", "npm", "npm:@anthropic-ai/claude-code"],
+            "debian": ["claude-code"],
         }
+    )
+    # Anthropic publishes an official signed apt repository; use its latest
+    # channel, matching the @latest npm install it replaces
+    apt_repositories: list[AptRepository] = field(
+        default_factory=lambda: [
+            AptRepository(
+                key_url="https://downloads.claude.ai/keys/claude-code.asc",
+                keyring_path="/etc/apt/keyrings/claude-code.asc",
+                repo="deb [signed-by=/etc/apt/keyrings/claude-code.asc] "
+                "https://downloads.claude.ai/claude-code/apt/latest latest main",
+                filename="claude-code",
+            )
+        ]
     )
     agent_instructions_key: str = "claude_md"
     agent_instructions_path: str = ".claude/CLAUDE.md"
