@@ -187,6 +187,7 @@ def _converge_container(
     for tool_manager, _ in tool_managers:
         packages += tool_manager.packages_for(distribution)
     official_packages, aur_packages = provision.split_aur_packages(packages)
+    official_packages, npm_packages = provision.split_npm_packages(official_packages)
 
     mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
     mounts += user_shell.mounts_for(user, resolved.flavor.shell.options)
@@ -203,6 +204,8 @@ def _converge_container(
 
     provisioner.provision_packages(distribution, official_packages)
     aur_builder.install_packages(distribution, aur_packages)
+    if npm_packages:
+        provisioner.provision_npm_packages(npm_packages)
 
     # Debian has no pi or mise packages; install their standalone binaries
     if agents.EXTENSIONS_AGENT in resolved.agent_names and distribution == "debian":
@@ -223,10 +226,13 @@ def _converge_container(
     provisioner.provision_instance_env(resolved.instance_env)
     provisioner.provision_idle_shutdown(distribution, user)
 
-    resolved_packages = official_packages + aur_packages
+    resolved_packages = official_packages + aur_packages + npm_packages
     stale = incus.stale_packages(container.get_managed_packages(), resolved_packages)
     if stale:
-        provisioner.remove_packages(distribution, stale)
+        stale_distro, stale_npm = provision.split_npm_packages(stale)
+        provisioner.remove_npm_packages(stale_npm)
+        if stale_distro:
+            provisioner.remove_packages(distribution, stale_distro)
     container.set_managed_packages(resolved_packages)
 
     mise_provisioner = provision.MiseProvisioner(container)

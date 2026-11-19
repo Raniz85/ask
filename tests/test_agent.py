@@ -17,7 +17,10 @@ def test_claude_has_its_packages_and_state_paths() -> None:
     # then its distro-keyed packages, agent instructions file, and categorized state
     # paths are as expected
     assert claude.name == "claude"
-    assert claude.packages == {"arch": ["aur:claude-code"]}
+    assert claude.packages == {
+        "arch": ["aur:claude-code"],
+        "debian": ["nodejs", "npm", "npm:@anthropic-ai/claude-code"],
+    }
     assert claude.agent_instructions_key == "claude_md"
     assert claude.agent_instructions_path == ".claude/CLAUDE.md"
     assert claude.auth_paths == [".claude/.credentials.json"]
@@ -33,7 +36,10 @@ def test_opencode_has_its_packages_and_state_paths() -> None:
     # then its distro-keyed packages, agent instructions file, and categorized state
     # paths are as expected
     assert opencode.name == "opencode"
-    assert opencode.packages == {"arch": ["opencode"]}
+    assert opencode.packages == {
+        "arch": ["opencode"],
+        "debian": ["nodejs", "npm", "npm:opencode-ai"],
+    }
     assert opencode.agent_instructions_key == "agents_md"
     assert opencode.agent_instructions_path == ".config/opencode/AGENTS.md"
     assert opencode.auth_paths == [".local/share/opencode/auth.json"]
@@ -52,7 +58,10 @@ def test_codex_has_its_packages_and_state_paths() -> None:
     # then its distro-keyed packages, agent instructions file, and categorized state
     # paths are as expected
     assert codex.name == "codex"
-    assert codex.packages == {"arch": ["openai-codex"]}
+    assert codex.packages == {
+        "arch": ["openai-codex"],
+        "debian": ["nodejs", "npm", "npm:@openai/codex"],
+    }
     assert codex.agent_instructions_key == "agents_md"
     assert codex.agent_instructions_path == ".codex/AGENTS.md"
     assert codex.auth_paths == [".codex/auth.json"]

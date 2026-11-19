@@ -59,6 +59,15 @@ def split_aur_packages(packages: list[str]) -> tuple[list[str], list[str]]:
     return official, aur
 
 
+_NPM_PREFIX = "npm:"
+
+
+def split_npm_packages(packages: list[str]) -> tuple[list[str], list[str]]:
+    official = [p for p in packages if not p.startswith(_NPM_PREFIX)]
+    npm = [p.removeprefix(_NPM_PREFIX) for p in packages if p.startswith(_NPM_PREFIX)]
+    return official, npm
+
+
 def _ancestors_under_home(path: Path, home: Path) -> list[Path]:
     if path == home or home not in path.parents:
         return []
@@ -123,6 +132,30 @@ class Provisioner:
         logger.debug("installing pi in container %r", self.container.name)
         _run_checked(
             self.container, 0, 0, Path("/tmp"), ["sh", "-c", _PI_INSTALL_SCRIPT]
+        )
+
+    def provision_npm_packages(self, packages: list[str]) -> None:
+        if not packages:
+            return
+        logger.debug("installing npm packages in %r: %s", self.container.name, packages)
+        _run_checked(
+            self.container,
+            0,
+            0,
+            Path("/tmp"),
+            ["npm", "install", "-g", *packages],
+        )
+
+    def remove_npm_packages(self, packages: list[str]) -> None:
+        if not packages:
+            return
+        logger.debug("removing npm packages from %r: %s", self.container.name, packages)
+        _run_checked(
+            self.container,
+            0,
+            0,
+            Path("/tmp"),
+            ["npm", "uninstall", "-g", *packages],
         )
 
     def provision_mise(self) -> None:

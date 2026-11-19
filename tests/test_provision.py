@@ -21,6 +21,7 @@ from ask.provision import (
     ProvisioningError,
     _ancestors_under_home,
     split_aur_packages,
+    split_npm_packages,
 )
 from ask.tool_manager import config_digest
 from ask.user import ResolvedUser
@@ -797,6 +798,83 @@ def test_provision_pi_extensions_raises_when_an_install_fails() -> None:
         pytest.raises(ProvisioningError, match=r"`pi install @foo/bar`"),
     ):
         provisioner.provision_pi_extensions(_provisioner_user(), ["@foo/bar"])
+
+
+def test_split_npm_packages_separates_npm_prefixed_packages() -> None:
+    # given a mix of official and npm-prefixed packages
+    # when splitting them
+    official, npm = split_npm_packages(["git", "npm:@openai/codex", "python"])
+
+    # then the official packages are returned as-is, and the npm packages
+    # have their prefix stripped
+    assert official == ["git", "python"]
+    assert npm == ["@openai/codex"]
+
+
+def test_provision_npm_packages_installs_them_globally_as_root() -> None:
+    # given a provisioner and npm packages to install
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning them
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.provision_npm_packages(["@openai/codex", "opencode-ai"])
+
+    # then a single global npm install runs as root
+    assert _exec_commands(exec_command) == [
+        ["npm", "install", "-g", "@openai/codex", "opencode-ai"]
+    ]
+    for c in exec_command.call_args_list:
+        assert c.args[:2] == (0, 0)
+
+
+def test_provision_npm_packages_does_nothing_without_packages() -> None:
+    # given a provisioner and no npm packages
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning them
+    with patch.object(Container, "exec_command") as exec_command:
+        provisioner.provision_npm_packages([])
+
+    # then no command runs in the container
+    exec_command.assert_not_called()
+
+
+def test_provision_npm_packages_raises_when_the_install_fails() -> None:
+    # given a provisioner and a failing npm install
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning an npm package
+    with (
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError, match="npm install -g @openai/codex"),
+    ):
+        provisioner.provision_npm_packages(["@openai/codex"])
+
+
+def test_remove_npm_packages_uninstalls_them_globally_as_root() -> None:
+    # given a provisioner and npm packages to remove
+    provisioner = Provisioner(Container("my-project"))
+
+    # when removing them
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.remove_npm_packages(["@openai/codex"])
+
+    # then a global npm uninstall runs as root
+    assert _exec_commands(exec_command) == [["npm", "uninstall", "-g", "@openai/codex"]]
+    for c in exec_command.call_args_list:
+        assert c.args[:2] == (0, 0)
+
+
+def test_remove_npm_packages_does_nothing_without_packages() -> None:
+    # given a provisioner and no npm packages
+    provisioner = Provisioner(Container("my-project"))
+
+    # when removing them
+    with patch.object(Container, "exec_command") as exec_command:
+        provisioner.remove_npm_packages([])
+
+    # then no command runs in the container
+    exec_command.assert_not_called()
 
 
 def test_provision_pi_installs_the_standalone_binary_as_root() -> None:

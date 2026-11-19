@@ -66,7 +66,10 @@ class Agent:
 class Claude(Agent):
     name: str = "claude"
     packages: dict[str, list[str]] = field(
-        default_factory=lambda: {"arch": ["aur:claude-code"]}
+        default_factory=lambda: {
+            "arch": ["aur:claude-code"],
+            "debian": ["nodejs", "npm", "npm:@anthropic-ai/claude-code"],
+        }
     )
     agent_instructions_key: str = "claude_md"
     agent_instructions_path: str = ".claude/CLAUDE.md"
@@ -81,7 +84,10 @@ class Claude(Agent):
 class OpenCode(Agent):
     name: str = "opencode"
     packages: dict[str, list[str]] = field(
-        default_factory=lambda: {"arch": ["opencode"]}
+        default_factory=lambda: {
+            "arch": ["opencode"],
+            "debian": ["nodejs", "npm", "npm:opencode-ai"],
+        }
     )
     agent_instructions_key: str = "agents_md"
     agent_instructions_path: str = ".config/opencode/AGENTS.md"
@@ -101,7 +107,10 @@ class OpenCode(Agent):
 class Codex(Agent):
     name: str = "codex"
     packages: dict[str, list[str]] = field(
-        default_factory=lambda: {"arch": ["openai-codex"]}
+        default_factory=lambda: {
+            "arch": ["openai-codex"],
+            "debian": ["nodejs", "npm", "npm:@openai/codex"],
+        }
     )
     agent_instructions_key: str = "agents_md"
     agent_instructions_path: str = ".codex/AGENTS.md"

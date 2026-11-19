@@ -810,6 +810,69 @@ def test_converge_installs_pi_standalone_on_debian_before_its_extensions(
     assert names.index("provision_pi") < names.index("provision_pi_extensions")
 
 
+def test_converge_installs_npm_agents_on_debian(tmp_path: Path) -> None:
+    # given a debian flavour enabling the codex agent, which is npm-based
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _DEBIAN_FLAVOR
+        + "[layers.base.agents]\ncodex = true\n"
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then nodejs and npm are installed via apt, and codex via npm
+    provisioner = provisioner_cls.return_value
+    provisioner.provision_packages.assert_called_once_with(
+        "debian", ["bash", "nodejs", "npm"]
+    )
+    provisioner.provision_npm_packages.assert_called_once_with(["@openai/codex"])
+
+
+def test_converge_does_not_install_npm_packages_on_arch(tmp_path: Path) -> None:
+    # given an arch flavour enabling the codex agent, which comes from a
+    # distro package there
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + "[layers.base.agents]\ncodex = true\n"
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then no npm install runs; the arch package covers codex
+    provisioner_cls.return_value.provision_npm_packages.assert_not_called()
+
+
 def test_converge_does_not_install_pi_standalone_on_arch(tmp_path: Path) -> None:
     # given an arch flavour enabling the pi agent, where pi comes from the AUR
     project_dir = tmp_path / "my-project"
