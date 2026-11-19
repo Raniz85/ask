@@ -38,8 +38,9 @@ class Mise:
     packages: dict[str, list[str]] = field(
         default_factory=lambda: {
             "arch": ["mise"],
-            # curl runs the standalone installer; git backs git-based tools
-            "debian": ["curl", "git"],
+            # git backs git-based tools; the mise apt repo is added by the
+            # provisioner
+            "debian": ["git"],
         }
     )
 

@@ -127,9 +127,26 @@ class Provisioner:
 
     def provision_mise(self) -> None:
         logger.debug("installing mise in container %r", self.container.name)
-        _run_checked(
-            self.container, 0, 0, Path("/tmp"), ["sh", "-c", _MISE_INSTALL_SCRIPT]
-        )
+        with self.session() as state:
+            add_op(
+                state,
+                files.directory,
+                path="/etc/apt/keyrings",
+                user="root",
+                group="root",
+                mode="755",
+            )
+            add_op(
+                state,
+                files.download,
+                src=_MISE_KEY_URL,
+                dest=_MISE_KEYRING,
+                user="root",
+                group="root",
+                mode="644",
+            )
+            add_op(state, apt.repo, src=_MISE_REPO, filename="mise")
+            add_op(state, apt.packages, packages=["mise"], update=True)
 
     def provision_pi_extensions(
         self, user: ResolvedUser, extensions: list[str]
@@ -276,29 +293,10 @@ install -m 0755 pi/pi /usr/local/bin/pi
 """
 
 
-_MISE_LATEST_RELEASE = "https://github.com/jdx/mise/releases/latest"
-
-# Debian has no mise package, so download the release tarball from GitHub,
-# verify it against the release's SHASUMS256.txt, and install the binary.
-_MISE_INSTALL_SCRIPT = f"""set -eu
-command -v mise >/dev/null 2>&1 && exit 0
-case "$(uname -m)" in
-  x86_64) arch=x64 ;;
-  aarch64|arm64) arch=arm64 ;;
-  *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
-esac
-tag=$(curl -fsSL -o /dev/null -w '%{{url_effective}}' "{_MISE_LATEST_RELEASE}" | sed 's|.*/tag/||')
-base="https://github.com/jdx/mise/releases/download/$tag"
-asset="mise-$tag-linux-$arch.tar.gz"
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "$base/SHASUMS256.txt" -o "$tmp/SHASUMS256.txt"
-curl -fsSL "$base/$asset" -o "$tmp/$asset"
-cd "$tmp"
-grep -F "$asset" SHASUMS256.txt | sha256sum -c -
-tar -xf "$asset"
-install -m 0755 mise/bin/mise /usr/local/bin/mise
-"""
+# Debian has no mise package; add mise's signed apt repository instead.
+_MISE_KEY_URL = "https://mise.jdx.dev/gpg-key.pub"
+_MISE_KEYRING = "/etc/apt/keyrings/mise-archive-keyring.asc"
+_MISE_REPO = f"deb [signed-by={_MISE_KEYRING}] https://mise.jdx.dev/deb stable main"
 
 
 def _run_checked(

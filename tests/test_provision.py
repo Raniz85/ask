@@ -832,37 +832,63 @@ def test_provision_pi_raises_when_the_install_fails() -> None:
         provisioner.provision_pi()
 
 
-def test_provision_mise_downloads_the_release_binary_as_root() -> None:
-    # given a provisioner
-    provisioner = Provisioner(Container("my-project"))
-
-    # when provisioning mise
-    with patch.object(Container, "exec_command", return_value=0) as exec_command:
-        provisioner.provision_mise()
-
-    # then a download script runs as root, fetching the release tarball from
-    # GitHub, verifying it against the release checksums, and installing mise
-    # on the default PATH — without executing any downloaded script
-    assert exec_command.call_count == 1
-    args = exec_command.call_args.args
-    assert args[:3] == (0, 0, Path("/tmp"))
-    assert args[3][:2] == ["sh", "-c"]
-    script = args[3][2]
-    assert "github.com/jdx/mise/releases" in script
-    assert "SHASUMS256" in script
-    assert "sha256sum -c" in script
-    assert "/usr/local/bin/mise" in script
-    assert "mise.run" not in script
-
-
-def test_provision_mise_raises_when_the_install_fails() -> None:
-    # given a provisioner and a failing install
+def test_provision_mise_adds_the_signed_apt_repo_and_installs_mise() -> None:
+    # given a provisioner on a debian container, which has no mise package
     provisioner = Provisioner(Container("my-project"))
 
     # when provisioning mise
     with (
-        patch.object(Container, "exec_command", return_value=1),
-        pytest.raises(ProvisioningError, match="sh -c"),
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_mise()
+
+    # then mise's signing key is installed, the repository is added with
+    # signed-by pointing at it, and mise is installed from it with apt
+    assert add_op.call_args_list == [
+        call(
+            state_cls.return_value,
+            files.directory,
+            path="/etc/apt/keyrings",
+            user="root",
+            group="root",
+            mode="755",
+        ),
+        call(
+            state_cls.return_value,
+            files.download,
+            src="https://mise.jdx.dev/gpg-key.pub",
+            dest="/etc/apt/keyrings/mise-archive-keyring.asc",
+            user="root",
+            group="root",
+            mode="644",
+        ),
+        call(
+            state_cls.return_value,
+            apt.repo,
+            src="deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] "
+            "https://mise.jdx.dev/deb stable main",
+            filename="mise",
+        ),
+        call(state_cls.return_value, apt.packages, packages=["mise"], update=True),
+    ]
+
+
+def test_provision_mise_raises_when_the_repository_setup_fails() -> None:
+    # given a provisioner and a failing provisioning session
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning mise
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops", side_effect=PyinfraError("boom")),
+        pytest.raises(ProvisioningError, match="boom"),
     ):
         provisioner.provision_mise()
 
