@@ -22,6 +22,17 @@ def test_mise_is_installed_from_its_package() -> None:
     assert packages == ["mise"]
 
 
+def test_mise_has_debian_packages_for_the_standalone_installer() -> None:
+    # given the mise tool manager
+    mise = Mise()
+
+    # when resolving its packages for debian, which has no mise package
+    packages = mise.packages_for("debian")
+
+    # then curl (for the installer) and git (for git-based tools) are installed
+    assert packages == ["curl", "git"]
+
+
 def test_mise_finds_a_mise_toml_in_the_project(tmp_path: Path) -> None:
     # given a project with a mise.toml
     _touch(tmp_path, "mise.toml")

@@ -125,6 +125,12 @@ class Provisioner:
             self.container, 0, 0, Path("/tmp"), ["sh", "-c", _PI_INSTALL_SCRIPT]
         )
 
+    def provision_mise(self) -> None:
+        logger.debug("installing mise in container %r", self.container.name)
+        _run_checked(
+            self.container, 0, 0, Path("/tmp"), ["sh", "-c", _MISE_INSTALL_SCRIPT]
+        )
+
     def provision_pi_extensions(
         self, user: ResolvedUser, extensions: list[str]
     ) -> None:
@@ -268,6 +274,13 @@ grep -F "$asset" SHA256SUMS | sha256sum -c -
 tar -xzf "$asset"
 install -m 0755 pi/pi /usr/local/bin/pi
 """
+
+
+# Debian has no mise package; the official installer verifies the release
+# checksum itself and installs to MISE_INSTALL_PATH.
+_MISE_INSTALL_SCRIPT = (
+    "curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh"
+)
 
 
 def _run_checked(

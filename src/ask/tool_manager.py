@@ -35,7 +35,13 @@ _MISE_CONFIG_PATTERNS = [
 @dataclass(frozen=True)
 class Mise:
     name: str = "mise"
-    packages: dict[str, list[str]] = field(default_factory=lambda: {"arch": ["mise"]})
+    packages: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "arch": ["mise"],
+            # curl runs the standalone installer; git backs git-based tools
+            "debian": ["curl", "git"],
+        }
+    )
 
     def packages_for(self, distribution: str) -> list[str]:
         return resolve_packages(self.packages, distribution)

@@ -1671,12 +1671,14 @@ _RANIZ = ResolvedUser(
 )
 
 
-def _converge_with_mise(tmp_path: Path, ask_toml: str) -> tuple[Path, MagicMock]:
+def _converge_with_mise(
+    tmp_path: Path, ask_toml: str, flavor: str = _FLAVOR
+) -> tuple[Path, MagicMock]:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir(exist_ok=True)
     (project_dir / "ask.toml").write_text(ask_toml)
     config_path = _flavor_path(tmp_path)
-    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+    config_path.write_text(flavor + '[user]\nname = "raniz"\nuid = 1000\n')
 
     steps = MagicMock()
     with (
@@ -1733,6 +1735,27 @@ def test_converge_hands_tool_installation_to_mise_for_a_project_with_mise_config
         [Path("/home/raniz/.local/share/mise/shims")]
     )
 
+    # and the standalone mise install is not used; the arch package covers it
+    steps.provisioner.provision_mise.assert_not_called()
+
+
+def test_converge_installs_mise_standalone_on_debian_before_trusting_it(
+    tmp_path: Path,
+) -> None:
+    # given a debian project directory with a mise.toml, opting into mise
+    (tmp_path / "my-project").mkdir()
+    (tmp_path / "my-project" / "mise.toml").write_text('[tools]\nerlang = "29"\n')
+
+    # when converging
+    _, steps = _converge_with_mise(
+        tmp_path, 'tool_managers = ["mise"]\n', flavor=_DEBIAN_FLAVOR
+    )
+
+    # then the standalone mise binary is installed before mise is trusted
+    steps.provisioner.provision_mise.assert_called_once_with()
+    names = _step_names(steps)
+    assert names.index("provisioner.provision_mise") < names.index("mise.trust")
+
 
 def test_converge_leaves_mise_out_of_a_project_without_mise_config(
     tmp_path: Path,
@@ -1743,6 +1766,7 @@ def test_converge_leaves_mise_out_of_a_project_without_mise_config(
 
     # then mise is neither installed nor run
     steps.provisioner.provision_packages.assert_called_once_with("arch", ["bash"])
+    steps.provisioner.provision_mise.assert_not_called()
     assert [c for c in steps.mock_calls if c[0].startswith("mise.")] == []
 
     # and the PATH of commands run in the container is the default one
