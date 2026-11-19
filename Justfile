@@ -7,7 +7,7 @@ check: format lint typecheck test
 sync:
     uv sync
 
-# Format code using ruff
+# Format code using dprint
 format:
     dprint fmt
 
