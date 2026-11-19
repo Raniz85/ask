@@ -49,6 +49,7 @@ _WAYLAND_MOUNT = Mount(
 _WAYLAND_ENV = {"WAYLAND_DISPLAY": "/home/raniz/.wayland-socket"}
 _HOME_ENV = {"HOME": "/home/raniz"}
 _FLAVOR = 'distribution = "arch"\ndefault = true\n'
+_DEBIAN_FLAVOR = 'distribution = "debian"\ndefault = true\n'
 _PROJECT_FLAVOR = Flavor(
     distribution="arch", default=True, user=User(name="raniz", uid=1000)
 )
@@ -772,6 +773,70 @@ def test_converge_does_not_provision_pi_extensions_without_any(tmp_path: Path) -
 
     # then no pi extensions are provisioned
     provisioner_cls.return_value.provision_pi_extensions.assert_not_called()
+
+
+def test_converge_installs_pi_standalone_on_debian_before_its_extensions(
+    tmp_path: Path,
+) -> None:
+    # given a debian flavour enabling the pi agent with extensions
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _DEBIAN_FLAVOR
+        + '[layers.base.agents.pi]\nextensions = ["npm:pi-subagents"]\n'
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then pi itself is installed on debian, before its extensions
+    provisioner = provisioner_cls.return_value
+    provisioner.provision_pi.assert_called_once_with()
+    provisioner.provision_pi_extensions.assert_called_once()
+    names = [c[0] for c in provisioner.method_calls]
+    assert names.index("provision_pi") < names.index("provision_pi_extensions")
+
+
+def test_converge_does_not_install_pi_standalone_on_arch(tmp_path: Path) -> None:
+    # given an arch flavour enabling the pi agent, where pi comes from the AUR
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + "[layers.base.agents]\npi = true\n"
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the standalone pi install is not used; the AUR package covers it
+    provisioner_cls.return_value.provision_pi.assert_not_called()
 
 
 def test_converge_provisions_services_from_layers(tmp_path: Path) -> None:

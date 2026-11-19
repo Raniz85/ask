@@ -799,6 +799,39 @@ def test_provision_pi_extensions_raises_when_an_install_fails() -> None:
         provisioner.provision_pi_extensions(_provisioner_user(), ["@foo/bar"])
 
 
+def test_provision_pi_installs_the_standalone_binary_as_root() -> None:
+    # given a provisioner
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning pi
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.provision_pi()
+
+    # then a shell script runs as root in the container, downloading the
+    # release tarball, verifying its checksum, and installing pi on the
+    # default PATH
+    assert exec_command.call_count == 1
+    args = exec_command.call_args.args
+    assert args[:3] == (0, 0, Path("/tmp"))
+    assert args[3][:2] == ["sh", "-c"]
+    script = args[3][2]
+    assert "earendil-works/pi/releases" in script
+    assert "sha256sum -c" in script
+    assert "/usr/local/bin/pi" in script
+
+
+def test_provision_pi_raises_when_the_install_fails() -> None:
+    # given a provisioner and a failing install
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning pi
+    with (
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError, match="sh -c"),
+    ):
+        provisioner.provision_pi()
+
+
 def test_ensure_paru_clones_reviews_and_builds_paru_bin_when_approved() -> None:
     # given a container without paru that has never cloned paru-bin, and a
     # user who approves the build after reviewing the PKGBUILD

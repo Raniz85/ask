@@ -204,7 +204,11 @@ def _converge_container(
     provisioner.provision_packages(distribution, official_packages)
     aur_builder.install_packages(distribution, aur_packages)
 
-    # Provision pi extensions once the pi package is installed
+    # Debian has no pi package; install the standalone binary instead
+    if agents.EXTENSIONS_AGENT in resolved.agent_names and distribution == "debian":
+        provisioner.provision_pi()
+
+    # Provision pi extensions once pi is installed
     pi_extensions = resolved.pi_extensions
     if pi_extensions:
         provisioner.provision_pi_extensions(user, pi_extensions)

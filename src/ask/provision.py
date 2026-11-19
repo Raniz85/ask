@@ -119,6 +119,12 @@ class Provisioner:
         with self.session() as state:
             add_op(state, operation, packages=packages, present=False)
 
+    def provision_pi(self) -> None:
+        logger.debug("installing pi in container %r", self.container.name)
+        _run_checked(
+            self.container, 0, 0, Path("/tmp"), ["sh", "-c", _PI_INSTALL_SCRIPT]
+        )
+
     def provision_pi_extensions(
         self, user: ResolvedUser, extensions: list[str]
     ) -> None:
@@ -240,6 +246,28 @@ class Provisioner:
                 enabled=True,
                 running=True,
             )
+
+
+_PI_RELEASE_BASE = "https://github.com/earendil-works/pi/releases/latest/download"
+
+# Debian ships no pi package and its Node.js is too old for pi's npm package,
+# so install pi's standalone binary, checksum-verified against the release.
+_PI_INSTALL_SCRIPT = f"""set -eu
+command -v pi >/dev/null 2>&1 && exit 0
+case "$(uname -m)" in
+  x86_64) asset=pi-linux-x64.tar.gz ;;
+  aarch64|arm64) asset=pi-linux-arm64.tar.gz ;;
+  *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "{_PI_RELEASE_BASE}/SHA256SUMS" -o "$tmp/SHA256SUMS"
+curl -fsSL "{_PI_RELEASE_BASE}/$asset" -o "$tmp/$asset"
+cd "$tmp"
+grep -F "$asset" SHA256SUMS | sha256sum -c -
+tar -xzf "$asset"
+install -m 0755 pi/pi /usr/local/bin/pi
+"""
 
 
 def _run_checked(

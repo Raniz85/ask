@@ -113,7 +113,9 @@ class Codex(Agent):
 @dataclass(frozen=True)
 class Pi(Agent):
     name: str = "pi"
-    packages: dict[str, list[str]] = field(default_factory=lambda: {"arch": ["aur:pi"]})
+    packages: dict[str, list[str]] = field(
+        default_factory=lambda: {"arch": ["aur:pi"], "debian": ["curl"]}
+    )
     agent_instructions_key: str = "system_md"
     agent_instructions_path: str = ".pi/agent/SYSTEM.md"
     auth_paths: list[str] = field(default_factory=lambda: [".pi/agent/auth.json"])
