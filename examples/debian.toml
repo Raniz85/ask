@@ -44,31 +44,44 @@ packages = [
   "neovim",
   "starship",
   "dprint",
-  "aur:antigen",
 ]
 
-# SystemD Services to enable
+bind_mounts = [
+  # NeoVim configuration
+  "~/.config/nvim",
+  "~/.local/share/nvim",
+]
+
+# systemd Services to enable
 services."sshd.service" = "enabled"
 services."man-db.timer" = "enabled"
 
 # Agent definitions, `ask agent` will launch the first agent in the list.
 # To launch another agent call `ask agent <name>`
-agents = [
-  # Can be the name of the agent, which sets default options
-  "claude",
-  # Or with full options (defaults shown)
-  # { name: "claude", claude_md: true, auth: true, skills: true, config: true },
-  # { name: "opencode", agents_md: true, auth: true, skills: true, config: true },
-  # { name: "codex", agents_md: true, auth: true, skills: true, config: true },
-  # { name: "pi", system_md: true, auth: true, skills: true, config: true },
-]
+[layers.base.agents]
+default = "pi"
+# Can be just true to set default options
+pi = true
 
-# IDEs to include, `ask ide` will launch the first agent in the list.
-# To launch another agent, call `ask ide <name>`
-ides = [
-  "idea",
-  "vscode",
-]
+# Environment variables can be set for agents specifically
+# env.GIT_COMMITTER_NAME = "My autonumous agent"
+# env.GIT_COMMITTER_EMAIL = "agent@mydomain.com"
+# env.GIT_AUTHOR_NAME = "My autonumous agent"
+# env.GIT_AUTHOR_EMAIL = "agent@mydomain.com"
+
+# Or with full options (defaults shown)
+# claude = { claude_md: true, auth: true, skills: true, config: true }
+# opencode = { agents_md: true, auth: true, skills: true, config: true }
+# codex = { agents_md: true, auth: true, skills: true, config: true }
+
+# [layers.base.agents.pi]
+# system_md = true
+# auth = true
+# skills = true
+# config = true
+# extensions = [
+#   "npm:pi-subagents",
+# ]
 
 [layers.python]
 # If multiple layers are applied, ordering _may_ be important.
@@ -80,12 +93,6 @@ packages = [
   "python",
   "uv",
   "ipython3",
-]
-
-ides = [
-  "pycharm",
-  # IDEs in lower layers can be removed
-  "-vscode",
 ]
 
 bind_mounts = [
