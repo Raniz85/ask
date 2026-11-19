@@ -68,7 +68,9 @@ def test_pi_has_its_packages_and_state_paths() -> None:
     # then its distro-keyed packages, agent instructions file, and categorized state
     # paths are as expected
     assert pi.name == "pi"
-    assert pi.packages == {"arch": ["aur:pi"], "debian": ["curl"]}
+    assert pi.packages == {"arch": ["aur:pi"], "debian": ["curl", "nodejs", "npm"]}
+    # npm is needed by `pi install npm:<ext>`, not by pi itself
+    assert "npm" in pi.packages_for("debian")
     assert pi.agent_instructions_key == "system_md"
     assert pi.agent_instructions_path == ".pi/agent/SYSTEM.md"
     assert pi.auth_paths == [".pi/agent/auth.json"]

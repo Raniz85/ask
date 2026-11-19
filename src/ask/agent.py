@@ -114,7 +114,11 @@ class Codex(Agent):
 class Pi(Agent):
     name: str = "pi"
     packages: dict[str, list[str]] = field(
-        default_factory=lambda: {"arch": ["aur:pi"], "debian": ["curl"]}
+        default_factory=lambda: {
+            "arch": ["aur:pi"],
+            # curl fetches the standalone binary; npm runs `pi install npm:<ext>`
+            "debian": ["curl", "nodejs", "npm"],
+        }
     )
     agent_instructions_key: str = "system_md"
     agent_instructions_path: str = ".pi/agent/SYSTEM.md"
