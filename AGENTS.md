@@ -17,10 +17,12 @@ See `README.md` for the pitch and a quickstart sketch.
 - **PyInfra**: used as an in-process Python library (imported and driven through its Python
   API), never invoked via `subprocess`. See `docs/adr/0004-interface-pyinfra-as-library.md`.
 - **Configuration**: TOML. Per-project config lives in `ask.toml`; user-wide/shared config
-  lives in `global.toml`. See `docs/adr/0003-use-toml-for-configuration.md`. Each configuration
-  structure is represented by exactly one `dataclass`, which doubles as the validation layer —
-  there is no separate hand-maintained schema. See
-  `docs/adr/0006-use-dataclasses-for-configuration.md`.
+  lives in the flavour files under `$XDG_CONFIG_HOME/ask/`. See
+  `docs/adr/0003-use-toml-for-configuration.md` and
+  `docs/adr/0021-one-file-per-flavour.md`. Each configuration structure is represented by
+  exactly one `dataclass`, with Pydantic validators applied on top for validation. See
+  `docs/adr/0006-use-dataclasses-for-configuration.md` and
+  `docs/adr/0010-validate-configuration-with-pydantic.md`.
 - **CLI**: built with [cyclopts](https://cyclopts.readthedocs.io), deriving commands/arguments
   from type-annotated function signatures. See `docs/adr/0005-use-cyclopts-for-cli.md`.
 

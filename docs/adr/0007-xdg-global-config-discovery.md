@@ -25,6 +25,6 @@ exist, it is treated as an empty config (no layers defined) rather than an error
   tools use, without requiring a first-run setup step.
 - A project referencing a layer that isn't defined (whether because the global config is
   missing entirely or just missing that layer) fails with the same clear "unknown layer" error
-  from `ask.manifest.resolve_bind_mounts`, rather than a raw file-not-found error.
+  from `ask.validation`, rather than a raw file-not-found error.
 - Only `XDG_CONFIG_HOME` is consulted; no other XDG base directory variables (such as
   `XDG_CONFIG_DIRS`) are.

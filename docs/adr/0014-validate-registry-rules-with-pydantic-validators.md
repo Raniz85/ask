@@ -21,12 +21,12 @@ yet have no package operation.
 This supersedes the part of ADR 0010 that checks registry rules after structural validation.
 
 - Each registry module owns its configuration option type (e.g. `ShellOption` in `shell`,
-  `AgentOption` in `agent`) and validates it with Pydantic validators during loading, so
+  `AgentSettings` in `agent`) and validates it with Pydantic validators during loading, so
   registry problems are reported together with structural ones, through the same error path.
-- A `distribution` module owns everything Ask knows about a distribution: its Incus image, its
-  package operation and its sources for packages outside the regular repositories, keyed by
-  package prefix (e.g. `aur:` on Arch). The generic distribution type holds no
-  distribution-specific knowledge.
+- Everything Ask knows about a distribution lives in the modules that use it: the Incus image
+  (`known_distributions` and `image_for` in `incus`) and the package operations including extra
+  package sources keyed by package prefix (e.g. `aur:` in `provision`). The generic distribution
+  type holds no distribution-specific knowledge.
 - Rules that span files, such as a manifest referring to layers in the global configuration,
   are checked by the loader of the file that makes the reference.
 

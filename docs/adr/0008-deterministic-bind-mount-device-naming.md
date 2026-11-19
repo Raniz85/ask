@@ -18,8 +18,8 @@ and remove ones that are no longer declared — without disturbing devices it do
 ## Decision
 
 Every bind mount Ask manages (the automatic project directory mount included) is added as an
-Incus disk device named deterministically from its path: non-alphanumeric characters are
-replaced with `-` and the result is prefixed with `bind-` (e.g. `/home/raniz/.cache/uv` becomes
+Incus disk device named deterministically from its path: characters other than alphanumerics,
+`_` and `-` are replaced with `-` and the result is prefixed with `bind-` (e.g. `/home/raniz/.cache/uv` becomes
 `bind--home-raniz--cache-uv`). `ask converge` lists the instance's devices, treats every name
 starting with `bind-` as one it manages, and fully reconciles that subset: devices for mounts no
 longer declared are removed, and devices for newly declared mounts are added. Devices without

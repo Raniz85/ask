@@ -30,8 +30,9 @@ part of `docs/adr/0007-xdg-global-config-discovery.md`, and the note on distribu
   flavour matches, the one with `default = true` applies. Several matching flavours, several
   defaults, or no match and no default are errors.
 - Package lists are plain lists, since a flavour fixes the distribution.
-- `ask.toml` is no longer a layer. It sets only `packages`, `bind_mounts` and `tool_managers`,
-  and is applied after the flavour's layers. It is still trusted like a build script, because
+- `ask.toml` is no longer a layer. It sets only project-level options (`packages`,
+  `bind_mounts`, `tool_managers`, `services`, `scripts` and `env`), and is applied after the
+  flavour's layers. It is still trusted like a build script, because
   bind mounts can expose any host path.
 - A missing global config defines no flavours, so no flavour applies.
 

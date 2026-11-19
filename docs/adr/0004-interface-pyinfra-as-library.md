@@ -9,7 +9,8 @@
 ## Context
 
 Once an Incus container exists, Ask needs to declaratively provision it (packages, shell, IDE
-helpers, bind mounts, agent tooling, ...) as described by the layers in `ask.toml`/`global.toml`.
+helpers, bind mounts, agent tooling, ...) as described by the layers in `ask.toml` and the
+global flavour files.
 PyInfra is a Python automation tool that can be used either as a standalone CLI, driven by
 deploy files on disk, or imported and driven programmatically from Python code via its own API.
 
