@@ -832,7 +832,7 @@ def test_provision_pi_raises_when_the_install_fails() -> None:
         provisioner.provision_pi()
 
 
-def test_provision_mise_installs_via_the_official_installer_as_root() -> None:
+def test_provision_mise_downloads_the_release_binary_as_root() -> None:
     # given a provisioner
     provisioner = Provisioner(Container("my-project"))
 
@@ -840,15 +840,19 @@ def test_provision_mise_installs_via_the_official_installer_as_root() -> None:
     with patch.object(Container, "exec_command", return_value=0) as exec_command:
         provisioner.provision_mise()
 
-    # then the official installer runs as root, installing mise on the default
-    # PATH
+    # then a download script runs as root, fetching the release tarball from
+    # GitHub, verifying it against the release checksums, and installing mise
+    # on the default PATH — without executing any downloaded script
     assert exec_command.call_count == 1
     args = exec_command.call_args.args
     assert args[:3] == (0, 0, Path("/tmp"))
     assert args[3][:2] == ["sh", "-c"]
     script = args[3][2]
-    assert "mise.run" in script
+    assert "github.com/jdx/mise/releases" in script
+    assert "SHASUMS256" in script
+    assert "sha256sum -c" in script
     assert "/usr/local/bin/mise" in script
+    assert "mise.run" not in script
 
 
 def test_provision_mise_raises_when_the_install_fails() -> None:

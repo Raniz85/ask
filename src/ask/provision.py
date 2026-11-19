@@ -276,11 +276,29 @@ install -m 0755 pi/pi /usr/local/bin/pi
 """
 
 
-# Debian has no mise package; the official installer verifies the release
-# checksum itself and installs to MISE_INSTALL_PATH.
-_MISE_INSTALL_SCRIPT = (
-    "curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh"
-)
+_MISE_LATEST_RELEASE = "https://github.com/jdx/mise/releases/latest"
+
+# Debian has no mise package, so download the release tarball from GitHub,
+# verify it against the release's SHASUMS256.txt, and install the binary.
+_MISE_INSTALL_SCRIPT = f"""set -eu
+command -v mise >/dev/null 2>&1 && exit 0
+case "$(uname -m)" in
+  x86_64) arch=x64 ;;
+  aarch64|arm64) arch=arm64 ;;
+  *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+tag=$(curl -fsSL -o /dev/null -w '%{{url_effective}}' "{_MISE_LATEST_RELEASE}" | sed 's|.*/tag/||')
+base="https://github.com/jdx/mise/releases/download/$tag"
+asset="mise-$tag-linux-$arch.tar.gz"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "$base/SHASUMS256.txt" -o "$tmp/SHASUMS256.txt"
+curl -fsSL "$base/$asset" -o "$tmp/$asset"
+cd "$tmp"
+grep -F "$asset" SHASUMS256.txt | sha256sum -c -
+tar -xf "$asset"
+install -m 0755 mise/bin/mise /usr/local/bin/mise
+"""
 
 
 def _run_checked(
