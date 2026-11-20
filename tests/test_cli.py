@@ -4072,9 +4072,12 @@ def test_dump_prints_the_full_resolved_configuration(
     assert "mise" in out
     assert "config files: (none)" in out
 
-    # and the agent with its options, extensions, env and mounted files
+    # and the agent with its full config: effective options including
+    # defaults, packages, env and all candidate mounted files
     assert "agents:\n  claude" in out
-    assert "options: (none)" in out
+    assert "options: auth: true, claude_md: true, config: true, skills: true" in out
+    assert "    packages: aur:claude-code" in out
+    assert f"{Path.home()}/.claude/CLAUDE.md -> /home/raniz/.claude/CLAUDE.md" in out
 
 
 def test_dump_resolves_removals_and_merged_agent_configuration(
@@ -4096,7 +4099,7 @@ def test_dump_resolves_removals_and_merged_agent_configuration(
     # then the removed package is gone and the agent's own env wins over
     # the manifest env
     assert "official: htop, bash" in out
-    assert "auth: false" in out
+    assert "options: auth: false, claude_md: true, config: true, skills: true" in out
     agent_section = out.split("agents:\n  claude\n", 1)[1]
     assert "EDITOR=vim" in agent_section
     assert "EDITOR=emacs" not in agent_section

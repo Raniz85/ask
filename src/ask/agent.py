@@ -49,7 +49,7 @@ class Agent:
             keys.add(self.agent_instructions_key)
         return keys
 
-    def mounts_for(
+    def candidate_mounts(
         self, user: ResolvedUser, options: dict[str, bool] | None = None
     ) -> list[Mount]:
         options = options or {}
@@ -70,7 +70,15 @@ class Agent:
                 container_path=Path(f"/home/{user.name}") / state_path,
             )
             for state_path in state_paths
-            if (Path.home() / state_path).exists()
+        ]
+
+    def mounts_for(
+        self, user: ResolvedUser, options: dict[str, bool] | None = None
+    ) -> list[Mount]:
+        return [
+            mount
+            for mount in self.candidate_mounts(user, options)
+            if mount.host_path.exists()
         ]
 
 

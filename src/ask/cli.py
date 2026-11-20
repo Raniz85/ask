@@ -245,20 +245,32 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
     if not entries:
         console.print("  (none)")
     for entry in entries:
+        resolved_agent = agents.resolve(entry.name)
         console.print(f"  {entry.name}")
+        effective_options = {
+            key: entry.options.get(key, True)
+            for key in sorted(resolved_agent.option_keys())
+        }
         options = ", ".join(
-            f"{key}: {_bool(value)}" for key, value in entry.options.items()
+            f"{key}: {_bool(value)}" for key, value in effective_options.items()
         )
         console.print(f"    options: {options or '(none)'}")
         console.print(f"    extensions: {_items(entry.extensions)}")
+        console.print(
+            f"    packages: {_items(resolved_agent.packages_for(flavor.distribution))}"
+        )
         console.print("    environment:")
         _print_env(console, resolved.agent_env(entry.name), "      ")
         console.print("    mounts:")
-        _print_mounts(
-            console,
-            agents.resolve(entry.name).mounts_for(user, entry.options),
-            "      ",
-        )
+        candidate_mounts = resolved_agent.candidate_mounts(user, entry.options)
+        if not candidate_mounts:
+            console.print("      (none)")
+        for mount in candidate_mounts:
+            readonly = " (readonly)" if mount.readonly else ""
+            missing = "" if mount.host_path.exists() else " (missing on host)"
+            console.print(
+                f"      {mount.host_path} -> {mount.container_path}{readonly}{missing}"
+            )
 
     console.print("\ntool managers:")
     if not resolved.tool_managers:
