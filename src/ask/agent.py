@@ -37,6 +37,10 @@ class Agent:
     skills_paths: list[str] = field(default_factory=list)
     config_paths: list[str] = field(default_factory=list)
 
+    @property
+    def binary(self) -> str:
+        return self.name
+
     def packages_for(self, distribution: str) -> list[str]:
         return resolve_packages(self.packages, distribution)
 
@@ -175,11 +179,40 @@ class Pi(Agent):
     )
 
 
+@dataclass(frozen=True)
+class OhMyPi(Agent):
+    name: str = "oh-my-pi"
+
+    @property
+    def binary(self) -> str:
+        return "omp"
+
+    packages: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "arch": ["aur:oh-my-pi-bin"],
+            # curl fetches the standalone binary from GitHub releases
+            "debian": ["curl"],
+        }
+    )
+    agent_instructions_key: str = "agents_md"
+    agent_instructions_path: str = ".omp/agent/AGENTS.md"
+    auth_paths: list[str] = field(default_factory=lambda: [".omp/agent/auth.json"])
+    skills_paths: list[str] = field(default_factory=lambda: [".omp/agent/skills"])
+    config_paths: list[str] = field(
+        default_factory=lambda: [
+            ".omp/agent/settings.json",
+            ".omp/agent/mcp.json",
+            ".omp/agent/models.yml",
+        ]
+    )
+
+
 _AGENTS: dict[str, Agent] = {
     "claude": Claude(),
     "opencode": OpenCode(),
     "codex": Codex(),
     "pi": Pi(),
+    "oh-my-pi": OhMyPi(),
 }
 
 
@@ -215,8 +248,8 @@ class AgentSettings:
 _ENV = "env"
 _EXTENSIONS = "extensions"
 
-# pi is the only agent whose extensions ask provisions
-EXTENSIONS_AGENT = "pi"
+# pi and oh-my-pi are the agents whose extensions ask provisions
+EXTENSIONS_AGENTS = {"pi", "oh-my-pi"}
 
 
 def _to_settings(value: object) -> object:
@@ -251,10 +284,11 @@ def _check_extensions(
     entries: dict[str, AgentSettings],
 ) -> dict[str, AgentSettings]:
     for name, settings in entries.items():
-        if name != EXTENSIONS_AGENT and settings.extensions:
+        if name not in EXTENSIONS_AGENTS and settings.extensions:
             raise PydanticCustomError(
                 "unsupported_extensions",
-                "extensions are only supported for the pi agent, not {name}",
+                "extensions are only supported for the pi and oh-my-pi agents, "
+                "not {name}",
                 {"name": repr(name)},
             )
     return entries

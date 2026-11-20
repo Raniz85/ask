@@ -510,7 +510,7 @@ def test_agent_names_removes_disabled_agents_from_lower_layers() -> None:
     assert agent_names == ["codex"]
 
 
-def test_pi_extensions_combines_extensions_from_every_applied_layer() -> None:
+def test_agent_extensions_combines_extensions_from_every_applied_layer() -> None:
     # given two layers enabling pi, each declaring extensions, one repeating
     # an extension of the other
     resolved = _resolved(
@@ -529,26 +529,26 @@ def test_pi_extensions_combines_extensions_from_every_applied_layer() -> None:
         }
     )
 
-    # when resolving the pi extensions
-    extensions = resolved.pi_extensions
+    # when resolving the agent extensions
+    extensions = resolved.agent_extensions
 
     # then the extensions of both layers are included, in order, without
     # duplicates
-    assert extensions == ["@a/one", "@b/two"]
+    assert extensions == {"pi": ["@a/one", "@b/two"]}
 
 
-def test_pi_extensions_is_empty_when_pi_is_not_enabled() -> None:
+def test_agent_extensions_is_empty_when_no_extension_agent_is_enabled() -> None:
     # given a layer enabling an agent other than pi
     resolved = _resolved({"base": Layer(agents=_enabling("claude"))})
 
-    # when resolving the pi extensions
-    extensions = resolved.pi_extensions
+    # when resolving the agent extensions
+    extensions = resolved.agent_extensions
 
     # then there are none
-    assert extensions == []
+    assert extensions == {}
 
 
-def test_pi_extensions_is_empty_when_pi_is_disabled_in_a_later_layer() -> None:
+def test_agent_extensions_is_empty_when_pi_is_disabled_in_a_later_layer() -> None:
     # given a layer enabling pi with extensions, and a later layer disabling pi
     resolved = _resolved(
         {
@@ -561,11 +561,30 @@ def test_pi_extensions_is_empty_when_pi_is_disabled_in_a_later_layer() -> None:
         }
     )
 
-    # when resolving the pi extensions
-    extensions = resolved.pi_extensions
+    # when resolving the agent extensions
+    extensions = resolved.agent_extensions
 
     # then there are none
-    assert extensions == []
+    assert extensions == {}
+
+
+def test_agent_extensions_includes_oh_my_pi_extensions() -> None:
+    # given a layer enabling oh-my-pi with extensions
+    resolved = _resolved(
+        {
+            "base": Layer(
+                agents=AgentTable(
+                    entries={"oh-my-pi": AgentSettings(extensions=["@foo/bar"])}
+                )
+            )
+        }
+    )
+
+    # when resolving the agent extensions
+    extensions = resolved.agent_extensions
+
+    # then oh-my-pi's extensions are included
+    assert extensions == {"oh-my-pi": ["@foo/bar"]}
 
 
 def test_agents_resolves_each_configured_agent_name_in_order() -> None:

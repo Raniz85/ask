@@ -254,7 +254,7 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
         console.print("    options:")
         for key, value in effective_options.items():
             console.print(f"      {key}: {_bool(value)}")
-        if entry.name == agents.EXTENSIONS_AGENT:
+        if entry.name in agents.EXTENSIONS_AGENTS:
             console.print("    extensions:")
             if entry.extensions:
                 for extension in entry.extensions:
@@ -366,16 +366,18 @@ def _converge_container(
     if npm_packages:
         provisioner.provision_npm_packages(npm_packages)
 
-    # Debian has no pi or mise packages; install their standalone binaries
-    if agents.EXTENSIONS_AGENT in resolved.agent_names and distribution == "debian":
+    # Debian has no pi, omp, or mise packages; install their standalone binaries
+    if "pi" in resolved.agent_names and distribution == "debian":
         provisioner.provision_pi()
+    if "oh-my-pi" in resolved.agent_names and distribution == "debian":
+        provisioner.provision_oh_my_pi()
     if tool_managers and distribution == "debian":
         provisioner.provision_mise()
 
-    # Provision pi extensions once pi is installed
-    pi_extensions = resolved.pi_extensions
-    if pi_extensions:
-        provisioner.provision_pi_extensions(user, pi_extensions)
+    # Provision agent extensions once their binaries are installed
+    for agent_name, extensions in resolved.agent_extensions.items():
+        binary = agents.resolve(agent_name).binary
+        provisioner.provision_pi_extensions(user, extensions, binary=binary)
 
     # Provision systemd services
     services = resolved.services

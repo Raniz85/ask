@@ -135,6 +135,12 @@ class Provisioner:
             self.container, 0, 0, Path("/tmp"), ["sh", "-c", _PI_INSTALL_SCRIPT]
         )
 
+    def provision_oh_my_pi(self) -> None:
+        logger.debug("installing oh-my-pi in container %r", self.container.name)
+        _run_checked(
+            self.container, 0, 0, Path("/tmp"), ["sh", "-c", _OMP_INSTALL_SCRIPT]
+        )
+
     def provision_npm_packages(self, packages: list[str]) -> None:
         if not packages:
             return
@@ -175,7 +181,7 @@ class Provisioner:
             add_op(state, apt.packages, packages=["mise"], update=True)
 
     def provision_pi_extensions(
-        self, user: ResolvedUser, extensions: list[str]
+        self, user: ResolvedUser, extensions: list[str], binary: str = "pi"
     ) -> None:
         if not extensions:
             return
@@ -186,7 +192,7 @@ class Provisioner:
                 user.uid,
                 user.gid,
                 home,
-                ["pi", "install", extension],
+                [binary, "install", extension],
                 env=home_env(user),
             )
 
@@ -296,6 +302,26 @@ class Provisioner:
                 running=True,
             )
 
+
+_OMP_RELEASE_BASE = "https://github.com/can1357/oh-my-pi/releases/latest/download"
+
+# Debian ships no omp package, so install oh-my-pi's standalone binary,
+# checksum-verified against the release.
+_OMP_INSTALL_SCRIPT = f"""set -eu
+command -v omp >/dev/null 2>&1 && exit 0
+case "$(uname -m)" in
+  x86_64) asset=omp-linux-x64 ;;
+  aarch64|arm64) asset=omp-linux-arm64 ;;
+  *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "{_OMP_RELEASE_BASE}/SHA256SUMS.txt" -o "$tmp/SHA256SUMS.txt"
+curl -fsSL "{_OMP_RELEASE_BASE}/$asset" -o "$tmp/$asset"
+cd "$tmp"
+grep -F "$asset" SHA256SUMS.txt | sha256sum -c -
+install -m 0755 "$asset" /usr/local/bin/omp
+"""
 
 _PI_RELEASE_BASE = "https://github.com/earendil-works/pi/releases/latest/download"
 

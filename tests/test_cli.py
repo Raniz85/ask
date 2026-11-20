@@ -744,6 +744,7 @@ def test_converge_provisions_the_resolved_pi_extensions(tmp_path: Path) -> None:
             extra_groups=[],
         ),
         ["@foo/bar", "@baz/qux"],
+        binary="pi",
     )
 
 
@@ -3158,7 +3159,7 @@ def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
         agent("copilot")
 
     assert str(error.value) == (
-        "Unknown agent 'copilot' (known: claude, codex, opencode, pi)."
+        "Unknown agent 'copilot' (known: claude, codex, oh-my-pi, opencode, pi)."
     )
 
 

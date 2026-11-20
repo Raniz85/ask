@@ -8,6 +8,7 @@ from ask.agent import (
     AptRepository,
     Claude,
     Codex,
+    OhMyPi,
     OpenCode,
     Pi,
     known_names,
@@ -109,6 +110,26 @@ def test_pi_has_its_packages_and_state_paths() -> None:
     ]
 
 
+def test_oh_my_pi_has_its_packages_and_state_paths() -> None:
+    # given the oh-my-pi agent
+    # when inspecting its properties
+    omp = OhMyPi()
+
+    # then its distro-keyed packages, agent instructions file, and categorized state
+    # paths are as expected
+    assert omp.name == "oh-my-pi"
+    assert omp.packages == {"arch": ["aur:oh-my-pi-bin"], "debian": ["curl"]}
+    assert omp.agent_instructions_key == "agents_md"
+    assert omp.agent_instructions_path == ".omp/agent/AGENTS.md"
+    assert omp.auth_paths == [".omp/agent/auth.json"]
+    assert omp.skills_paths == [".omp/agent/skills"]
+    assert omp.config_paths == [
+        ".omp/agent/settings.json",
+        ".omp/agent/mcp.json",
+        ".omp/agent/models.yml",
+    ]
+
+
 def test_resolve_returns_claude_for_claude() -> None:
     # given the name "claude"
     # when resolving it to an agent
@@ -135,6 +156,21 @@ def test_resolve_returns_pi_for_pi() -> None:
     # when resolving it to an agent
     # then the Pi agent is returned
     assert resolve("pi") == Pi()
+
+
+def test_resolve_returns_oh_my_pi_for_oh_my_pi() -> None:
+    # given the name "oh-my-pi"
+    # when resolving it to an agent
+    # then the OhMyPi agent is returned
+    assert resolve("oh-my-pi") == OhMyPi()
+
+
+def test_oh_my_pi_binary_is_omp() -> None:
+    # given the oh-my-pi agent
+    # when reading its binary name
+    # then it is omp, not the agent name
+    assert OhMyPi().binary == "omp"
+    assert Pi().binary == "pi"
 
 
 def test_resolve_raises_for_unknown_agent() -> None:
@@ -347,7 +383,7 @@ def test_known_names_lists_every_supported_agent_sorted() -> None:
     names = known_names()
 
     # then every supported agent is listed, sorted by name
-    assert names == ["claude", "codex", "opencode", "pi"]
+    assert names == ["claude", "codex", "oh-my-pi", "opencode", "pi"]
 
 
 def _load_problems(tmp_path: Path, toml: str) -> list[str]:
@@ -368,7 +404,7 @@ def test_loading_a_config_rejects_unknown_agents(tmp_path: Path) -> None:
 
     # then the agent is reported by its name along with the supported ones
     assert problems == [
-        "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, opencode, pi)"
+        "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, oh-my-pi, opencode, pi)"
     ]
 
 
@@ -381,7 +417,7 @@ def test_loading_a_config_rejects_removing_unknown_agents(tmp_path: Path) -> Non
 
     # then the agent is reported by its name along with the supported ones
     assert problems == [
-        "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, opencode, pi)"
+        "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, oh-my-pi, opencode, pi)"
     ]
 
 
@@ -412,7 +448,7 @@ def test_loading_a_config_rejects_an_unknown_default_agent(tmp_path: Path) -> No
 
     # then the default is reported along with the supported agents
     assert problems == [
-        "layers.base.agents.default: unknown agent 'hal' (known: claude, codex, opencode, pi)"
+        "layers.base.agents.default: unknown agent 'hal' (known: claude, codex, oh-my-pi, opencode, pi)"
     ]
 
 
@@ -466,7 +502,7 @@ def test_loading_a_config_rejects_extensions_for_agents_that_do_not_support_them
     # then the problem is reported, naming the agent
     assert problems == [
         (
-            "layers.base.agents: extensions are only supported for the pi agent, "
-            "not 'claude'"
+            "layers.base.agents: extensions are only supported for the pi and "
+            "oh-my-pi agents, not 'claude'"
         )
     ]

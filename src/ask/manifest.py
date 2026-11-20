@@ -189,11 +189,12 @@ class ResolvedManifest:
         return [agent.resolve(name) for name in self.agent_names]
 
     @property
-    def pi_extensions(self) -> list[str]:
+    def agent_extensions(self) -> dict[str, list[str]]:
+        extensions: dict[str, list[str]] = {}
         for entry in self.merged_agents():
-            if entry.name == agent.EXTENSIONS_AGENT:
-                return entry.extensions
-        return []
+            if entry.name in agent.EXTENSIONS_AGENTS and entry.extensions:
+                extensions[entry.name] = entry.extensions
+        return extensions
 
     @property
     def tool_managers(self) -> list[Mise]:

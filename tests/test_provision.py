@@ -911,6 +911,54 @@ def test_provision_pi_raises_when_the_install_fails() -> None:
         provisioner.provision_pi()
 
 
+def test_provision_oh_my_pi_installs_the_standalone_binary_as_root() -> None:
+    # given a provisioner
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning oh-my-pi
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.provision_oh_my_pi()
+
+    # then a shell script runs as root in the container, downloading the
+    # release binary, verifying its checksum, and installing omp on the
+    # default PATH
+    assert exec_command.call_count == 1
+    args = exec_command.call_args.args
+    assert args[:3] == (0, 0, Path("/tmp"))
+    assert args[3][:2] == ["sh", "-c"]
+    script = args[3][2]
+    assert "can1357/oh-my-pi/releases" in script
+    assert "omp-linux-x64" in script
+    assert "omp-linux-arm64" in script
+    assert "sha256sum -c" in script
+    assert "/usr/local/bin/omp" in script
+
+
+def test_provision_oh_my_pi_raises_when_the_install_fails() -> None:
+    # given a provisioner and a failing install
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning oh-my-pi
+    with (
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError, match="sh -c"),
+    ):
+        provisioner.provision_oh_my_pi()
+
+
+def test_provision_pi_extensions_uses_the_given_binary_for_install() -> None:
+    # given a provisioner, a resolved user, and oh-my-pi extensions
+    provisioner = Provisioner(Container("my-project"))
+    user = _provisioner_user()
+
+    # when provisioning the extensions with the omp binary
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.provision_pi_extensions(user, ["@foo/bar"], binary="omp")
+
+    # then `omp install` runs for the extension
+    assert _exec_commands(exec_command) == [["omp", "install", "@foo/bar"]]
+
+
 def test_provision_mise_adds_the_signed_apt_repo_and_installs_mise() -> None:
     # given a provisioner on a debian container, which has no mise package
     provisioner = Provisioner(Container("my-project"))
