@@ -1913,3 +1913,109 @@ def test_provision_session_logs_the_target_container(
 
     # then the target container is logged at debug level
     assert "my-project" in caplog.text
+
+
+def test_provision_taskfiles_runs_each_taskfile_in_one_session(tmp_path: Path) -> None:
+    # given a provisioner and two taskfiles that each record their execution
+    marker_a = tmp_path / "a.ran"
+    marker_b = tmp_path / "b.ran"
+    task_a = tmp_path / "a.py"
+    task_b = tmp_path / "b.py"
+    task_a.write_text(
+        f"from pathlib import Path; Path({str(marker_a)!r}).write_text('a')\n"
+    )
+    task_b.write_text(
+        f"from pathlib import Path; Path({str(marker_b)!r}).write_text('b')\n"
+    )
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning the taskfiles
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all") as connect_all_mock,
+        patch("ask.provision.run_ops") as run_ops_mock,
+    ):
+        state = state_cls.return_value
+        state.inventory.get_active_hosts.return_value = [MagicMock()]
+        provisioner.provision_taskfiles([task_a, task_b])
+
+    # then both taskfiles were executed against the container's host, and the
+    # session connected before running the accumulated operations once
+    assert marker_a.read_text() == "a"
+    assert marker_b.read_text() == "b"
+    connect_all_mock.assert_called_once_with(state)
+    run_ops_mock.assert_called_once_with(state)
+
+
+def test_provision_taskfiles_does_nothing_without_taskfiles() -> None:
+    # given a provisioner and no taskfiles
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning them
+    with (
+        patch("ask.provision.Inventory") as inventory_cls,
+        patch("ask.provision.connect_all") as connect_all_mock,
+        patch("ask.provision.run_ops") as run_ops_mock,
+    ):
+        provisioner.provision_taskfiles([])
+
+    # then no provisioning session is opened at all
+    inventory_cls.assert_not_called()
+    connect_all_mock.assert_not_called()
+    run_ops_mock.assert_not_called()
+
+
+def test_provision_taskfiles_reports_a_failing_taskfile(tmp_path: Path) -> None:
+    # given a provisioner and a taskfile that raises
+    task = tmp_path / "boom.py"
+    task.write_text("raise RuntimeError('boom')\n")
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning it
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.run_ops"),
+        pytest.raises(ProvisioningError, match="boom"),
+    ):
+        state_cls.return_value.inventory.get_active_hosts.return_value = [MagicMock()]
+        provisioner.provision_taskfiles([task])
+
+
+def test_provision_taskfiles_reports_an_unreadable_taskfile(tmp_path: Path) -> None:
+    # given a provisioner and a taskfile that does not exist
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning it
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.run_ops"),
+        pytest.raises(ProvisioningError, match="cannot read taskfile"),
+    ):
+        provisioner.provision_taskfiles([tmp_path / "missing.py"])
+
+
+def test_provision_taskfiles_reports_pyinfra_failures(tmp_path: Path) -> None:
+    # given a provisioner and a taskfile raising a pyinfra error
+    task = tmp_path / "fail.py"
+    task.write_text(
+        "from pyinfra.api.exceptions import PyinfraError\nraise PyinfraError('nope')\n"
+    )
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning it
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.run_ops"),
+        pytest.raises(
+            ProvisioningError, match="Provisioning container 'my-project' failed"
+        ),
+    ):
+        state_cls.return_value.inventory.get_active_hosts.return_value = [MagicMock()]
+        provisioner.provision_taskfiles([task])

@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -53,6 +54,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
             {
                 "name": "base",
                 "bind_mounts": [],
+                "taskfiles": [],
                 "packages": ["git"],
                 "agents": {
                     "entries": {
@@ -66,6 +68,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
             },
         ],
         "manifest": {
+            "taskfiles": [],
             "packages": ["ripgrep"],
             "bind_mounts": ["/src"],
             "tool_managers": ["mise"],
@@ -73,6 +76,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
             "env": {},
         },
         "tool_manager_configs": {},
+        "taskfiles": {},
     }
 
 
@@ -299,3 +303,37 @@ def test_fingerprint_is_the_installed_version_and_a_hash_of_the_configuration() 
         version="1.2.3",
         config_hash="b4d08efec2bc0df9d45d54d803868e9963a72785c179ce078a4fdab29322ebb8",
     )
+
+
+def test_effective_configuration_contains_taskfile_digests(tmp_path: Path) -> None:
+    # given a layer and a manifest each declaring a taskfile
+    layer_task = tmp_path / "layer-task.py"
+    layer_task.write_text("# layer task\n")
+    manifest_task = tmp_path / "manifest-task.py"
+    manifest_task.write_text("# manifest task\n")
+    flavor = Flavor(distribution="arch", layers={"base": Layer(taskfiles=[layer_task])})
+    m = Manifest(taskfiles=[manifest_task])
+
+    # when building the effective configuration
+    configuration = json.loads(
+        effective_configuration(ResolvedManifest(m, flavor, tmp_path))
+    )
+
+    # then every taskfile is represented by the hash of its contents
+    assert configuration["taskfiles"] == {
+        str(layer_task): hashlib.sha256(b"# layer task\n").hexdigest(),
+        str(manifest_task): hashlib.sha256(b"# manifest task\n").hexdigest(),
+    }
+
+
+def test_effective_configuration_changes_with_taskfile_contents(tmp_path: Path) -> None:
+    # given a taskfile whose contents change between two resolutions
+    task = tmp_path / "task.py"
+
+    def configuration_with(contents: str) -> str:
+        task.write_text(contents)
+        flavor = Flavor(distribution="arch", layers={"base": Layer(taskfiles=[task])})
+        return effective_configuration(ResolvedManifest(Manifest(), flavor, tmp_path))
+
+    # then the effective configuration changes with the taskfile's contents
+    assert configuration_with("a = 1\n") != configuration_with("a = 2\n")

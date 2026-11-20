@@ -145,6 +145,14 @@ def _flatten_options(value: object) -> object:
 HomePath = Annotated[Path, AfterValidator(Path.expanduser)]
 
 
+def resolve_taskfile_paths(source: Path, taskfiles: list[Path]) -> list[Path]:
+    """Resolve taskfile paths relative to the file that declared them."""
+    return [
+        taskfile if taskfile.is_absolute() else source.parent / taskfile
+        for taskfile in taskfiles
+    ]
+
+
 @dataclass
 class LayerWhen:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
@@ -184,6 +192,7 @@ class Layer:
         default_factory=AgentTable
     )
     env: Env = field(default_factory=dict)
+    taskfiles: list[HomePath] = field(default_factory=list)
     order: StrictInt = 0
     when: LayerWhen | None = None
 
@@ -362,7 +371,10 @@ def _load_flavor(path: Path, single: bool) -> Flavor:
     data = read_toml(path)
     if single:
         data = {"default": True} | data
-    return _validate(path, data, Flavor)
+    flavor = _validate(path, data, Flavor)
+    for layer in flavor.layers.values():
+        layer.taskfiles = resolve_taskfile_paths(path, layer.taskfiles)
+    return flavor
 
 
 def load(directory: Path) -> Config:

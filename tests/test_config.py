@@ -377,6 +377,48 @@ def test_load_reads_layer_bind_mounts(
     }
 
 
+def test_load_resolves_layer_taskfiles_relative_to_the_flavour_file(
+    tmp_path: Path,
+) -> None:
+    # given a layer declaring a relative and an absolute taskfile
+    flavors_dir = _flavor_with_layers(
+        tmp_path,
+        '[layers.python]\ntaskfiles = ["tasks/provision.py", "/opt/tasks/global.py"]\n',
+    )
+
+    # when loading the config
+    config = load(flavors_dir)
+
+    # then the relative taskfile is resolved against the flavour file's
+    # directory, and the absolute path is kept as it is
+    assert config.flavors["arch"].layers == {
+        "python": Layer(
+            taskfiles=[
+                flavors_dir / "tasks" / "provision.py",
+                Path("/opt/tasks/global.py"),
+            ]
+        )
+    }
+
+
+def test_load_expands_the_home_directory_in_layer_taskfiles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given a layer with a home-relative taskfile
+    monkeypatch.setenv("HOME", str(tmp_path))
+    flavors_dir = _flavor_with_layers(
+        tmp_path, '[layers.python]\ntaskfiles = ["~/tasks/provision.py"]\n'
+    )
+
+    # when loading the config
+    config = load(flavors_dir)
+
+    # then "~" is expanded against the home directory
+    assert config.flavors["arch"].layers == {
+        "python": Layer(taskfiles=[tmp_path / "tasks" / "provision.py"])
+    }
+
+
 def test_load_reads_layer_packages(tmp_path: Path) -> None:
     # given a layer declaring packages
     flavors_dir = _flavor_with_layers(

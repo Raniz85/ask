@@ -53,7 +53,7 @@ Then, in any project directory, create its manifest:
 ~/my-project $ ask init
 ```
 
-Edit the generated `ask.toml` to declare packages, bind mounts, services, tool managers and scripts.
+Edit the generated `ask.toml` to declare packages, bind mounts, services, tool managers, scripts and custom pyinfra taskfiles.
 Shared container configuration lives in flavour files under `~/.config/ask/flavors/`.
 
 Once configured, create the container with

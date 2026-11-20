@@ -22,6 +22,13 @@ def _tool_manager_configs(resolved: ResolvedManifest) -> dict[str, dict[str, str
     return configs
 
 
+def _taskfile_digests(resolved: ResolvedManifest) -> dict[str, str]:
+    return {
+        str(taskfile): hashlib.sha256(taskfile.read_bytes()).hexdigest()
+        for taskfile in resolved.taskfiles
+    }
+
+
 def _dump[T](schema: type[T], value: T) -> object:
     return TypeAdapter(schema).dump_python(value, mode="json")
 
@@ -55,6 +62,7 @@ def effective_configuration(resolved: ResolvedManifest) -> str:
         "layers": [_layer(name, flavor.layers[name]) for name in resolved.layer_names],
         "manifest": manifest,
         "tool_manager_configs": _tool_manager_configs(resolved),
+        "taskfiles": _taskfile_digests(resolved),
     }
     return json.dumps(configuration, sort_keys=True, separators=(",", ":"))
 

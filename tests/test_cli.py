@@ -4234,3 +4234,77 @@ when = { files = ["special.txt", "other.txt"] }
     # then the conditional layer is listed with the file that matched it
     assert "layers:\n  base (always)\n  extra (matched: special.txt)" in out
     assert "official: git, htop, bash" in out
+
+
+def test_converge_runs_custom_taskfiles_last(tmp_path: Path) -> None:
+    # given a project whose ask.toml declares a taskfile, and a layer declaring
+    # another one
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    project_task = project_dir / "provision.py"
+    project_task.write_text("# project task\n")
+    (project_dir / "ask.toml").write_text('taskfiles = ["provision.py"]\n')
+    config_path = _flavor_path(tmp_path)
+    layer_task = config_path.parent / "layer-task.py"
+    layer_task.write_text("# layer task\n")
+    config_path.write_text(
+        _FLAVOR
+        + '[layers.base]\ntaskfiles = ["layer-task.py"]\n'
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    call_order: list[str] = []
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+        container.set_path_prefix.side_effect = lambda *a, **k: call_order.append(
+            "set_path_prefix"
+        )
+        container.set_converged_state.side_effect = lambda *a, **k: call_order.append(
+            "set_converged_state"
+        )
+        provisioner = provisioner_cls.return_value
+        provisioner.provision_idle_shutdown.side_effect = lambda *a, **k: (
+            call_order.append("provision_idle_shutdown")
+        )
+        provisioner.provision_taskfiles.side_effect = lambda *a, **k: call_order.append(
+            "provision_taskfiles"
+        )
+
+        converge()
+
+    # then the resolved taskfiles (layer first, then the project's) run after
+    # all of Ask's own provisioning, before the converged state is recorded
+    provisioner.provision_taskfiles.assert_called_once_with([layer_task, project_task])
+    assert call_order[-2:] == ["provision_taskfiles", "set_converged_state"]
+
+
+def test_dump_lists_the_resolved_taskfiles(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "500")
+    # given a project manifest and a layer each declaring a taskfile
+    project_task = tmp_path / "my-project" / "provision.py"
+    project_task.parent.mkdir(parents=True)
+    project_task.write_text("# project task\n")
+    layer_task = tmp_path / "flavors" / "layer-task.py"
+    layer_task.parent.mkdir(parents=True)
+    layer_task.write_text("# layer task\n")
+
+    out = _dump_in_project(
+        tmp_path,
+        capsys,
+        manifest='taskfiles = ["provision.py"]\n',
+        layer='taskfiles = ["layer-task.py"]\n',
+    )
+
+    # then the dump lists both taskfiles, layer-level first
+    assert f"taskfiles:\n  {layer_task}, {project_task}" in out

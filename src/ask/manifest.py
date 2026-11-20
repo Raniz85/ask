@@ -15,6 +15,7 @@ from ask.config import (
     _normalize_service_dict,
     _validate,
     read_toml,
+    resolve_taskfile_paths,
 )
 from ask.env import Env
 from ask.incus import Mount
@@ -55,13 +56,16 @@ class Manifest:
         dict[StrictStr, StrictStr], AfterValidator(_validate_scripts)
     ] = field(default_factory=dict)
     env: Env = field(default_factory=dict)
+    taskfiles: list[HomePath] = field(default_factory=list)
 
 
 def load(path: Path) -> Manifest:
     data = read_toml(path)
     if "services" in data:
         data["services"] = _normalize_service_dict(data["services"])
-    return _validate(path, data, Manifest)
+    m = _validate(path, data, Manifest)
+    m.taskfiles = resolve_taskfile_paths(path, m.taskfiles)
+    return m
 
 
 @dataclass
@@ -123,6 +127,13 @@ class ResolvedManifest:
         for layer in self._configured_layers():
             mounts += layer.bind_mounts
         return list(dict.fromkeys(mounts))
+
+    @property
+    def taskfiles(self) -> list[Path]:
+        taskfiles: list[Path] = []
+        for layer in self._configured_layers():
+            taskfiles += layer.taskfiles
+        return list(dict.fromkeys(taskfiles))
 
     @property
     def packages(self) -> list[str]:

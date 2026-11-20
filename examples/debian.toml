@@ -52,6 +52,11 @@ bind_mounts = [
   "~/.local/share/nvim",
 ]
 
+# Custom pyinfra taskfiles to run last during converge, relative to this file
+# taskfiles = [
+#   "tasks/provision.py",
+# ]
+
 # systemd Services to enable
 services."sshd.service" = "enabled"
 services."man-db.timer" = "enabled"

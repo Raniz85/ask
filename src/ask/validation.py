@@ -40,8 +40,19 @@ def _missing_bind_mounts(location: str, bind_mounts: list[Path]) -> list[str]:
     ]
 
 
+def _missing_taskfiles(location: str, taskfiles: list[Path]) -> list[str]:
+    return [
+        f"{location}taskfiles.{index}: path {path} does not exist"
+        for index, path in enumerate(taskfiles)
+        if not path.exists()
+    ]
+
+
 def check_manifest(m: Manifest) -> list[str]:
-    return _missing_bind_mounts("", m.bind_mounts)
+    return [
+        *_missing_bind_mounts("", m.bind_mounts),
+        *_missing_taskfiles("", m.taskfiles),
+    ]
 
 
 def load_manifest(path: Path) -> Manifest:
@@ -64,6 +75,10 @@ def resolve_project(
         problems += _missing_bind_mounts(
             f"layers.{layer_name}.",
             flavor.layers[layer_name].bind_mounts,
+        )
+        problems += _missing_taskfiles(
+            f"layers.{layer_name}.",
+            flavor.layers[layer_name].taskfiles,
         )
     if problems:
         raise ConfigError(config.flavor_path(flavors_dir, flavor_name), problems)

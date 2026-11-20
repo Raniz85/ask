@@ -1016,3 +1016,52 @@ def test_tool_managers_enables_the_tool_managers_the_manifest_lists() -> None:
 
     # then mise is enabled
     assert tool_managers == [Mise()]
+
+
+def test_load_resolves_taskfiles_relative_to_the_manifest_file(tmp_path: Path) -> None:
+    # given a manifest declaring a relative and an absolute taskfile
+    manifest_path = _manifest_file(
+        tmp_path, 'taskfiles = ["tasks/provision.py", "/opt/tasks/global.py"]\n'
+    )
+
+    # when loading the manifest
+    manifest = load(manifest_path)
+
+    # then the relative taskfile is resolved against the manifest's directory,
+    # and the absolute path is kept as it is
+    assert manifest == Manifest(
+        taskfiles=[tmp_path / "tasks" / "provision.py", Path("/opt/tasks/global.py")]
+    )
+
+
+def test_taskfiles_applies_layers_before_the_project() -> None:
+    # given a manifest with its own taskfile, and a flavour layer with another
+    manifest = Manifest(taskfiles=[Path("/project/task.py")])
+    resolved = _resolved(
+        {"python": Layer(taskfiles=[Path("/layer/task.py")])}, manifest
+    )
+
+    # when resolving the full set of taskfiles
+    taskfiles = resolved.taskfiles
+
+    # then the layer-level taskfiles come first, followed by the project-level ones
+    assert taskfiles == [Path("/layer/task.py"), Path("/project/task.py")]
+
+
+def test_taskfiles_merges_duplicates() -> None:
+    # given a manifest and two layers all referencing the same taskfile, and one
+    # layer referencing another as well
+    manifest = Manifest(taskfiles=[Path("/shared.py")])
+    resolved = _resolved(
+        {
+            "base": Layer(taskfiles=[Path("/shared.py"), Path("/base.py")]),
+            "python": Layer(taskfiles=[Path("/shared.py")]),
+        },
+        manifest,
+    )
+
+    # when resolving the full set of taskfiles
+    taskfiles = resolved.taskfiles
+
+    # then each taskfile appears once, in the order it was first declared
+    assert taskfiles == [Path("/shared.py"), Path("/base.py")]

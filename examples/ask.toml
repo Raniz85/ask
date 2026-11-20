@@ -9,3 +9,9 @@ packages = [
 
 scripts.test = "uv run pytest"
 scripts.lint = "uv run ruff check"
+
+# Custom pyinfra taskfiles to run last during `ask converge`. Paths are
+# relative to this file; absolute paths work too.
+# taskfiles = [
+#   "provision.py",
+# ]

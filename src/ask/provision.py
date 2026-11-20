@@ -15,6 +15,7 @@ from pyinfra.api.exceptions import PyinfraError
 from pyinfra.api.operation import add_op
 from pyinfra.api.operations import run_ops
 from pyinfra.api.output import set_echo
+from pyinfra.context import ctx_config, ctx_host, ctx_state
 from pyinfra.operations import apt, files, pacman, server, systemd
 
 from ask import env, idle, incus
@@ -78,6 +79,32 @@ def _ancestors_under_home(path: Path, home: Path) -> list[Path]:
         ancestors.append(current)
         current = current.parent
     return ancestors
+
+
+def _exec_taskfile(state: State, taskfile: Path) -> None:
+    """Execute a pyinfra taskfile against every active host of the state."""
+    logger.debug("running taskfile %s", taskfile)
+    try:
+        source = taskfile.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ProvisioningError(
+            f"cannot read taskfile {taskfile}: {error.strerror}"
+        ) from None
+    code = compile(source, str(taskfile), "exec")
+    for host in state.inventory.get_active_hosts():
+        with (
+            ctx_state.use(state),
+            ctx_config.use(state.config.copy()),
+            ctx_host.use(host),
+        ):
+            try:
+                exec(code, {"__file__": str(taskfile)})  # noqa: S102 - taskfiles are trusted user code by design
+            except PyinfraError:
+                raise
+            except Exception as error:
+                raise ProvisioningError(
+                    f"taskfile {taskfile} failed: {error}"
+                ) from error
 
 
 @dataclass(frozen=True)
@@ -301,6 +328,18 @@ class Provisioner:
                 enabled=True,
                 running=True,
             )
+
+    def provision_taskfiles(self, taskfiles: list[Path]) -> None:
+        if not taskfiles:
+            return
+        logger.debug(
+            "running custom taskfiles on container %r: %s",
+            self.container.name,
+            ", ".join(str(taskfile) for taskfile in taskfiles),
+        )
+        with self.session() as state:
+            for taskfile in taskfiles:
+                _exec_taskfile(state, taskfile)
 
 
 _OMP_RELEASE_BASE = "https://github.com/can1357/oh-my-pi/releases/latest/download"

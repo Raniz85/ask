@@ -121,6 +121,12 @@ INIT_TEMPLATE = """\
 # Named shell commands to run inside the container with `ask run <name>`.
 # [scripts]
 # test = "uv run pytest"
+
+# Custom pyinfra taskfiles to run last during `ask converge`, after Ask's own
+# provisioning. Paths are relative to this file; absolute paths work too.
+# taskfiles = [
+#   "my-custom-pyinfra-task.py",
+# ]
 """
 
 
@@ -239,6 +245,8 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
 
     console.print("\nscripts:")
     _print_pairs(console, resolved.scripts, "  ")
+    console.print("\ntaskfiles:")
+    console.print(f"  {_items([str(taskfile) for taskfile in resolved.taskfiles])}")
 
     console.print("\nagents:")
     entries = resolved.merged_agents()
@@ -403,6 +411,10 @@ def _converge_container(
         mise_provisioner.install(project_dir, user)
         path_entries += manager.path_entries(user)
     container.set_path_prefix(path_entries)
+
+    # custom taskfiles are the escape hatch and run last, after all of Ask's
+    # own provisioning, but before the converged state is recorded
+    provisioner.provision_taskfiles(resolved.taskfiles)
 
     configuration = convergence.effective_configuration(resolved)
     fingerprint = convergence.fingerprint(configuration)

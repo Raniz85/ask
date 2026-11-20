@@ -197,3 +197,68 @@ def test_resolve_project_reports_missing_bind_mount_sources_from_applied_layers(
         flavors_dir / "arch.toml",
         [f"layers.base.bind_mounts.1: path {missing} does not exist"],
     )
+
+
+def test_check_manifest_reports_missing_taskfiles(tmp_path: Path) -> None:
+    # given a manifest referencing a taskfile that exists and one that does not
+    existing = tmp_path / "provision.py"
+    existing.touch()
+    missing = tmp_path / "missing.py"
+    m = Manifest(taskfiles=[existing, missing])
+
+    # when checking it
+    problems = check_manifest(m)
+
+    # then only the missing taskfile is reported, at its position in the manifest
+    assert problems == [f"taskfiles.1: path {missing} does not exist"]
+
+
+def test_load_manifest_reports_missing_taskfiles_against_the_file(
+    tmp_path: Path,
+) -> None:
+    # given a manifest file referencing a taskfile that does not exist
+    manifest_path = tmp_path / "ask.toml"
+    manifest_path.write_text('taskfiles = ["missing.py"]\n')
+
+    # when loading it
+    with pytest.raises(ConfigError) as error:
+        load_manifest(manifest_path)
+
+    # then the problem is reported against the file, with the path resolved
+    # against the manifest's directory
+    assert (error.value.path, error.value.problems) == (
+        manifest_path,
+        [f"taskfiles.0: path {tmp_path / 'missing.py'} does not exist"],
+    )
+
+
+def test_resolve_project_reports_missing_taskfiles_from_applied_layers(
+    tmp_path: Path,
+) -> None:
+    # given a default flavour with a base layer referencing a missing taskfile,
+    # and a layer that does not apply to the project with the same missing path
+    missing = tmp_path / "missing.py"
+    flavor = Flavor(
+        distribution="arch",
+        default=True,
+        layers={
+            "base": Layer(taskfiles=[missing]),
+            "python": Layer(
+                taskfiles=[missing], when=LayerWhen(files=["pyproject.toml"])
+            ),
+        },
+    )
+    flavors_dir = tmp_path / "flavors"
+
+    # when resolving the project
+    with pytest.raises(ConfigError) as error:
+        resolve_project(
+            flavors_dir, Config(flavors={"arch": flavor}), Manifest(), tmp_path
+        )
+
+    # then the missing taskfile is reported once against the flavour file, by
+    # its position in the applied layer
+    assert (error.value.path, error.value.problems) == (
+        flavors_dir / "arch.toml",
+        [f"layers.base.taskfiles.0: path {missing} does not exist"],
+    )
