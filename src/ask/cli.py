@@ -330,7 +330,7 @@ def agent(
     )
 
 
-def resolve_shortcut(name: str) -> str:
+def resolve_shortcut(name: str) -> str | None:
     resolved = _resolve_project(validation.find_project_dir(Path.cwd()))
     matches = [
         command
@@ -342,6 +342,8 @@ def resolve_shortcut(name: str) -> str:
     ]
     if len(matches) == 1:
         return matches[0]
+    if not matches:
+        return None
     raise AskError(
         f"Ambigous command {name!r}; use `ask agent {name}` or `ask run {name}`."
     )

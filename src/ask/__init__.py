@@ -54,7 +54,10 @@ def run(tokens: Sequence[str], debug: bool) -> None:
 def _expand_shortcut(tokens: Sequence[str]) -> list[str]:
     if not tokens or tokens[0].startswith("-") or tokens[0] in app.resolved_commands():
         return list(tokens)
-    return [resolve_shortcut(tokens[0]), "--", *tokens]
+    target = resolve_shortcut(tokens[0])
+    if target is None:
+        return list(tokens)
+    return [target, "--", *tokens]
 
 
 def _report(error: BaseException) -> NoReturn:

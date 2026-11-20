@@ -175,22 +175,22 @@ def test_run_dispatches_an_unknown_command_that_matches_one_script() -> None:
     app_mock.assert_called_once_with(["run", "--", "build", "-v"])
 
 
-def test_run_reports_an_error_when_an_unknown_command_matches_neither_uniquely(
+def test_run_reports_an_error_when_an_unknown_command_is_ambiguous(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # given an unknown command that does not uniquely match an agent or a script
+    # given an unknown command that matches both an agent and a script
     with (
         patch("ask.app") as app_mock,
         patch(
             "ask.resolve_shortcut",
             side_effect=AskError(
-                "Unknown command 'nope'; use `ask agent nope` or `ask run nope`."
+                "Ambigous command 'claude'; use `ask agent claude` or `ask run claude`."
             ),
         ),
     ):
         app_mock.resolved_commands.return_value = []
         with pytest.raises(SystemExit) as exit_info:
-            run(["nope"], debug=False)
+            run(["claude"], debug=False)
 
     # then the error is printed to stderr, pointing at ask agent and ask run
     assert exit_info.value.code == 1
@@ -198,6 +198,20 @@ def test_run_reports_an_error_when_an_unknown_command_matches_neither_uniquely(
     assert "ask agent" in err
     assert "ask run" in err
     app_mock.assert_not_called()
+
+
+def test_run_passes_an_unmatched_command_through_to_cyclopts() -> None:
+    # given an unknown command that matches neither an agent nor a script
+    with (
+        patch("ask.app") as app_mock,
+        patch("ask.resolve_shortcut", return_value=None) as resolve_mock,
+    ):
+        app_mock.resolved_commands.return_value = []
+        run(["nope"], debug=False)
+
+    # then the tokens are passed to the app untouched for cyclopts to reject
+    resolve_mock.assert_called_once_with("nope")
+    app_mock.assert_called_once_with(["nope"])
 
 
 def test_run_passes_known_commands_through_unchanged() -> None:

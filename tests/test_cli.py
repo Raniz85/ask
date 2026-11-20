@@ -1635,7 +1635,7 @@ def test_run_rejects_undefined_script(tmp_path: Path) -> None:
     container_cls.assert_not_called()
 
 
-def _resolve_in_project(project_dir: Path, config_path: Path, name: str) -> str:
+def _resolve_in_project(project_dir: Path, config_path: Path, name: str) -> str | None:
     with (
         patch("ask.cli.Path.cwd", return_value=project_dir),
         patch("ask.cli.config.default_dir", return_value=config_path.parent),
@@ -1696,7 +1696,7 @@ def test_resolve_shortcut_rejects_a_name_matching_both_an_agent_and_a_script(
     assert "ask run" in str(error.value)
 
 
-def test_resolve_shortcut_rejects_a_name_matching_neither_an_agent_nor_a_script(
+def test_resolve_shortcut_returns_none_for_a_name_matching_neither_an_agent_nor_a_script(
     tmp_path: Path,
 ) -> None:
     # given a project with an unrelated script
@@ -1707,16 +1707,10 @@ def test_resolve_shortcut_rejects_a_name_matching_neither_an_agent_nor_a_script(
     config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
 
     # when resolving a name that matches nothing
-    with (
-        patch("ask.cli.Path.cwd", return_value=project_dir),
-        patch("ask.cli.config.default_dir", return_value=config_path.parent),
-        pytest.raises(AskError) as error,
-    ):
-        resolve_shortcut("nope")
+    target = _resolve_in_project(project_dir, config_path, "nope")
 
-    # then the error tells the user to pick ask agent or ask run explicitly
-    assert "ask agent" in str(error.value)
-    assert "ask run" in str(error.value)
+    # then there is no shortcut, letting cyclopts report the unknown command
+    assert target is None
 
 
 def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
