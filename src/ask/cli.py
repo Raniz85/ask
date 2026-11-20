@@ -251,11 +251,16 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
             key: entry.options.get(key, True)
             for key in sorted(resolved_agent.option_keys())
         }
-        options = ", ".join(
-            f"{key}: {_bool(value)}" for key, value in effective_options.items()
-        )
-        console.print(f"    options: {options or '(none)'}")
-        console.print(f"    extensions: {_items(entry.extensions)}")
+        console.print("    options:")
+        for key, value in effective_options.items():
+            console.print(f"      {key}: {_bool(value)}")
+        if entry.name == agents.EXTENSIONS_AGENT:
+            console.print("    extensions:")
+            if entry.extensions:
+                for extension in entry.extensions:
+                    console.print(f"      {extension}")
+            else:
+                console.print("      (none)")
         console.print(
             f"    packages: {_items(resolved_agent.packages_for(flavor.distribution))}"
         )

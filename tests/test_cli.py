@@ -4075,9 +4075,17 @@ def test_dump_prints_the_full_resolved_configuration(
     # and the agent with its full config: effective options including
     # defaults, packages, env and all candidate mounted files
     assert "agents:\n  claude" in out
-    assert "options: auth: true, claude_md: true, config: true, skills: true" in out
+    assert (
+        "    options:\n"
+        "      auth: true\n"
+        "      claude_md: true\n"
+        "      config: true\n"
+        "      skills: true\n" in out
+    )
     assert "    packages: aur:claude-code" in out
     assert f"{Path.home()}/.claude/CLAUDE.md -> /home/raniz/.claude/CLAUDE.md" in out
+    # claude does not support extensions, so the row is hidden
+    assert "extensions:" not in out
 
 
 def test_dump_resolves_removals_and_merged_agent_configuration(
@@ -4099,10 +4107,26 @@ def test_dump_resolves_removals_and_merged_agent_configuration(
     # then the removed package is gone and the agent's own env wins over
     # the manifest env
     assert "official: htop, bash" in out
-    assert "options: auth: false, claude_md: true, config: true, skills: true" in out
+    assert "      auth: false\n" in out
     agent_section = out.split("agents:\n  claude\n", 1)[1]
     assert "EDITOR=vim" in agent_section
     assert "EDITOR=emacs" not in agent_section
+
+
+def test_dump_lists_extensions_on_their_own_rows_for_pi(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given a layer that enables pi with extensions
+    monkeypatch.setenv("COLUMNS", "500")
+    out = _dump_in_project(
+        tmp_path,
+        capsys,
+        layer=('agents = { pi = { extensions = ["foo", "bar"] } }\n'),
+    )
+
+    # then each extension is listed on its own row under the pi agent
+    assert "  pi\n" in out
+    assert "    extensions:\n      foo\n      bar\n" in out
 
 
 def test_dump_shows_which_file_matched_each_conditional_layer(
