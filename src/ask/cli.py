@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import pwd
@@ -12,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, cast
 
 from cyclopts import Parameter
+from rich.console import Console
 
 from ask import (
     agent as agents,
@@ -164,69 +164,109 @@ def _all_mounts(resolved: manifest.ResolvedManifest) -> list[incus.Mount]:
     return mounts
 
 
-def _mount_dump(mount: incus.Mount) -> dict[str, object]:
-    return {
-        "host": str(mount.host_path),
-        "container": str(mount.container_path),
-        "readonly": mount.readonly,
-    }
+def _items(items: list[str]) -> str:
+    return ", ".join(items) if items else "(none)"
 
 
-def _resolved_config(resolved: manifest.ResolvedManifest) -> dict[str, object]:
+def _bool(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def _print_mounts(console: Console, mounts: list[incus.Mount], indent: str) -> None:
+    if not mounts:
+        console.print(f"{indent}(none)")
+        return
+    for mount in mounts:
+        readonly = " (readonly)" if mount.readonly else ""
+        console.print(f"{indent}{mount.host_path} -> {mount.container_path}{readonly}")
+
+
+def _print_pairs(console: Console, mapping: dict[str, str], indent: str) -> None:
+    if not mapping:
+        console.print(f"{indent}(none)")
+        return
+    for name, value in mapping.items():
+        console.print(f"{indent}{name}: {value}")
+
+
+def _print_env(console: Console, env: dict[str, str], indent: str) -> None:
+    if not env:
+        console.print(f"{indent}(none)")
+        return
+    for name, value in env.items():
+        console.print(f"{indent}{name}={value}")
+
+
+def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
     flavor = resolved.flavor
     user = config.resolve_user(flavor)
     tool_managers = _active_tool_managers(resolved)
     official, aur, npm = _all_packages(resolved, flavor.distribution, tool_managers)
-    return {
-        "project_dir": str(resolved.project_dir),
-        "distribution": flavor.distribution,
-        "layers": resolved.layer_names,
-        "shell": {"name": flavor.shell.name, "options": flavor.shell.options},
-        "user": {
-            "name": user.name,
-            "uid": user.uid,
-            "gid": user.gid,
-            "group": user.group_name,
-            "shell": user.shell,
-            "extra_groups": user.extra_groups,
-        },
-        "packages": {"official": official, "aur": aur, "npm": npm},
-        "bind_mounts": [_mount_dump(mount) for mount in _all_mounts(resolved)],
-        "services": resolved.services,
-        "env": resolved.instance_env,
-        "agents": [
-            {
-                "name": entry.name,
-                "options": entry.options,
-                "extensions": entry.extensions,
-                "env": resolved.agent_env(entry.name),
-                "mounts": [
-                    _mount_dump(mount)
-                    for mount in agents.resolve(entry.name).mounts_for(
-                        user, entry.options
-                    )
-                ],
-            }
-            for entry in resolved.merged_agents()
-        ],
-        "tool_managers": [
-            {
-                "name": manager.name,
-                "config_files": [
-                    str(config_file)
-                    for config_file in manager.config_files(resolved.project_dir)
-                ],
-            }
-            for manager in resolved.tool_managers
-        ],
-        "scripts": resolved.scripts,
-    }
+    console = Console()
+
+    console.print(f"project: {resolved.project_dir}")
+    console.print(f"distribution: {flavor.distribution}")
+    console.print(f"layers: {_items(resolved.layer_names)}")
+    shell_options = ", ".join(
+        f"{key}: {_bool(value)}" for key, value in flavor.shell.options.items()
+    )
+    console.print(f"shell: {flavor.shell.name} (options: {shell_options or '(none)'})")
+    console.print(
+        f"user: {user.name} (uid: {user.uid}, gid: {user.gid}, "
+        f"group: {user.group_name}, shell: {user.shell}, "
+        f"extra groups: {_items(user.extra_groups)})"
+    )
+
+    console.print("\npackages:")
+    console.print(f"  official: {_items(official)}")
+    console.print(f"  aur: {_items(aur)}")
+    console.print(f"  npm: {_items(npm)}")
+
+    console.print("\nbind mounts:")
+    _print_mounts(console, _all_mounts(resolved), "  ")
+
+    console.print("\nservices:")
+    _print_pairs(console, resolved.services, "  ")
+
+    console.print("\nenvironment:")
+    _print_env(console, resolved.instance_env, "  ")
+
+    console.print("\nscripts:")
+    _print_pairs(console, resolved.scripts, "  ")
+
+    console.print("\nagents:")
+    entries = resolved.merged_agents()
+    if not entries:
+        console.print("  (none)")
+    for entry in entries:
+        console.print(f"  {entry.name}")
+        options = ", ".join(
+            f"{key}: {_bool(value)}" for key, value in entry.options.items()
+        )
+        console.print(f"    options: {options or '(none)'}")
+        console.print(f"    extensions: {_items(entry.extensions)}")
+        console.print("    environment:")
+        _print_env(console, resolved.agent_env(entry.name), "      ")
+        console.print("    mounts:")
+        _print_mounts(
+            console,
+            agents.resolve(entry.name).mounts_for(user, entry.options),
+            "      ",
+        )
+
+    console.print("\ntool managers:")
+    if not resolved.tool_managers:
+        console.print("  (none)")
+    for manager in resolved.tool_managers:
+        console.print(f"  {manager.name}")
+        config_files = [str(f) for f in manager.config_files(resolved.project_dir)]
+        console.print(f"    config files: {_items(config_files)}")
 
 
 def dump() -> None:
     project_dir = validation.find_project_dir(Path.cwd())
     resolved = _resolve_project(project_dir)
-    print(json.dumps(_resolved_config(resolved), indent=2, sort_keys=True))
+    _print_resolved(resolved)
 
 
 def init() -> None:

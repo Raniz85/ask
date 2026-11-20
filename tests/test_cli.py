@@ -1,5 +1,4 @@
 import hashlib
-import json
 import logging
 import threading
 import time
@@ -3993,7 +3992,7 @@ def _dump_in_project(
     capsys: pytest.CaptureFixture[str],
     manifest: str = "",
     layer: str = "",
-) -> dict:
+) -> str:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir(exist_ok=True)
     (project_dir / "ask.toml").write_text(manifest)
@@ -4009,17 +4008,18 @@ def _dump_in_project(
         patch("ask.cli.config.default_dir", return_value=flavors_dir),
     ):
         dump()
-    return json.loads(capsys.readouterr().out)
+    return capsys.readouterr().out
 
 
 def test_dump_prints_the_full_resolved_configuration(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("COLUMNS", "500")
     # given a flavour layer and a project manifest with packages, mounts,
     # services, env, an agent, a tool manager and a script
     cache = tmp_path / "cache"
     cache.mkdir()
-    config = _dump_in_project(
+    out = _dump_in_project(
         tmp_path,
         capsys,
         manifest=(
@@ -4037,68 +4037,53 @@ def test_dump_prints_the_full_resolved_configuration(
         ),
     )
 
-    # then the dump shows the project, distribution and applied layers
-    assert config["project_dir"] == str(tmp_path / "my-project")
-    assert config["distribution"] == "arch"
-    assert config["layers"] == ["base"]
+    # then the dump is human readable, not JSON
+    assert not out.startswith("{")
+
+    # and it shows the project, distribution and applied layers
+    assert f"project: {tmp_path / 'my-project'}" in out
+    assert "distribution: arch" in out
+    assert "layers: base" in out
 
     # and the resolved shell and user, including groups
-    assert config["shell"] == {"name": "bash", "options": {}}
-    assert config["user"] == {
-        "name": "raniz",
-        "uid": 1000,
-        "gid": 1000,
-        "group": "raniz",
-        "shell": "bash",
-        "extra_groups": [],
-    }
+    assert "shell: bash" in out
+    assert "user: raniz (uid: 1000, gid: 1000, group: raniz" in out
 
     # and all packages to install, split by kind, including the ones the
-    # shell and the agent add
-    # mise has no config files in the project, so it adds no packages
-    assert config["packages"] == {
-        "official": ["git", "uv", "bash"],
-        "aur": ["hello", "claude-code"],
-        "npm": [],
-    }
+    # shell and the agent add; mise has no config files in the project, so
+    # it adds no packages
+    assert "official: git, uv, bash" in out
+    assert "aur: hello, claude-code" in out
+    assert "npm: (none)" in out
 
     # and all bind mounts, starting with the project directory
-    mounts = config["bind_mounts"]
-    assert mounts[0] == {
-        "host": str(tmp_path / "my-project"),
-        "container": str(tmp_path / "my-project"),
-        "readonly": False,
-    }
-    assert mounts[1] == {
-        "host": str(cache),
-        "container": str(cache),
-        "readonly": False,
-    }
+    project_dir = tmp_path / "my-project"
+    assert (
+        f"bind mounts:\n  {project_dir} -> {project_dir}\n  {cache} -> {cache}" in out
+    )
 
     # and the resolved services, merged environment and scripts
-    assert config["services"] == {"sshd.service": "enabled"}
-    assert config["env"] == {"EDITOR": "nvim", "REMOVED": "x"}
-    assert config["scripts"] == {"test": "uv run pytest"}
+    assert "sshd.service: enabled" in out
+    assert "EDITOR=nvim" in out
+    assert "REMOVED=x" in out
+    assert "test: uv run pytest" in out
 
-    # and the tool managers with their config files
-    assert config["tool_managers"] == [{"name": "mise", "config_files": []}]
+    # and the tool manager with its config files
+    assert "mise" in out
+    assert "config files: (none)" in out
 
-    # and each agent with its options, extensions, env and mounted files
-    assert len(config["agents"]) == 1
-    claude = config["agents"][0]
-    assert claude["name"] == "claude"
-    assert claude["options"] == {}
-    assert claude["extensions"] == []
-    assert claude["env"] == {"EDITOR": "nvim", "REMOVED": "x"}
-    assert isinstance(claude["mounts"], list)
+    # and the agent with its options, extensions, env and mounted files
+    assert "agents:\n  claude" in out
+    assert "options: (none)" in out
 
 
 def test_dump_resolves_removals_and_merged_agent_configuration(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("COLUMNS", "500")
     # given a layer that installs git and enables an agent with options and
-    # env, and a manifest that removes git and overrides the agent env
-    config = _dump_in_project(
+    # env, and a manifest that removes git and overrides the env
+    out = _dump_in_project(
         tmp_path,
         capsys,
         manifest=('packages = ["-git"]\n[env]\nEDITOR = "emacs"\n'),
@@ -4110,7 +4095,8 @@ def test_dump_resolves_removals_and_merged_agent_configuration(
 
     # then the removed package is gone and the agent's own env wins over
     # the manifest env
-    assert config["packages"]["official"] == ["htop", "bash"]
-    claude = config["agents"][0]
-    assert claude["options"] == {"auth": False}
-    assert claude["env"] == {"EDITOR": "vim"}
+    assert "official: htop, bash" in out
+    assert "auth: false" in out
+    agent_section = out.split("agents:\n  claude\n", 1)[1]
+    assert "EDITOR=vim" in agent_section
+    assert "EDITOR=emacs" not in agent_section
