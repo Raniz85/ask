@@ -3000,6 +3000,32 @@ def test_agent_launches_the_named_agent_when_given(tmp_path: Path) -> None:
     assert exc_info.value.code == 0
 
 
+def test_agent_launches_oh_my_pi_via_its_omp_binary(tmp_path: Path) -> None:
+    # given a project directory with no agents configured, and a resolved user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when launching oh-my-pi by name
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        agent("oh-my-pi")
+
+    # then its binary omp is executed, not the agent name
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["omp"], env=_HOME_ENV
+    )
+
+
 def test_agent_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"

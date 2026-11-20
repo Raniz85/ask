@@ -476,7 +476,7 @@ def agent(
     _exec_in_container(
         project_dir,
         resolved,
-        [resolved_agent.name, *args],
+        [resolved_agent.binary, *args],
         cwd,
         resolved.agent_env(resolved_agent.name),
         gui,
