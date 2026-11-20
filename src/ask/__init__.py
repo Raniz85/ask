@@ -12,6 +12,7 @@ from ask.cli import (
     converge,
     create,
     destroy,
+    dump,
     enter,
     exec,
     init,
@@ -27,6 +28,7 @@ from ask.log import configure_debug
 
 app = cyclopts.App()
 app.command(create)
+app.command(dump, name="config")
 app.command(converge)
 app.command(destroy)
 app.command(enter)

@@ -335,6 +335,12 @@ def test_commands_accept_create_and_converge_flags(
     assert bound.kwargs == expected
 
 
+def test_config_command_is_registered() -> None:
+    # given the ask CLI app
+    # then the resolved configuration dump is available as `ask config`
+    assert "config" in app.resolved_commands()
+
+
 @pytest.mark.parametrize("command", ["restart", "create", "stop", "destroy"])
 def test_create_and_converge_flags_do_not_appear_in_help_for_commands_that_do_not_accept_them(
     capsys: pytest.CaptureFixture[str], command: str

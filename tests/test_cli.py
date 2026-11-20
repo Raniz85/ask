@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -17,6 +18,7 @@ from ask.cli import (
     converge,
     create,
     destroy,
+    dump,
     enter,
     exec,
     init,
@@ -3984,3 +3986,131 @@ def test_rename_rejects_a_missing_container(tmp_path: Path) -> None:
     # then the error says the container does not exist, and nothing is renamed
     assert str(error.value) == "No container named 'old-project'."
     assert container.method_calls == [call.snapshot()]
+
+
+def _dump_in_project(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    manifest: str = "",
+    layer: str = "",
+) -> dict:
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir(exist_ok=True)
+    (project_dir / "ask.toml").write_text(manifest)
+    flavors_dir = tmp_path / "flavors"
+    flavors_dir.mkdir(exist_ok=True)
+    (flavors_dir / "arch.toml").write_text(
+        'distribution = "arch"\ndefault = true\n'
+        '[user]\nname = "raniz"\nuid = 1000\n'
+        "[layers.base]\n" + layer
+    )
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=flavors_dir),
+    ):
+        dump()
+    return json.loads(capsys.readouterr().out)
+
+
+def test_dump_prints_the_full_resolved_configuration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a flavour layer and a project manifest with packages, mounts,
+    # services, env, an agent, a tool manager and a script
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    config = _dump_in_project(
+        tmp_path,
+        capsys,
+        manifest=(
+            f'packages = ["uv", "aur:hello"]\n'
+            f'bind_mounts = ["{cache}"]\n'
+            'tool_managers = ["mise"]\n'
+            '[env]\nEDITOR = "nvim"\n'
+            '[scripts]\ntest = "uv run pytest"\n'
+        ),
+        layer=(
+            'packages = ["git"]\n'
+            'services = { sshd = "enabled" }\n'
+            "agents = { claude = true }\n"
+            'env = { EDITOR = "vim", REMOVED = "x" }\n'
+        ),
+    )
+
+    # then the dump shows the project, distribution and applied layers
+    assert config["project_dir"] == str(tmp_path / "my-project")
+    assert config["distribution"] == "arch"
+    assert config["layers"] == ["base"]
+
+    # and the resolved shell and user, including groups
+    assert config["shell"] == {"name": "bash", "options": {}}
+    assert config["user"] == {
+        "name": "raniz",
+        "uid": 1000,
+        "gid": 1000,
+        "group": "raniz",
+        "shell": "bash",
+        "extra_groups": [],
+    }
+
+    # and all packages to install, split by kind, including the ones the
+    # shell and the agent add
+    # mise has no config files in the project, so it adds no packages
+    assert config["packages"] == {
+        "official": ["git", "uv", "bash"],
+        "aur": ["hello", "claude-code"],
+        "npm": [],
+    }
+
+    # and all bind mounts, starting with the project directory
+    mounts = config["bind_mounts"]
+    assert mounts[0] == {
+        "host": str(tmp_path / "my-project"),
+        "container": str(tmp_path / "my-project"),
+        "readonly": False,
+    }
+    assert mounts[1] == {
+        "host": str(cache),
+        "container": str(cache),
+        "readonly": False,
+    }
+
+    # and the resolved services, merged environment and scripts
+    assert config["services"] == {"sshd.service": "enabled"}
+    assert config["env"] == {"EDITOR": "nvim", "REMOVED": "x"}
+    assert config["scripts"] == {"test": "uv run pytest"}
+
+    # and the tool managers with their config files
+    assert config["tool_managers"] == [{"name": "mise", "config_files": []}]
+
+    # and each agent with its options, extensions, env and mounted files
+    assert len(config["agents"]) == 1
+    claude = config["agents"][0]
+    assert claude["name"] == "claude"
+    assert claude["options"] == {}
+    assert claude["extensions"] == []
+    assert claude["env"] == {"EDITOR": "nvim", "REMOVED": "x"}
+    assert isinstance(claude["mounts"], list)
+
+
+def test_dump_resolves_removals_and_merged_agent_configuration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a layer that installs git and enables an agent with options and
+    # env, and a manifest that removes git and overrides the agent env
+    config = _dump_in_project(
+        tmp_path,
+        capsys,
+        manifest=('packages = ["-git"]\n[env]\nEDITOR = "emacs"\n'),
+        layer=(
+            'packages = ["git", "htop"]\n'
+            'agents = { claude = { auth = false, env = { EDITOR = "vim" } } }\n'
+        ),
+    )
+
+    # then the removed package is gone and the agent's own env wins over
+    # the manifest env
+    assert config["packages"]["official"] == ["htop", "bash"]
+    claude = config["agents"][0]
+    assert claude["options"] == {"auth": False}
+    assert claude["env"] == {"EDITOR": "vim"}

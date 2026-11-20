@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import pwd
@@ -32,6 +33,7 @@ from ask import (
 )
 from ask.errors import AskError
 from ask.module import Module
+from ask.tool_manager import Mise
 from ask.user import home_env
 
 logger = logging.getLogger(__name__)
@@ -122,6 +124,111 @@ INIT_TEMPLATE = """\
 """
 
 
+def _active_tool_managers(
+    resolved: manifest.ResolvedManifest,
+) -> list[tuple[Mise, list[Path]]]:
+    return [
+        (manager, config_files)
+        for manager in resolved.tool_managers
+        if (config_files := manager.config_files(resolved.project_dir))
+    ]
+
+
+def _all_packages(
+    resolved: manifest.ResolvedManifest,
+    distribution: str,
+    tool_managers: list[tuple[Mise, list[Path]]],
+) -> tuple[list[str], list[str], list[str]]:
+    user_shell = shell.resolve(config.resolve_user(resolved.flavor).shell)
+    package_modules: list[Module] = [
+        cast(Module, user_shell),
+        *[agent for agent in resolved.agents if isinstance(agent, Module)],
+    ]
+    packages = list(resolved.packages)
+    for mod in package_modules:
+        packages += mod.packages_for(distribution)
+    for manager, _ in tool_managers:
+        packages += manager.packages_for(distribution)
+    official, aur = provision.split_aur_packages(packages)
+    official, npm = provision.split_npm_packages(official)
+    return official, aur, npm
+
+
+def _all_mounts(resolved: manifest.ResolvedManifest) -> list[incus.Mount]:
+    user = config.resolve_user(resolved.flavor)
+    user_shell = shell.resolve(user.shell)
+    bind_mounts = [resolved.project_dir] + resolved.bind_mounts
+    mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
+    mounts += user_shell.mounts_for(user, resolved.flavor.shell.options)
+    mounts += resolved.agent_mounts(user)
+    return mounts
+
+
+def _mount_dump(mount: incus.Mount) -> dict[str, object]:
+    return {
+        "host": str(mount.host_path),
+        "container": str(mount.container_path),
+        "readonly": mount.readonly,
+    }
+
+
+def _resolved_config(resolved: manifest.ResolvedManifest) -> dict[str, object]:
+    flavor = resolved.flavor
+    user = config.resolve_user(flavor)
+    tool_managers = _active_tool_managers(resolved)
+    official, aur, npm = _all_packages(resolved, flavor.distribution, tool_managers)
+    return {
+        "project_dir": str(resolved.project_dir),
+        "distribution": flavor.distribution,
+        "layers": resolved.layer_names,
+        "shell": {"name": flavor.shell.name, "options": flavor.shell.options},
+        "user": {
+            "name": user.name,
+            "uid": user.uid,
+            "gid": user.gid,
+            "group": user.group_name,
+            "shell": user.shell,
+            "extra_groups": user.extra_groups,
+        },
+        "packages": {"official": official, "aur": aur, "npm": npm},
+        "bind_mounts": [_mount_dump(mount) for mount in _all_mounts(resolved)],
+        "services": resolved.services,
+        "env": resolved.instance_env,
+        "agents": [
+            {
+                "name": entry.name,
+                "options": entry.options,
+                "extensions": entry.extensions,
+                "env": resolved.agent_env(entry.name),
+                "mounts": [
+                    _mount_dump(mount)
+                    for mount in agents.resolve(entry.name).mounts_for(
+                        user, entry.options
+                    )
+                ],
+            }
+            for entry in resolved.merged_agents()
+        ],
+        "tool_managers": [
+            {
+                "name": manager.name,
+                "config_files": [
+                    str(config_file)
+                    for config_file in manager.config_files(resolved.project_dir)
+                ],
+            }
+            for manager in resolved.tool_managers
+        ],
+        "scripts": resolved.scripts,
+    }
+
+
+def dump() -> None:
+    project_dir = validation.find_project_dir(Path.cwd())
+    resolved = _resolve_project(project_dir)
+    print(json.dumps(_resolved_config(resolved), indent=2, sort_keys=True))
+
+
 def init() -> None:
     path = Path.cwd() / "ask.toml"
     if path.exists():
@@ -167,31 +274,14 @@ def _converge_container(
     resolved: manifest.ResolvedManifest,
     distribution: str,
 ) -> None:
-    bind_mounts = [project_dir] + resolved.bind_mounts
     user = config.resolve_user(resolved.flavor)
-    user_shell = shell.resolve(user.shell)
 
-    tool_managers = [
-        (tool_manager, config_files)
-        for tool_manager in resolved.tool_managers
-        if (config_files := tool_manager.config_files(project_dir))
-    ]
+    tool_managers = _active_tool_managers(resolved)
 
-    package_modules: list[Module] = [
-        cast(Module, user_shell),
-        *[agent for agent in resolved.agents if isinstance(agent, Module)],
-    ]
-    packages = resolved.packages
-    for mod in package_modules:
-        packages += mod.packages_for(distribution)
-    for tool_manager, _ in tool_managers:
-        packages += tool_manager.packages_for(distribution)
-    official_packages, aur_packages = provision.split_aur_packages(packages)
-    official_packages, npm_packages = provision.split_npm_packages(official_packages)
-
-    mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
-    mounts += user_shell.mounts_for(user, resolved.flavor.shell.options)
-    mounts += resolved.agent_mounts(user)
+    official_packages, aur_packages, npm_packages = _all_packages(
+        resolved, distribution, tool_managers
+    )
+    mounts = _all_mounts(resolved)
 
     provisioner = provision.Provisioner(container)
     aur_builder = provision.AurBuilder(container)
@@ -243,10 +333,10 @@ def _converge_container(
 
     mise_provisioner = provision.MiseProvisioner(container)
     path_entries: list[Path] = []
-    for tool_manager, config_files in tool_managers:
+    for manager, config_files in tool_managers:
         mise_provisioner.trust(project_dir, user, config_files)
         mise_provisioner.install(project_dir, user)
-        path_entries += tool_manager.path_entries(user)
+        path_entries += manager.path_entries(user)
     container.set_path_prefix(path_entries)
 
     configuration = convergence.effective_configuration(resolved)

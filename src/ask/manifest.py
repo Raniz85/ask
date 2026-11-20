@@ -118,7 +118,7 @@ class ResolvedManifest:
             packages += [p for p in layer.packages if not is_removal(p)]
         return list(dict.fromkeys(packages))
 
-    def _merged_agents(self) -> list[_MergedAgent]:
+    def merged_agents(self) -> list[_MergedAgent]:
         merged: dict[str, _MergedAgent] = {}
         for layer in self._flavor_layers():
             for name, settings in layer.agents.entries.items():
@@ -135,7 +135,7 @@ class ResolvedManifest:
 
     @property
     def agent_names(self) -> list[str]:
-        return [entry.name for entry in self._merged_agents()]
+        return [entry.name for entry in self.merged_agents()]
 
     @property
     def default_agent(self) -> str | None:
@@ -159,7 +159,7 @@ class ResolvedManifest:
 
     def agent_env(self, name: str) -> dict[str, str]:
         own_envs = next(
-            (entry.envs for entry in self._merged_agents() if entry.name == name), []
+            (entry.envs for entry in self.merged_agents() if entry.name == name), []
         )
         return env.merge(
             [
@@ -175,7 +175,7 @@ class ResolvedManifest:
 
     @property
     def pi_extensions(self) -> list[str]:
-        for entry in self._merged_agents():
+        for entry in self.merged_agents():
             if entry.name == agent.EXTENSIONS_AGENT:
                 return entry.extensions
         return []
@@ -200,7 +200,7 @@ class ResolvedManifest:
 
     def agent_mounts(self, user: ResolvedUser) -> list[Mount]:
         mounts: list[Mount] = []
-        for entry in self._merged_agents():
+        for entry in self.merged_agents():
             resolved_agent = agent.resolve(entry.name)
             mounts += resolved_agent.mounts_for(user, entry.options)
         return mounts
