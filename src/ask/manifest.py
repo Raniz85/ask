@@ -78,10 +78,25 @@ class ResolvedManifest:
     flavor: Flavor
     project_dir: Path
 
+    def _matched_files(self, layer: Layer) -> list[str] | None:
+        if layer.when is None:
+            return None
+        return [
+            file_name
+            for file_name in layer.when.files
+            if (self.project_dir / file_name).exists()
+        ]
+
     def _applies(self, layer: Layer) -> bool:
-        return layer.when is None or any(
-            (self.project_dir / file_name).exists() for file_name in layer.when.files
-        )
+        matched = self._matched_files(layer)
+        return matched is None or bool(matched)
+
+    @property
+    def layer_matches(self) -> dict[str, list[str] | None]:
+        return {
+            name: self._matched_files(self.flavor.layers[name])
+            for name in self.layer_names
+        }
 
     @property
     def layer_names(self) -> list[str]:

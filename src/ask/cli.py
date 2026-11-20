@@ -206,7 +206,13 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
 
     console.print(f"project: {resolved.project_dir}")
     console.print(f"distribution: {flavor.distribution}")
-    console.print(f"layers: {_items(resolved.layer_names)}")
+    console.print("layers:")
+    matches = resolved.layer_matches
+    if not matches:
+        console.print("  (none)")
+    for name, matched in matches.items():
+        reason = "always" if matched is None else f"matched: {_items(matched)}"
+        console.print(f"  {name} ({reason})")
     shell_options = ", ".join(
         f"{key}: {_bool(value)}" for key, value in flavor.shell.options.items()
     )

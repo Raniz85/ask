@@ -4043,7 +4043,7 @@ def test_dump_prints_the_full_resolved_configuration(
     # and it shows the project, distribution and applied layers
     assert f"project: {tmp_path / 'my-project'}" in out
     assert "distribution: arch" in out
-    assert "layers: base" in out
+    assert "layers:\n  base (always)" in out
 
     # and the resolved shell and user, including groups
     assert "shell: bash" in out
@@ -4100,3 +4100,41 @@ def test_dump_resolves_removals_and_merged_agent_configuration(
     agent_section = out.split("agents:\n  claude\n", 1)[1]
     assert "EDITOR=vim" in agent_section
     assert "EDITOR=emacs" not in agent_section
+
+
+def test_dump_shows_which_file_matched_each_conditional_layer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given a base layer and a conditional layer triggered by a project file
+    monkeypatch.setenv("COLUMNS", "500")
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    (project_dir / "special.txt").write_text("")
+    flavors_dir = tmp_path / "flavors"
+    flavors_dir.mkdir()
+    (flavors_dir / "arch.toml").write_text(
+        """distribution = "arch"
+default = true
+[user]
+name = "raniz"
+uid = 1000
+[layers.base]
+packages = ["git"]
+[layers.extra]
+packages = ["htop"]
+when = { files = ["special.txt", "other.txt"] }
+"""
+    )
+
+    # when dumping the resolved configuration
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=flavors_dir),
+    ):
+        dump()
+    out = capsys.readouterr().out
+
+    # then the conditional layer is listed with the file that matched it
+    assert "layers:\n  base (always)\n  extra (matched: special.txt)" in out
+    assert "official: git, htop, bash" in out
