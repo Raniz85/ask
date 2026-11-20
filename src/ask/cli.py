@@ -468,11 +468,11 @@ def agent(
             raise agents.AgentError(
                 "No agents configured in the flavour layers that apply to this project."
             )
-    if name not in agents.known_names():
+    resolved_agent = agents.resolve_name(name)
+    if resolved_agent is None:
         raise agents.AgentError(
-            f"Unknown agent {name!r} {problems.known(agents.known_names())}."
+            f"Unknown agent {name!r} {problems.known(agents.known_with_aliases())}."
         )
-    resolved_agent = agents.resolve(name)
     _exec_in_container(
         project_dir,
         resolved,
@@ -490,7 +490,7 @@ def resolve_shortcut(name: str) -> str | None:
     matches = [
         command
         for command, matched in (
-            ("agent", name in agents.known_names()),
+            ("agent", agents.resolve_name(name) is not None),
             ("run", name in resolved.scripts),
         )
         if matched

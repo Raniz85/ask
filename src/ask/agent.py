@@ -36,6 +36,7 @@ class Agent:
     auth_paths: list[str] = field(default_factory=list)
     skills_paths: list[str] = field(default_factory=list)
     config_paths: list[str] = field(default_factory=list)
+    aliases: tuple[str, ...] = ()
 
     @property
     def binary(self) -> str:
@@ -205,6 +206,7 @@ class OhMyPi(Agent):
             ".omp/agent/models.yml",
         ]
     )
+    aliases: tuple[str, ...] = ("omp",)
 
 
 _AGENTS: dict[str, Agent] = {
@@ -225,6 +227,23 @@ def resolve(name: str) -> Agent:
         return _AGENTS[name]
     except KeyError:
         raise ValueError(f"no known agent named {name!r}") from None
+
+
+# Aliases resolve on the command line only; configuration uses canonical names
+_ALIASES: dict[str, str] = {
+    alias: name for name, agent in _AGENTS.items() for alias in agent.aliases
+}
+
+
+def resolve_name(name: str) -> Agent | None:
+    return _AGENTS.get(_ALIASES.get(name, name))
+
+
+def known_with_aliases() -> list[str]:
+    return [
+        f"{name} (aliases: {', '.join(agent.aliases)})" if agent.aliases else name
+        for name, agent in sorted(_AGENTS.items())
+    ]
 
 
 def _check_name(name: str) -> str:

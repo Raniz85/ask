@@ -120,6 +120,8 @@ If you have multiple agents defined, you can start a specific one.
 ~/my-project $ ask agent claude
 ```
 
+Agents can also be started by command-line aliases — `ask agent omp` is the same as `ask agent oh-my-pi`. Aliases work on the command line only, not in `ask.toml`.
+
 If the agent name is unambigous with other shortcuts, you can drop `agent`:
 
 ```shell

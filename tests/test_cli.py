@@ -1660,6 +1660,21 @@ def test_resolve_shortcut_maps_a_known_agent_name_to_agent(tmp_path: Path) -> No
     assert target == "agent"
 
 
+def test_resolve_shortcut_maps_an_agent_alias_to_agent(tmp_path: Path) -> None:
+    # given a project without any scripts
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when resolving an unknown command that is an agent alias
+    target = _resolve_in_project(project_dir, config_path, "omp")
+
+    # then it dispatches to the agent command
+    assert target == "agent"
+
+
 def test_resolve_shortcut_maps_a_script_name_to_run(tmp_path: Path) -> None:
     # given a project with a script defined in ask.toml
     project_dir = tmp_path / "my-project"
@@ -3026,6 +3041,32 @@ def test_agent_launches_oh_my_pi_via_its_omp_binary(tmp_path: Path) -> None:
     )
 
 
+def test_agent_launches_oh_my_pi_via_its_omp_alias(tmp_path: Path) -> None:
+    # given a project directory with no agents configured, and a resolved user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when launching oh-my-pi by its command-line alias
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        pytest.raises(SystemExit),
+    ):
+        container = container_cls.return_value
+        container.exec_command.return_value = 0
+
+        agent("omp")
+
+    # then its binary omp is executed, with env keyed by the canonical agent name
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["omp"], env=_HOME_ENV
+    )
+
+
 def test_agent_starts_a_stopped_targeted_container(tmp_path: Path) -> None:
     # given a project directory with a stopped container
     project_dir = tmp_path / "my-project"
@@ -3185,7 +3226,8 @@ def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
         agent("copilot")
 
     assert str(error.value) == (
-        "Unknown agent 'copilot' (known: claude, codex, oh-my-pi, opencode, pi)."
+        "Unknown agent 'copilot' "
+        "(known: claude, codex, oh-my-pi (aliases: omp), opencode, pi)."
     )
 
 

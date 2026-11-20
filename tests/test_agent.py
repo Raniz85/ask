@@ -12,7 +12,9 @@ from ask.agent import (
     OpenCode,
     Pi,
     known_names,
+    known_with_aliases,
     resolve,
+    resolve_name,
 )
 from ask.config import ConfigError
 from ask.incus import Mount
@@ -179,6 +181,45 @@ def test_resolve_raises_for_unknown_agent() -> None:
     # then a clear error is raised
     with pytest.raises(ValueError, match="copilot"):
         resolve("copilot")
+
+
+def test_oh_my_pi_has_omp_as_its_alias() -> None:
+    # given the oh-my-pi agent
+    # when reading its aliases
+    # then omp is an alias, and the other agents have none
+    assert OhMyPi().aliases == ("omp",)
+    assert all(agent.aliases == () for agent in (Claude(), Codex(), OpenCode(), Pi()))
+
+
+def test_resolve_name_accepts_aliases() -> None:
+    # given a canonical agent name and an alias
+    # when resolving either as a command-line name
+    # then both resolve to the same agent
+    assert resolve_name("oh-my-pi") == OhMyPi()
+    assert resolve_name("omp") == OhMyPi()
+    assert resolve_name("claude") == Claude()
+    assert resolve_name("copilot") is None
+
+
+def test_resolve_rejects_aliases() -> None:
+    # given an alias, which configuration must not use
+    # when resolving it through the configuration path
+    # then it is not a known agent
+    with pytest.raises(ValueError, match="omp"):
+        resolve("omp")
+
+
+def test_known_with_aliases_lists_each_agents_aliases() -> None:
+    # given the registry of supported agents
+    # when listing the known names for command-line help
+    # then each agent's aliases are listed next to its name
+    assert known_with_aliases() == [
+        "claude",
+        "codex",
+        "oh-my-pi (aliases: omp)",
+        "opencode",
+        "pi",
+    ]
 
 
 def test_apt_repositories_for_returns_them_only_on_debian() -> None:
@@ -405,6 +446,19 @@ def test_loading_a_config_rejects_unknown_agents(tmp_path: Path) -> None:
     # then the agent is reported by its name along with the supported ones
     assert problems == [
         "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, oh-my-pi, opencode, pi)"
+    ]
+
+
+def test_loading_a_config_rejects_an_agent_alias(tmp_path: Path) -> None:
+    # given a layer using an alias, which only works on the command line
+    toml = "[layers.base.agents]\nomp = true\n"
+
+    # when loading it
+    problems = _load_problems(tmp_path, toml)
+
+    # then the alias is rejected, listing only the canonical names
+    assert problems == [
+        "layers.base.agents.omp: unknown agent 'omp' (known: claude, codex, oh-my-pi, opencode, pi)"
     ]
 
 
