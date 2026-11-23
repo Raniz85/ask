@@ -31,6 +31,9 @@ from ask import (
 )
 from ask import gui as gui_support
 from ask import (
+    ide as ides,
+)
+from ask import (
     setup as setup_ops,
 )
 from ask.errors import AskError
@@ -168,6 +171,7 @@ def _all_packages(
     package_modules: list[Module] = [
         cast(Module, user_shell),
         *[agent for agent in resolved.agents if isinstance(agent, Module)],
+        *[ide for ide in resolved.ides if isinstance(ide, Module)],
     ]
     packages = list(resolved.packages)
     for mod in package_modules:
@@ -187,6 +191,7 @@ def _all_mounts(resolved: manifest.ResolvedManifest) -> list[incus.Mount]:
     mounts = [incus.Mount(host_path=p, container_path=p) for p in bind_mounts]
     mounts += user_shell.mounts_for(user, resolved.flavor.shell.options)
     mounts += resolved.agent_mounts(user)
+    mounts += resolved.ide_mounts(user)
     return mounts
 
 
@@ -306,6 +311,21 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
                 f"      {mount.host_path} -> {mount.container_path}{readonly}{missing}"
             )
 
+    console.print("\nides:")
+    if not resolved.ide_names:
+        console.print("  (none)")
+    for resolved_ide in resolved.ides:
+        console.print(f"  {resolved_ide.name}")
+        console.print(
+            f"    packages: {_items(resolved_ide.packages_for(flavor.distribution))}"
+        )
+        console.print("    mounts:")
+        candidate_mounts = resolved_ide.mounts_for(user)
+        if not candidate_mounts:
+            console.print("      (none)")
+        for mount in candidate_mounts:
+            console.print(f"      {mount.host_path} -> {mount.container_path}")
+
     console.print("\ntool managers:")
     if not resolved.tool_managers:
         console.print("  (none)")
@@ -396,11 +416,14 @@ def _converge_container(
     if packages.pipx:
         provisioner.provision_pipx_packages(packages.pipx)
 
-    # Debian has no pi, omp, or mise packages; install their standalone binaries
+    # Debian has no pi, omp, pycharm, or mise packages; install their
+    # standalone binaries or tarballs
     if "pi" in resolved.agent_names and distribution == "debian":
         provisioner.provision_pi()
     if "oh-my-pi" in resolved.agent_names and distribution == "debian":
         provisioner.provision_oh_my_pi()
+    if "pycharm" in resolved.ide_names and distribution == "debian":
+        provisioner.provision_pycharm()
     if tool_managers and distribution == "debian":
         provisioner.provision_mise()
 
@@ -521,12 +544,49 @@ def agent(
     )
 
 
+def ide(
+    name: str | None = None,
+    *args: str,
+    gui: bool = True,
+    create_missing: CreateMissing = False,
+    converge_changed: ConvergeChanged = None,
+) -> None:
+    cwd = Path.cwd()
+    project_dir = validation.find_project_dir(cwd)
+    resolved = _resolve_project(project_dir)
+    if name is not None and name.startswith("-"):
+        args = (name, *args)
+        name = None
+    if name is None:
+        name = resolved.ide_names[0] if resolved.ide_names else None
+        if name is None:
+            raise ides.IdeError(
+                "No ides configured in the flavour layers that apply to this project."
+            )
+    resolved_ide = ides.resolve_name(name)
+    if resolved_ide is None:
+        raise ides.IdeError(
+            f"Unknown ide {name!r} {problems.known(ides.known_with_aliases())}."
+        )
+    _exec_in_container(
+        project_dir,
+        resolved,
+        [resolved_ide.binary, *args],
+        cwd,
+        resolved.instance_env,
+        gui,
+        create_missing,
+        converge_changed,
+    )
+
+
 def resolve_shortcut(name: str) -> str | None:
     resolved = _resolve_project(validation.find_project_dir(Path.cwd()))
     matches = [
         command
         for command, matched in (
             ("agent", agents.resolve_name(name) is not None),
+            ("ide", ides.resolve_name(name) is not None),
             ("run", name in resolved.scripts),
         )
         if matched
@@ -536,7 +596,9 @@ def resolve_shortcut(name: str) -> str | None:
     if not matches:
         return None
     raise AskError(
-        f"Ambigous command {name!r}; use `ask agent {name}` or `ask run {name}`."
+        f"Ambigous command {name!r}; use "
+        + " or ".join(f"`ask {command} {name}`" for command in matches)
+        + "."
     )
 
 

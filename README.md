@@ -134,6 +134,29 @@ Options following the agent name, or unknown options if no name is given, are pa
 ~/my-project $ ask agent --resume
 ```
 
+### Start an IDE
+
+IDEs are listed per flavour layer and started with the `ide` subcommand, which opens them with GUI access by default (`--no-gui` disables it).
+
+```toml
+[layers.python]
+ides = [
+  "pycharm",
+]
+```
+
+```shell
+~/my-project $ ask ide
+```
+
+If you have multiple IDEs defined, you can start a specific one, and pass options on to it.
+
+```shell
+~/my-project $ ask ide pycharm .
+```
+
+PyCharm installs the unified build (the official `pycharm-community-edition` package on Arch, JetBrains' tarball on Debian); registering a JetBrains license in the IDE unlocks the Pro features. The license state lives under `~/.config/JetBrains`, which Ask mounts into the container.
+
 ### Management
 
 To apply configuration changes explicitly, or to manage the container by hand:

@@ -61,6 +61,7 @@ def test_effective_configuration_contains_everything_that_converge_uses(
                         "claude": {"enabled": True, "options": {}, "extensions": []}
                     }
                 },
+                "ides": [],
                 "env": {},
                 "services": {},
                 "order": 0,

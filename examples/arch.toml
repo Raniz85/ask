@@ -97,6 +97,10 @@ packages = [
   "ipython3",
 ]
 
+ides = [
+  "pycharm",
+]
+
 bind_mounts = [
   "~/.cache/uv",
 ]

@@ -5,6 +5,7 @@ import pytest
 
 from ask.agent import Agent, AgentError, AgentSettings, AgentTable
 from ask.config import ConfigError, Flavor, Layer, LayerWhen
+from ask.ide import Ide
 from ask.incus import Mount
 from ask.manifest import Manifest, ResolvedManifest, load
 from ask.tool_manager import Mise
@@ -1065,3 +1066,74 @@ def test_taskfiles_merges_duplicates() -> None:
 
     # then each taskfile appears once, in the order it was first declared
     assert taskfiles == [Path("/shared.py"), Path("/base.py")]
+
+
+def test_ide_names_combines_ides_from_every_applied_layer() -> None:
+    # given a flavour with two layers, each listing an ide
+    resolved = _resolved(
+        {
+            "base": Layer(ides=["pycharm"]),
+            "python": Layer(ides=["pycharm", "other"]),
+        }
+    )
+
+    # when resolving the full set of ide names
+    ide_names = resolved.ide_names
+
+    # then the ide names from both layers are included, in the order the
+    # layers are applied, without duplicates
+    assert ide_names == ["pycharm", "other"]
+
+
+def test_ides_resolves_each_configured_ide_name_in_order() -> None:
+    # given a flavour with two layers, each listing an ide
+    resolved = _resolved(
+        {
+            "base": Layer(ides=["pycharm"]),
+            "python": Layer(ides=["other"]),
+        }
+    )
+    pycharm_ide = Ide(name="pycharm")
+    other_ide = Ide(name="other")
+
+    # when resolving the full set of ides
+    with patch("ask.manifest.ide.resolve") as resolve:
+        resolve.side_effect = {"pycharm": pycharm_ide, "other": other_ide}.__getitem__
+        ides = resolved.ides
+
+    # then each configured ide name is resolved, in order
+    resolve.assert_has_calls([call("pycharm"), call("other")])
+    assert ides == [pycharm_ide, other_ide]
+
+
+def test_ide_mounts_calls_mounts_for_with_each_ide() -> None:
+    # given a flavour with two layers, each listing an ide
+    resolved = _resolved(
+        {
+            "base": Layer(ides=["pycharm"]),
+            "python": Layer(ides=["other"]),
+        }
+    )
+    pycharm_ide = MagicMock()
+    pycharm_mounts = [
+        Mount(host_path=Path("/host/state"), container_path=Path("/container/state"))
+    ]
+    pycharm_ide.mounts_for.return_value = pycharm_mounts
+    other_ide = MagicMock()
+    other_mounts = [
+        Mount(host_path=Path("/host/other"), container_path=Path("/container/other"))
+    ]
+    other_ide.mounts_for.return_value = other_mounts
+
+    # when resolving the ides' mounts
+    with patch(
+        "ask.manifest.ide.resolve", side_effect=[pycharm_ide, other_ide]
+    ) as resolve:
+        mounts = resolved.ide_mounts(_user())
+
+    # then each ide is resolved, its mounts_for is called with the user, and
+    # the resulting mounts are returned in order
+    resolve.assert_has_calls([call("pycharm"), call("other")])
+    pycharm_ide.mounts_for.assert_called_once_with(_user())
+    other_ide.mounts_for.assert_called_once_with(_user())
+    assert mounts == pycharm_mounts + other_mounts

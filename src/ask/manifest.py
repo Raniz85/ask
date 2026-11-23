@@ -5,7 +5,7 @@ from typing import Annotated
 from pydantic import AfterValidator, StrictStr
 from pydantic_core import PydanticCustomError
 
-from ask import agent, env, tool_manager
+from ask import agent, env, ide, tool_manager
 from ask.agent import Agent
 from ask.config import (
     BASE_LAYER,
@@ -230,4 +230,21 @@ class ResolvedManifest:
         for entry in self.merged_agents():
             resolved_agent = agent.resolve(entry.name)
             mounts += resolved_agent.mounts_for(user, entry.options)
+        return mounts
+
+    @property
+    def ide_names(self) -> list[str]:
+        names: list[str] = []
+        for layer in self._flavor_layers():
+            names += layer.ides
+        return list(dict.fromkeys(names))
+
+    @property
+    def ides(self) -> list[ide.Ide]:
+        return [ide.resolve(name) for name in self.ide_names]
+
+    def ide_mounts(self, user: ResolvedUser) -> list[Mount]:
+        mounts: list[Mount] = []
+        for resolved_ide in self.ides:
+            mounts += resolved_ide.mounts_for(user)
         return mounts

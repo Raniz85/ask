@@ -15,6 +15,7 @@ from ask.cli import (
     dump,
     enter,
     exec,
+    ide,
     init,
     rename,
     resolve_shortcut,
@@ -34,6 +35,7 @@ app.command(destroy)
 app.command(enter)
 app.command(exec)
 app.command(agent)
+app.command(ide)
 app.command(init)
 app.command(rename)
 app.command(restart)
@@ -93,7 +95,7 @@ def _launcher(
     run(tokens, debug=debug or bool(os.environ.get("ASK_DEBUG")))
 
 
-_PASSTHROUGH_COMMANDS = ("exec", "run", "agent")
+_PASSTHROUGH_COMMANDS = ("exec", "run", "agent", "ide")
 
 
 def main(tokens: Sequence[str] | None = None) -> None:

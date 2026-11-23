@@ -21,6 +21,7 @@ from ask import agent
 from ask.agent import AgentTable
 from ask.env import Env
 from ask.errors import AskError
+from ask.ide import IdeName
 from ask.incus import known_distributions
 from ask.problems import unknown_name
 from ask.schema import FORBID_UNKNOWN_KEYS
@@ -191,6 +192,7 @@ class Layer:
     agents: Annotated[AgentTable, BeforeValidator(agent.to_table)] = field(
         default_factory=AgentTable
     )
+    ides: list[IdeName] = field(default_factory=list)
     env: Env = field(default_factory=dict)
     taskfiles: list[HomePath] = field(default_factory=list)
     order: StrictInt = 0

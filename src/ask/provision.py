@@ -185,6 +185,12 @@ class Provisioner:
             self.container, 0, 0, Path("/tmp"), ["sh", "-c", _OMP_INSTALL_SCRIPT]
         )
 
+    def provision_pycharm(self) -> None:
+        logger.debug("installing pycharm in container %r", self.container.name)
+        _run_checked(
+            self.container, 0, 0, Path("/tmp"), ["sh", "-c", _PYCHARM_INSTALL_SCRIPT]
+        )
+
     def provision_npm_packages(self, packages: list[str]) -> None:
         if not packages:
             return
@@ -412,6 +418,28 @@ curl -fsSL "{_OMP_RELEASE_BASE}/$asset" -o "$tmp/$asset"
 cd "$tmp"
 grep -F "$asset" SHA256SUMS.txt | sha256sum -c -
 install -m 0755 "$asset" /usr/local/bin/omp
+"""
+
+_PYCHARM_RELEASES_API = (
+    "https://data.services.jetbrains.com/products/releases"
+    "?code=PCP&latest=true&type=release"
+)
+
+# Debian ships no pycharm package, so download JetBrains' latest professional
+# tarball and link its launcher into PATH.
+_PYCHARM_INSTALL_SCRIPT = f"""set -eu
+command -v pycharm >/dev/null 2>&1 && exit 0
+url=$(curl -fsSL "{_PYCHARM_RELEASES_API}" \\
+  | tr ',' '\\n' \\
+  | grep -o 'https://download\\.jetbrains\\.com/python/pycharm-professional-[^"]*\\.tar\\.gz' \\
+  | head -n 1)
+test -n "$url"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "$url" -o "$tmp/pycharm.tar.gz"
+mkdir -p /opt
+tar -xzf "$tmp/pycharm.tar.gz" -C /opt
+ln -sf /opt/pycharm-*/bin/pycharm.sh /usr/local/bin/pycharm
 """
 
 _PI_RELEASE_BASE = "https://github.com/earendil-works/pi/releases/latest/download"

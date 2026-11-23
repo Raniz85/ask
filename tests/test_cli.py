@@ -20,6 +20,7 @@ from ask.cli import (
     dump,
     enter,
     exec,
+    ide,
     init,
     rename,
     resolve_shortcut,
@@ -30,6 +31,7 @@ from ask.cli import (
 from ask.config import ConfigError, Flavor, FlavorError, User
 from ask.convergence import effective_configuration, fingerprint
 from ask.errors import AskError
+from ask.ide import IdeError
 from ask.incus import (
     ContainerExistsError,
     ContainerNotFoundError,
@@ -4511,3 +4513,184 @@ def test_dump_lists_the_resolved_taskfiles(
 
     # then the dump lists both taskfiles, layer-level first
     assert f"taskfiles:\n  {layer_task}, {project_task}" in out
+
+
+def test_ide_runs_the_default_ide(tmp_path: Path) -> None:
+    # given a layer listing pycharm as its only ide
+    # when launching the ide without a name
+    project_dir, container = _run_in_project(
+        tmp_path, lambda: ide(), layer='ides = ["pycharm"]\n'
+    )
+
+    # then the ide's binary runs in the container
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["pycharm"], env=_HOME_ENV
+    )
+
+
+def test_ide_runs_a_named_ide_with_its_arguments(tmp_path: Path) -> None:
+    # given a layer listing pycharm as an ide
+    # when launching it by name with arguments
+    project_dir, container = _run_in_project(
+        tmp_path,
+        lambda: ide("pycharm", ".", "--new-window"),
+        layer='ides = ["pycharm"]\n',
+    )
+
+    # then the ide's binary runs with the arguments passed on
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["pycharm", ".", "--new-window"], env=_HOME_ENV
+    )
+
+
+def test_ide_rejects_an_unknown_ide_name(tmp_path: Path) -> None:
+    # given a layer listing pycharm as an ide
+    # when launching an ide ask doesn't know
+    with pytest.raises(IdeError) as error:
+        _run_in_project(tmp_path, lambda: ide("vscode"), layer='ides = ["pycharm"]\n')
+
+    # then a clear error is raised, listing the known ides
+    assert "Unknown ide 'vscode'" in str(error.value)
+    assert "pycharm" in str(error.value)
+
+
+def test_ide_rejects_a_project_without_ides(tmp_path: Path) -> None:
+    # given a layer listing no ides
+    # when launching the ide without a name
+    with pytest.raises(Exception, match="No ides configured"):
+        _run_in_project(tmp_path, lambda: ide(), layer="")
+
+
+def test_resolve_shortcut_maps_a_known_ide_name_to_ide(tmp_path: Path) -> None:
+    # given a project without any scripts, and a layer listing pycharm as an ide
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[layers.base]\nides = ["pycharm"]\n')
+
+    # when resolving an unknown command that names a known ide
+    target = _resolve_in_project(project_dir, config_path, "pycharm")
+
+    # then it dispatches to the ide command
+    assert target == "ide"
+
+
+def test_converge_provisions_the_ides_official_packages(tmp_path: Path) -> None:
+    # given a project directory, and a config listing pycharm as an ide
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[layers.base]\nides = ["pycharm"]\n')
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder") as aur_builder_cls,
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the ide's package is installed from the official repositories,
+    # and no AUR packages are built
+    provisioner_cls.return_value.provision_packages.assert_called_once_with(
+        "arch", ["bash", "pycharm-community-edition"]
+    )
+    aur_builder_cls.return_value.install_packages.assert_called_once_with("arch", [])
+
+
+def test_converge_installs_pycharm_standalone_on_debian(tmp_path: Path) -> None:
+    # given a debian flavour listing pycharm as an ide
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_DEBIAN_FLAVOR + '[layers.base]\nides = ["pycharm"]\n')
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then pycharm's tarball is installed by the provisioner, alongside its
+    # debian packages
+    provisioner_cls.return_value.provision_pycharm.assert_called_once_with()
+    provisioner_cls.return_value.provision_packages.assert_called_once_with(
+        "debian", ["bash", "curl", "tar", "gzip"]
+    )
+
+
+def test_converge_applies_resolved_ide_mounts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given a project directory, a config listing pycharm as an ide, and a
+    # host home directory with all of pycharm's state paths present
+    home = tmp_path / "home"
+    for state_path in (
+        ".config/JetBrains",
+        ".local/share/JetBrains",
+        ".cache/JetBrains",
+    ):
+        (home / state_path).mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[layers.base]\nides = ["pycharm"]\n')
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the container's bind mounts include the ide's existing state paths
+    mounts = container.converge.call_args[0][0]
+    assert [mount for mount in mounts if "JetBrains" in mount.host_path.name] == [
+        Mount(
+            host_path=home / state_path,
+            container_path=Path("/home/raniz") / state_path,
+        )
+        for state_path in (
+            ".config/JetBrains",
+            ".local/share/JetBrains",
+            ".cache/JetBrains",
+        )
+    ]
+
+
+def test_ide_passes_a_leading_dash_argument_to_the_default_ide(tmp_path: Path) -> None:
+    # given a layer listing pycharm as its only ide
+    # when launching the ide with an option but no name
+    project_dir, container = _run_in_project(
+        tmp_path,
+        lambda: ide("--new-window"),
+        layer='ides = ["pycharm"]\n',
+    )
+
+    # then the option is passed on to the default ide's binary
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["pycharm", "--new-window"], env=_HOME_ENV
+    )
