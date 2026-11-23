@@ -2254,7 +2254,7 @@ def test_enter_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) ->
         patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
-        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.acquire", return_value=False) as acquire_mock,
         patch("ask.gui.release") as release_mock,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -2266,7 +2266,7 @@ def test_enter_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) ->
     # then the gui session is acquired before, and released after, running
     # the resolved shell with the wayland display environment variable
     # merged into the fake ssh environment
-    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT, _RANIZ)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV | _WAYLAND_ENV
@@ -2291,7 +2291,7 @@ def test_enter_does_not_forward_anything_when_gui_requested_without_a_session(
         patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=None),
-        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.acquire", return_value=False) as acquire_mock,
         patch("ask.gui.release") as release_mock,
         pytest.raises(SystemExit),
     ):
@@ -3010,7 +3010,7 @@ def test_exec_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> 
         patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
-        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.acquire", return_value=False) as acquire_mock,
         patch("ask.gui.release") as release_mock,
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -3021,7 +3021,7 @@ def test_exec_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> 
 
     # then the gui session is acquired before, and released after, running
     # the command with the wayland display environment variable set
-    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT, _RANIZ)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["ls", "-la"], env=_USER_ENV | _WAYLAND_ENV
@@ -3046,7 +3046,7 @@ def test_exec_adds_no_gui_environment_when_gui_requested_without_a_session(
         patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=None),
-        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.acquire", return_value=False) as acquire_mock,
         patch("ask.gui.release") as release_mock,
         pytest.raises(SystemExit),
     ):
@@ -3444,7 +3444,7 @@ def test_agent_forwards_wayland_display_when_gui_is_requested(
         patch("ask.cli.config.default_dir", return_value=config_path.parent),
         patch("ask.cli.incus.Container") as container_cls,
         patch("ask.gui.wayland_mount", return_value=_WAYLAND_MOUNT),
-        patch("ask.gui.acquire") as acquire_mock,
+        patch("ask.gui.acquire", return_value=False) as acquire_mock,
         patch("ask.gui.release") as release_mock,
         pytest.raises(SystemExit),
     ):
@@ -3455,7 +3455,7 @@ def test_agent_forwards_wayland_display_when_gui_is_requested(
 
     # then the gui session is acquired before, and released after, running
     # the agent with the wayland display environment variable set
-    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
+    acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT, _RANIZ)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["claude"], env=_USER_ENV | _WAYLAND_ENV
