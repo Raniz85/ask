@@ -4600,7 +4600,7 @@ def test_converge_provisions_the_ides_official_packages(tmp_path: Path) -> None:
     # then the ide's package is installed from the official repositories,
     # and no AUR packages are built
     provisioner_cls.return_value.provision_packages.assert_called_once_with(
-        "arch", ["bash", "pycharm-community-edition"]
+        "arch", ["bash", "pycharm-community-edition", "xwayland-satellite"]
     )
     aur_builder_cls.return_value.install_packages.assert_called_once_with("arch", [])
 

@@ -24,7 +24,7 @@ def test_pycharm_has_its_packages_and_state_paths() -> None:
     # then its distro-keyed packages and categorized state paths are as expected
     assert pycharm.name == "pycharm"
     assert pycharm.packages == {
-        "arch": ["pycharm-community-edition"],
+        "arch": ["pycharm-community-edition", "xwayland-satellite"],
         "debian": ["curl", "tar", "gzip"],
     }
     assert pycharm.binary == "pycharm"

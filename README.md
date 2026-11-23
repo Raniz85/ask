@@ -157,6 +157,8 @@ If you have multiple IDEs defined, you can start a specific one, and pass option
 
 PyCharm installs the unified build (the official `pycharm-community-edition` package on Arch, JetBrains' tarball on Debian); registering a JetBrains license in the IDE unlocks the Pro features. The license state lives under `~/.config/JetBrains`, which Ask mounts into the container.
 
+GUI access shares the host's Wayland socket with the container. X11 applications are supported through [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite), started inside the container when the first GUI session opens and stopped when the last one closes. It is used when the `xwayland-satellite` package is installed in the container: PyCharm pulls it in on Arch, and other layers can add it to their `packages`. It is not available on Debian.
+
 ### Management
 
 To apply configuration changes explicitly, or to manage the container by hand:
