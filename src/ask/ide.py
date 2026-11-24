@@ -141,6 +141,7 @@ class Rustrover(JetbrainsIde):
     name: str = "rustrover"
     code: str = "RR"
 
+
 @dataclass(frozen=True)
 class Vscode(Ide):
     name: str = "code"

@@ -444,7 +444,16 @@ def _ide_install_script(ide: Ide) -> str:
   | tr ',' '\\n' \\
   | grep -o 'https://download\\.jetbrains\\.com/[^"]*\\.tar\\.gz' \\
   | grep -v aarch64 \\
-  | head -n 1)
+  | head -n 1)"""
+    elif isinstance(ide, (Vscode, Zed)):
+        # the download URL redirects directly to the tarball
+        url = _VSCODE_TARBALL_URL if isinstance(ide, Vscode) else _ZED_TARBALL_URL
+        fetch = f'url="{url}"'
+    else:
+        raise TypeError(f"no download source for ide {ide.name!r}")
+    return f"""set -eu
+command -v {ide.binary} >/dev/null 2>&1 && exit 0
+{fetch}
 test -n "$url"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
