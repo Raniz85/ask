@@ -450,6 +450,7 @@ test -n "$launcher"
 ln -sf "$launcher" /usr/local/bin/{ide.binary}
 """
 
+
 _PI_RELEASE_BASE = "https://github.com/earendil-works/pi/releases/latest/download"
 
 # Debian ships no pi package and its Node.js is too old for pi's npm package,

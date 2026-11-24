@@ -15,12 +15,21 @@ class IdeError(AskError):
     pass
 
 
+_JETBRAINS_STATE_PATHS = [
+    ".config/JetBrains",
+    ".local/share/JetBrains",
+    ".cache/JetBrains",
+]
+
+
 @dataclass(frozen=True)
 class Ide:
     name: str
     packages: dict[str, list[str]] = field(default_factory=dict)
     config_paths: list[str] = field(default_factory=list)
     aliases: tuple[str, ...] = ()
+    # JetBrains releases API product code, used to fetch the Debian tarball
+    code: str = ""
 
     @property
     def binary(self) -> str:
@@ -41,27 +50,96 @@ class Ide:
 
 
 @dataclass(frozen=True)
-class Pycharm(Ide):
-    name: str = "pycharm"
+class JetbrainsIde(Ide):
+    # AUR packages are the official JetBrains binaries (extra/*-community-edition
+    # packages are built from intellij-community and have no license manager).
+    # The IDEs are X11 applications, bridged onto Wayland by xwayland-satellite.
+    # Debian ships no JetBrains packages; the tarball is fetched and installed by
+    # provision_ide instead.
     packages: dict[str, list[str]] = field(
         default_factory=lambda: {
-            # AUR pycharm is the official JetBrains binary (unified build,
-            # license-unlockable to Pro); extra/pycharm-community-edition is
-            # the Apache-2.0 CE-only OSS build with no license manager.
-            # PyCharm is X11, bridged onto Wayland by xwayland-satellite
-            "arch": ["aur:pycharm", "xwayland-satellite"],
-            # Debian ships no pycharm package; the tarball is fetched and
-            # installed by provision_pycharm instead
+            "arch": ["xwayland-satellite"],
             "debian": ["curl", "tar", "gzip"],
         }
     )
     config_paths: list[str] = field(
-        default_factory=lambda: [
-            ".config/JetBrains",
-            ".local/share/JetBrains",
-            ".cache/JetBrains",
-        ]
+        default_factory=lambda: list(_JETBRAINS_STATE_PATHS)
     )
+
+    def packages_for(self, distribution: str) -> list[str]:
+        packages = resolve_packages(self.packages, distribution)
+        if distribution == "arch":
+            return [f"aur:{self.name}", *packages]
+        return packages
+
+
+@dataclass(frozen=True)
+class Pycharm(JetbrainsIde):
+    name: str = "pycharm"
+    code: str = "PCP"
+
+
+@dataclass(frozen=True)
+class IntellijIdea(JetbrainsIde):
+    name: str = "idea"
+    aliases: tuple[str, ...] = ("intellij-idea",)
+    # the AUR package name differs from the binary name
+    code: str = "IIU"
+
+    def packages_for(self, distribution: str) -> list[str]:
+        packages = super().packages_for(distribution)
+        return [
+            "aur:intellij-idea-ultimate-edition" if p == "aur:idea" else p
+            for p in packages
+        ]
+
+
+@dataclass(frozen=True)
+class Webstorm(JetbrainsIde):
+    name: str = "webstorm"
+    code: str = "WS"
+
+
+@dataclass(frozen=True)
+class Phpstorm(JetbrainsIde):
+    name: str = "phpstorm"
+    code: str = "PS"
+
+
+@dataclass(frozen=True)
+class Rubymine(JetbrainsIde):
+    name: str = "rubymine"
+    code: str = "RM"
+
+
+@dataclass(frozen=True)
+class Goland(JetbrainsIde):
+    name: str = "goland"
+    code: str = "GO"
+
+
+@dataclass(frozen=True)
+class Clion(JetbrainsIde):
+    name: str = "clion"
+    code: str = "CL"
+
+
+@dataclass(frozen=True)
+class Rider(JetbrainsIde):
+    name: str = "rider"
+    code: str = "RD"
+
+
+@dataclass(frozen=True)
+class Datagrip(JetbrainsIde):
+    name: str = "datagrip"
+    code: str = "DG"
+
+
+@dataclass(frozen=True)
+class Rustrover(JetbrainsIde):
+    name: str = "rustrover"
+    code: str = "RR"
 
 
 _IDES: dict[str, Ide] = {
