@@ -21,10 +21,13 @@ def test_pycharm_has_its_packages_and_state_paths() -> None:
     # when inspecting its properties
     pycharm = Pycharm()
 
-    assert pycharm.packages == {
-        "arch": ["aur:pycharm", "xwayland-satellite"],
-        "debian": ["curl", "tar", "gzip"],
-    }
+    # then its arch packages include the AUR package and xwayland-satellite,
+    # and its state paths cover the JetBrains config directories
+    assert pycharm.packages_for("arch") == [
+        "aur:pycharm",
+        "xwayland-satellite",
+    ]
+    assert pycharm.packages_for("debian") == ["curl", "tar", "gzip"]
     assert pycharm.config_paths == [
         ".config/JetBrains",
         ".local/share/JetBrains",
@@ -59,14 +62,36 @@ def test_known_names_lists_every_supported_ide_sorted() -> None:
     # given the registry of supported ides
     # when listing the known ide names
     # then every supported ide is listed, sorted by name
-    assert known_names() == ["pycharm"]
+    assert known_names() == [
+        "clion",
+        "datagrip",
+        "goland",
+        "idea",
+        "phpstorm",
+        "pycharm",
+        "rider",
+        "rubymine",
+        "rustrover",
+        "webstorm",
+    ]
 
 
 def test_known_with_aliases_lists_each_ides_aliases() -> None:
     # given the registry of supported ides
     # when listing the known names for command-line help
-    # then each ide is listed by name
-    assert known_with_aliases() == ["pycharm"]
+    # then each ide is listed by name, with aliases where they exist
+    assert known_with_aliases() == [
+        "clion",
+        "datagrip",
+        "goland",
+        "idea (aliases: intellij-idea)",
+        "phpstorm",
+        "pycharm",
+        "rider",
+        "rubymine",
+        "rustrover",
+        "webstorm",
+    ]
 
 
 def test_packages_for_combines_common_and_distribution_packages() -> None:
@@ -182,4 +207,9 @@ def test_loading_a_config_rejects_unknown_ides(tmp_path: Path) -> None:
     problems = _load_problems(tmp_path, toml)
 
     # then the ide is reported by its name along with the supported ones
-    assert problems == ["layers.base.ides.0: unknown ide 'vscode' (known: pycharm)"]
+    assert problems == [
+        (
+            "layers.base.ides.0: unknown ide 'vscode' (known: clion, datagrip, "
+            "goland, idea, phpstorm, pycharm, rider, rubymine, rustrover, webstorm)"
+        )
+    ]

@@ -416,14 +416,15 @@ def _converge_container(
     if packages.pipx:
         provisioner.provision_pipx_packages(packages.pipx)
 
-    # Debian has no pi, omp, pycharm, or mise packages; install their
+    # Debian has no pi, omp, JetBrains IDE, or mise packages; install their
     # standalone binaries or tarballs
     if "pi" in resolved.agent_names and distribution == "debian":
         provisioner.provision_pi()
     if "oh-my-pi" in resolved.agent_names and distribution == "debian":
         provisioner.provision_oh_my_pi()
-    if "pycharm" in resolved.ide_names and distribution == "debian":
-        provisioner.provision_pycharm()
+    if distribution == "debian":
+        for resolved_ide in resolved.ides:
+            provisioner.provision_ide(resolved_ide)
     if tool_managers and distribution == "debian":
         provisioner.provision_mise()
 

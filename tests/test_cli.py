@@ -31,7 +31,7 @@ from ask.cli import (
 from ask.config import ConfigError, Flavor, FlavorError, User
 from ask.convergence import effective_configuration, fingerprint
 from ask.errors import AskError
-from ask.ide import IdeError
+from ask.ide import IdeError, resolve
 from ask.incus import (
     ContainerExistsError,
     ContainerNotFoundError,
@@ -4628,9 +4628,11 @@ def test_converge_installs_pycharm_standalone_on_debian(tmp_path: Path) -> None:
 
         converge()
 
-    # then pycharm's tarball is installed by the provisioner, alongside its
+    # then the ide's tarball is installed by the provisioner, alongside its
     # debian packages
-    provisioner_cls.return_value.provision_pycharm.assert_called_once_with()
+    provisioner_cls.return_value.provision_ide.assert_called_once_with(
+        resolve("pycharm")
+    )
     provisioner_cls.return_value.provision_packages.assert_called_once_with(
         "debian", ["bash", "curl", "tar", "gzip"]
     )

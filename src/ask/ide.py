@@ -66,6 +66,15 @@ class Pycharm(Ide):
 
 _IDES: dict[str, Ide] = {
     "pycharm": Pycharm(),
+    "idea": IntellijIdea(),
+    "webstorm": Webstorm(),
+    "phpstorm": Phpstorm(),
+    "rubymine": Rubymine(),
+    "goland": Goland(),
+    "clion": Clion(),
+    "rider": Rider(),
+    "datagrip": Datagrip(),
+    "rustrover": Rustrover(),
 }
 
 
