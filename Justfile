@@ -27,6 +27,7 @@ test:
 e2e:
     uv run pytest -m vm -v tests/vm
 
-# Regenerate docs/config.md from the configuration structs
+# Regenerate docs/config.md and docs/commands.md from the configuration
+# structs and the CLI signatures
 docs:
-    uv run python -m ask.docgen docs/config.md
+    uv run python -m ask.docgen

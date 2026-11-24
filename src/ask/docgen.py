@@ -1,14 +1,17 @@
-"""Generate the configuration reference in docs/config.md.
+"""Generate the configuration reference in docs/config.md and docs/commands.md.
 
-docs/config.md carries hand-written prose around
+The docs carry hand-written prose around
 `<!-- ask:gen:<name> -->` markers; the content inside each marker is
-generated from the pydantic schemas of the configuration dataclasses.
-Run `just docs` after changing a configuration struct.
+generated from the pydantic schemas of the configuration dataclasses
+and the cyclopts app's registered commands.
+Run `just docs` after changing a configuration struct or CLI signature.
 """
 
 import importlib
+import inspect
 import re
 import sys
+from collections.abc import Sequence
 
 from pydantic import TypeAdapter
 
@@ -16,6 +19,7 @@ from pydantic import TypeAdapter
 agent = importlib.import_module("ask.agent")
 ide = importlib.import_module("ask.ide")
 tool_manager = importlib.import_module("ask.tool_manager")
+from ask import app
 from ask.config import Config
 from ask.incus import known_distributions
 from ask.manifest import Manifest
@@ -66,23 +70,12 @@ def _default(prop: dict) -> str:
     return f" Defaults to `{value!r}`."
 
 
-def _table(schema: dict, defs: dict) -> list[str]:
-    """Render an object schema's properties as a Markdown table.
+def _padded(header: tuple[str, ...], rows: Sequence[tuple[str, ...]]) -> list[str]:
+    """Render rows as a width-aligned Markdown table.
 
     Columns are padded to equal width so the output survives dprint fmt
     unchanged (dprint aligns markdown tables).
     """
-    required = set(schema.get("required", []))
-    rows = [
-        (
-            f"`{name}`",
-            _type(prop, defs),
-            "yes" if name in required else "no",
-            f"{prop.get('description', '')}{_default(prop)}",
-        )
-        for name, prop in schema["properties"].items()
-    ]
-    header = ("Key", "Type", "Required", "Description")
     widths = [
         max(len(row[column]) for row in (header, *rows))
         for column in range(len(header))
@@ -97,8 +90,65 @@ def _table(schema: dict, defs: dict) -> list[str]:
     return [padded[0], separator, *padded[1:]]
 
 
+def _table(schema: dict, defs: dict) -> list[str]:
+    """Render an object schema's properties as a Markdown table."""
+    required = set(schema.get("required", []))
+    rows = [
+        (
+            f"`{name}`",
+            _type(prop, defs),
+            "yes" if name in required else "no",
+            f"{prop.get('description', '')}{_default(prop)}",
+        )
+        for name, prop in schema["properties"].items()
+    ]
+    return _padded(("Key", "Type", "Required", "Description"), rows)
+
+
 def _enum(kind: str, names: list[str]) -> str:
     return f"Known {kind}: {', '.join(f'`{name}`' for name in names)}."
+
+
+def _argument_default(argument) -> str:
+    """A 'Defaults to' suffix for an argument, or an empty string."""
+    info = argument.field_info
+    if info.required or info.default is inspect.Parameter.empty:
+        return ""
+    value = (
+        str(info.default).lower() if isinstance(info.default, bool) else info.default
+    )
+    return f" Defaults to `{value}`."
+
+
+def _command(name: str, sub) -> list[str]:
+    """Render one CLI command: heading, description, and an argument table."""
+    lines = [f"### `ask {name}`", "", sub.help]
+    rows = []
+    for a in sub.assemble_argument_collection():
+        kind = a.field_info.kind
+        label = (
+            f"{a.names[0].lstrip('-').upper()} {' '.join(a.names)}"
+            if kind.name == "POSITIONAL_OR_KEYWORD"
+            else f"{' '.join(a.names)}{'...' if kind.name == 'VAR_POSITIONAL' else ''}"
+        )
+        rows.append(
+            (
+                f"`{label}`",
+                f"{(a.parameter.help or '')}{_argument_default(a)}",
+            )
+        )
+    if rows:
+        lines += ["", *_padded(("Argument", "Description"), rows)]
+    return lines
+
+
+def _cli_commands():
+    """The app's commands as (name, sub-app) pairs, in registration order."""
+    return [
+        (name, sub)
+        for name, sub in app._registered_commands.items()
+        if not name.startswith("-")
+    ]
 
 
 def _agent_options() -> list[str]:
@@ -160,28 +210,35 @@ def sections() -> dict[str, str]:
     }
 
 
-def update(doc: str) -> str:
+def _cli_section() -> dict[str, str]:
+    return {
+        "commands": "\n\n".join(
+            "\n".join(_command(name, sub)) for name, sub in _cli_commands()
+        ),
+    }
+
+
+def update(doc: str, generated: dict[str, str]) -> str:
     """Replace the body inside each marker with generated content."""
-    generated = sections()
 
     def replacement(match: re.Match) -> str:
         name = match.group("name")
-        assert name in generated, f"docs/config.md has unknown marker ask:gen:{name}"
+        assert name in generated, f"doc has unknown marker ask:gen:{name}"
         return f"{_BEGIN.format(name=name)}\n\n{generated[name]}\n\n<!-- /ask:gen -->\n"
 
     updated, count = _MARK_RE.subn(replacement, doc)
     missing = generated.keys() - {
         match.group("name") for match in _MARK_RE.finditer(doc)
     }
-    assert not missing, f"docs/config.md lacks markers: {', '.join(sorted(missing))}"
-    assert count, "docs/config.md has no generation markers"
+    assert not missing, f"doc lacks markers: {', '.join(sorted(missing))}"
+    assert count, "doc has no generation markers"
     return updated
 
 
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 else "docs/config.md"
-    with open(path) as f:
-        doc = f.read()
-    updated = update(doc)
-    with open(path, "w") as f:
-        f.write(updated)
+    for path in sys.argv[1:] or ["docs/config.md", "docs/commands.md"]:
+        generated = _cli_section() if path.endswith("commands.md") else sections()
+        with open(path) as f:
+            doc = f.read()
+        with open(path, "w") as f:
+            f.write(update(doc, generated))

@@ -67,6 +67,24 @@ ConvergeChanged = Annotated[
     ),
 ]
 
+Gui = Annotated[
+    bool,
+    Parameter(
+        help="Start a GUI session sharing the host's Wayland socket with the container."
+    ),
+]
+AgentName = Annotated[
+    str | None,
+    Parameter(help="Agent name; defaults to the flavour's default agent."),
+]
+CommandArgs = Annotated[
+    str,
+    Parameter(
+        name="ARGS",
+        help="Arguments passed to the command.",
+    ),
+]
+
 FAKE_SSH_ENV = {
     "SSH_CLIENT": "127.0.0.1 1 22",
     "SSH_CONNECTION": "127.0.0.1 1 127.0.0.1 22",
@@ -336,12 +354,16 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
 
 
 def dump() -> None:
+    """Print the project's resolved configuration."""
+
     project_dir = validation.find_project_dir(Path.cwd())
     resolved = _resolve_project(project_dir)
     _print_resolved(resolved)
 
 
 def init() -> None:
+    """Create an ask.toml template in the current directory."""
+
     path = Path.cwd() / "ask.toml"
     if path.exists():
         raise AskError(f"{path} already exists; not overwriting it.")
@@ -349,11 +371,15 @@ def init() -> None:
 
 
 def setup() -> None:
+    """Set up Incus and create a default flavour."""
+
     user = pwd.getpwuid(os.getuid())
     setup_ops.run_setup(setup_ops.config_dir(), user.pw_name, user.pw_uid, _confirm)
 
 
 def create() -> None:
+    """Create the project's container and converge it."""
+
     project_dir = validation.find_project_dir(Path.cwd())
     resolved = _resolve_project(project_dir)
     container_name = slug.slugify(project_dir.name)
@@ -370,6 +396,8 @@ def converge(
     *,
     create_missing: CreateMissing = False,
 ) -> None:
+    """Apply ask.toml and the flavour's configuration to the container."""
+
     project_dir = validation.find_project_dir(Path.cwd())
     resolved = _resolve_project(project_dir)
     distribution = resolved.flavor.distribution
@@ -481,12 +509,17 @@ def _converge_container(
 
 
 def enter(
-    gui: bool = False,
+    gui: Gui = False,
     *,
-    root: bool = False,
+    root: Annotated[
+        bool,
+        Parameter(help="Start a root shell instead of the container user's."),
+    ] = False,
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
+    """Start a shell in the project's container."""
+
     cwd = Path.cwd()
     project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
@@ -510,12 +543,14 @@ def enter(
 
 
 def agent(
-    name: str | None = None,
-    *args: str,
-    gui: bool = False,
+    name: AgentName = None,
+    *args: CommandArgs,
+    gui: Gui = False,
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
+    """Start an AI agent in the project's container."""
+
     cwd = Path.cwd()
     project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
@@ -546,12 +581,20 @@ def agent(
 
 
 def ide(
-    name: str | None = None,
-    *args: str,
-    gui: bool = True,
+    name: Annotated[
+        str | None,
+        Parameter(help="IDE name; defaults to the project's first configured IDE."),
+    ] = None,
+    *args: Annotated[
+        str,
+        Parameter(name="ARGS", help="Arguments passed to the IDE's binary."),
+    ],
+    gui: Gui = True,
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
+    """Start an IDE in the project's container."""
+
     cwd = Path.cwd()
     project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
@@ -608,12 +651,17 @@ def resolve_shortcut(name: str) -> str | None:
 
 
 def run(
-    name: str,
-    *args: str,
-    gui: bool = False,
+    name: Annotated[str, Parameter(help="Script name defined in ask.toml.")],
+    *args: Annotated[
+        str,
+        Parameter(name="ARGS", help="Arguments appended to the script's command."),
+    ],
+    gui: Gui = False,
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
+    """Run a script defined in the project's ask.toml."""
+
     cwd = Path.cwd()
     project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
@@ -633,11 +681,16 @@ def run(
 
 
 def exec(
-    *command: str,
-    gui: bool = False,
+    *command: Annotated[
+        str,
+        Parameter(name="COMMAND", help="Command and arguments to run."),
+    ],
+    gui: Gui = False,
     create_missing: CreateMissing = False,
     converge_changed: ConvergeChanged = None,
 ) -> None:
+    """Run a command in the project's container."""
+
     cwd = Path.cwd()
     project_dir = validation.find_project_dir(cwd)
     resolved = _resolve_project(project_dir)
@@ -654,6 +707,8 @@ def exec(
 
 
 def destroy() -> None:
+    """Delete the project's container and its configuration."""
+
     project_dir = validation.find_project_dir(Path.cwd())
     container_name = slug.slugify(project_dir.name)
     container = incus.Container(container_name)
@@ -666,6 +721,8 @@ def destroy() -> None:
 
 
 def stop() -> None:
+    """Stop the project's container now instead of waiting for idle shutdown."""
+
     project_dir = validation.find_project_dir(Path.cwd())
     container_name = slug.slugify(project_dir.name)
     container = incus.Container(container_name)
@@ -679,6 +736,8 @@ def stop() -> None:
 
 
 def restart() -> None:
+    """Restart the project's container."""
+
     project_dir = validation.find_project_dir(Path.cwd())
     container_name = slug.slugify(project_dir.name)
     container = incus.Container(container_name)
@@ -693,7 +752,12 @@ def restart() -> None:
         container.start()
 
 
-def rename(old: str, new: str) -> None:
+def rename(
+    old: Annotated[str, Parameter(help="Current project directory name.")],
+    new: Annotated[str, Parameter(help="New project directory name.")],
+) -> None:
+    """Rename the project's directory and its container."""
+
     cwd = Path.cwd()
     old_dir = cwd / old
     new_dir = cwd / new
