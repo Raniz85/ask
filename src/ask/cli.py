@@ -395,7 +395,9 @@ def _converge_container(
     provisioner.provision_instance_env(resolved.instance_env)
     provisioner.provision_idle_shutdown(distribution, user)
 
-    resolved_packages = official_packages + aur_packages + npm_packages
+    resolved_packages = (
+        official_packages + aur_packages + provision.with_npm_prefix(npm_packages)
+    )
     stale = incus.stale_packages(container.get_managed_packages(), resolved_packages)
     if stale:
         stale_distro, stale_npm = provision.split_npm_packages(stale)

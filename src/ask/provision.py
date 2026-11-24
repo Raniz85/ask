@@ -70,6 +70,10 @@ def split_npm_packages(packages: list[str]) -> tuple[list[str], list[str]]:
     return official, npm
 
 
+def with_npm_prefix(packages: list[str]) -> list[str]:
+    return [f"{_NPM_PREFIX}{package}" for package in packages]
+
+
 def _ancestors_under_home(path: Path, home: Path) -> list[Path]:
     if path == home or home not in path.parents:
         return []

@@ -947,6 +947,66 @@ def test_converge_does_not_install_npm_packages_on_arch(tmp_path: Path) -> None:
     provisioner_cls.return_value.provision_npm_packages.assert_not_called()
 
 
+def test_converge_tracks_npm_packages_by_their_prefixed_name(tmp_path: Path) -> None:
+    # given a debian flavour enabling the codex agent, which is npm-based
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _DEBIAN_FLAVOR
+        + "[layers.base.agents]\ncodex = true\n"
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the npm package is tracked with its prefix, so it can later be told
+    # apart from distro packages
+    container.set_managed_packages.assert_called_once_with(
+        ["bash", "nodejs", "npm", "npm:@openai/codex"]
+    )
+
+
+def test_converge_removes_stale_npm_packages_with_npm(tmp_path: Path) -> None:
+    # given a debian flavour without codex, and a container that was
+    # previously managing codex's npm package
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_DEBIAN_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = ["bash", "npm:@openai/codex"]
+
+        converge()
+
+    # then the npm package is uninstalled with npm, not the distro package manager
+    provisioner = provisioner_cls.return_value
+    provisioner.remove_npm_packages.assert_called_once_with(["@openai/codex"])
+    provisioner.remove_packages.assert_not_called()
+
+
 def test_converge_does_not_install_pi_standalone_on_arch(tmp_path: Path) -> None:
     # given an arch flavour enabling the pi agent, where pi comes from the AUR
     project_dir = tmp_path / "my-project"
