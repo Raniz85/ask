@@ -586,10 +586,11 @@ def exec(
 
 def destroy() -> None:
     project_dir = validation.find_project_dir(Path.cwd())
-    container = incus.Container(project_dir.name)
+    container_name = slug.slugify(project_dir.name)
+    container = incus.Container(container_name)
     snapshot = container.snapshot()
     if snapshot is None:
-        raise incus.ContainerNotFoundError(f"No container named {project_dir.name!r}.")
+        raise incus.ContainerNotFoundError(f"No container named {container_name!r}.")
     if snapshot.is_running():
         container.stop()
     container.delete()
@@ -597,11 +598,12 @@ def destroy() -> None:
 
 def stop() -> None:
     project_dir = validation.find_project_dir(Path.cwd())
-    container = incus.Container(project_dir.name)
+    container_name = slug.slugify(project_dir.name)
+    container = incus.Container(container_name)
     snapshot = container.snapshot()
     if snapshot is None:
         raise incus.ContainerNotFoundError(
-            f"No container named {project_dir.name!r}. Run `ask create` first."
+            f"No container named {container_name!r}. Run `ask create` first."
         )
     if snapshot.is_running():
         container.stop()
@@ -609,11 +611,12 @@ def stop() -> None:
 
 def restart() -> None:
     project_dir = validation.find_project_dir(Path.cwd())
-    container = incus.Container(project_dir.name)
+    container_name = slug.slugify(project_dir.name)
+    container = incus.Container(container_name)
     snapshot = container.snapshot()
     if snapshot is None:
         raise incus.ContainerNotFoundError(
-            f"No container named {project_dir.name!r}. Run `ask create` first."
+            f"No container named {container_name!r}. Run `ask create` first."
         )
     if snapshot.is_running():
         container.restart()

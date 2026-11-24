@@ -1,11 +1,12 @@
 """Tests for slugification in CLI commands."""
 
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
 from ask import incus
-from ask.cli import _running_container, create
+from ask.cli import _running_container, create, destroy, restart, stop
+from ask.incus import InstanceSnapshot
 from ask.slug import slugify
 
 
@@ -52,3 +53,48 @@ def test_running_container_uses_slugified_name(mock_project_dir):
     ):
         container, _ = _running_container(mock_project_dir, create_missing=True)
         assert container.name == "my-project-with-dots"
+
+
+def test_stop_uses_slugified_name(mock_project_dir):
+    """Test that `stop` targets the slugified container, like `create` does."""
+    with (
+        patch("ask.cli.Path.cwd", return_value=mock_project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
+
+        stop()
+
+    container_cls.assert_called_once_with("my-project-with-dots")
+    assert container.method_calls == [call.snapshot(), call.stop()]
+
+
+def test_restart_uses_slugified_name(mock_project_dir):
+    """Test that `restart` targets the slugified container, like `create` does."""
+    with (
+        patch("ask.cli.Path.cwd", return_value=mock_project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
+
+        restart()
+
+    container_cls.assert_called_once_with("my-project-with-dots")
+    assert container.method_calls == [call.snapshot(), call.restart()]
+
+
+def test_destroy_uses_slugified_name(mock_project_dir):
+    """Test that `destroy` targets the slugified container, like `create` does."""
+    with (
+        patch("ask.cli.Path.cwd", return_value=mock_project_dir),
+        patch("ask.cli.incus.Container") as container_cls,
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Stopped", config={})
+
+        destroy()
+
+    container_cls.assert_called_once_with("my-project-with-dots")
+    assert container.method_calls == [call.snapshot(), call.delete()]
