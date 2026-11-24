@@ -232,12 +232,15 @@ def test_acquire_starts_the_x11_bridge_when_it_is_installed(
         acquire(container, _MOUNT, _USER)
 
     # then xwayland-satellite is started as the user, on the mounted wayland
-    # socket, after the socket is attached
+    # socket, with the user session env (its xwls socket lives in
+    # XDG_RUNTIME_DIR), after the socket is attached
     assert _started_satellite(container)
     uid, gid, cwd, _ = container.exec_command.call_args.args
     assert (uid, gid, cwd) == (1000, 1000, Path("/home/raniz"))
     assert container.exec_command.call_args.kwargs["env"] == {
         "WAYLAND_DISPLAY": "/home/raniz/.wayland-socket",
+        "XDG_RUNTIME_DIR": "/run/user/1000",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
         "HOME": "/home/raniz",
     }
     assert container.method_calls.index(call.add_gui_device(_MOUNT)) < next(

@@ -445,12 +445,15 @@ def _converge_container(
         provisioner.provision_pipx_packages(packages.pipx)
 
     # Debian has no pi, omp, JetBrains IDE, or mise packages; install their
-    # standalone binaries or tarballs
+    # standalone binaries or tarballs. xwayland-satellite is built from source
+    # when an IDE needs the X11 bridge.
     if "pi" in resolved.agent_names and distribution == "debian":
         provisioner.provision_pi()
     if "oh-my-pi" in resolved.agent_names and distribution == "debian":
         provisioner.provision_oh_my_pi()
     if distribution == "debian":
+        if any(isinstance(ide, ides.JetbrainsIde) for ide in resolved.ides):
+            provisioner.provision_xwayland_satellite()
         for resolved_ide in resolved.ides:
             provisioner.provision_ide(resolved_ide)
     if tool_managers and distribution == "debian":

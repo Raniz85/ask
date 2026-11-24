@@ -186,6 +186,18 @@ class Provisioner:
             self.container, 0, 0, Path("/tmp"), ["sh", "-c", _OMP_INSTALL_SCRIPT]
         )
 
+    def provision_xwayland_satellite(self) -> None:
+        logger.debug(
+            "installing xwayland-satellite in container %r", self.container.name
+        )
+        _run_checked(
+            self.container,
+            0,
+            0,
+            Path("/tmp"),
+            ["sh", "-c", _SATELLITE_INSTALL_SCRIPT],
+        )
+
     def provision_ide(self, ide: Ide) -> None:
         logger.debug("installing ide %r in container %r", ide.name, self.container.name)
         _run_checked(
@@ -485,6 +497,30 @@ cd "$tmp"
 grep -F "$asset" SHA256SUMS | sha256sum -c -
 tar -xzf "$asset"
 install -m 0755 pi/pi /usr/local/bin/pi
+"""
+
+
+_SATELLITE_TAGS_API = "https://api.github.com/repos/Supreeeme/xwayland-satellite/tags"
+_SATELLITE_BUILD_DEPS = "cargo clang libclang-dev libxcb1-dev libxcb-cursor-dev"
+
+# Debian ships no xwayland-satellite package and its releases carry no
+# binaries, so install the Xwayland runtime and build the latest release from
+# source; build deps are removed afterwards so they stay out of the container.
+_SATELLITE_INSTALL_SCRIPT = f"""set -eu
+command -v xwayland-satellite >/dev/null 2>&1 && exit 0
+tag=$(curl -fsSL "{_SATELLITE_TAGS_API}" | grep -o '"name": *"[^"]*"' | head -n 1 | cut -d'"' -f4)
+test -n "$tag"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "https://github.com/Supreeeme/xwayland-satellite/archive/$tag.tar.gz" -o "$tmp/src.tar.gz"
+tar -xzf "$tmp/src.tar.gz" -C "$tmp"
+cd "$tmp"/xwayland-satellite-*
+apt-get update -qq
+apt-get install -y -qq {_SATELLITE_BUILD_DEPS} xwayland
+cargo build --release --locked
+install -m 0755 target/release/xwayland-satellite /usr/local/bin/xwayland-satellite
+apt-get purge -y -qq {_SATELLITE_BUILD_DEPS}
+apt-get autoremove -y -qq
 """
 
 

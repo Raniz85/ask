@@ -1032,6 +1032,41 @@ def test_provision_oh_my_pi_raises_when_the_install_fails() -> None:
         provisioner.provision_oh_my_pi()
 
 
+def test_provision_xwayland_satellite_builds_it_from_source_as_root() -> None:
+    # given a provisioner
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning xwayland-satellite
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.provision_xwayland_satellite()
+
+    # then a shell script runs as root in the container, fetching the latest
+    # release tag, building it with cargo, installing the binary on the
+    # default PATH, and purging the build dependencies
+    assert exec_command.call_count == 1
+    args = exec_command.call_args.args
+    assert args[:3] == (0, 0, Path("/tmp"))
+    assert args[3][:2] == ["sh", "-c"]
+    script = args[3][2]
+    assert "Supreeeme/xwayland-satellite" in script
+    assert "command -v xwayland-satellite" in script
+    assert "cargo build --release" in script
+    assert "/usr/local/bin/xwayland-satellite" in script
+    assert "apt-get purge" in script
+
+
+def test_provision_xwayland_satellite_raises_when_the_install_fails() -> None:
+    # given a provisioner and a failing build
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning xwayland-satellite
+    with (
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError, match="sh -c"),
+    ):
+        provisioner.provision_xwayland_satellite()
+
+
 def test_provision_pi_extensions_uses_the_given_binary_for_install() -> None:
     # given a provisioner, a resolved user, and oh-my-pi extensions
     provisioner = Provisioner(Container("my-project"))

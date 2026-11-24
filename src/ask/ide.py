@@ -54,8 +54,9 @@ class JetbrainsIde(Ide):
     # AUR packages are the official JetBrains binaries (extra/*-community-edition
     # packages are built from intellij-community and have no license manager).
     # The IDEs are X11 applications, bridged onto Wayland by xwayland-satellite.
-    # Debian ships no JetBrains packages; the tarball is fetched and installed by
-    # provision_ide instead.
+    # Debian ships no JetBrains packages; the tarball is fetched and installed
+    # by provision_ide, and xwayland-satellite is built from source by
+    # provision_xwayland_satellite.
     packages: dict[str, list[str]] = field(
         default_factory=lambda: {
             "arch": ["xwayland-satellite"],

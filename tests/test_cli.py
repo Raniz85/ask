@@ -4629,10 +4629,12 @@ def test_converge_installs_pycharm_standalone_on_debian(tmp_path: Path) -> None:
         converge()
 
     # then the ide's tarball is installed by the provisioner, alongside its
-    # debian packages
+    # debian packages, and xwayland-satellite is built from source for the
+    # X11 bridge
     provisioner_cls.return_value.provision_ide.assert_called_once_with(
         resolve("pycharm")
     )
+    provisioner_cls.return_value.provision_xwayland_satellite.assert_called_once_with()
     provisioner_cls.return_value.provision_packages.assert_called_once_with(
         "debian", ["bash", "curl", "tar", "gzip"]
     )

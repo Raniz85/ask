@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ask.incus import Container, Mount
 from ask.user import ResolvedUser
+from ask.user_session import env as user_session_env
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,8 @@ def _start_satellite(container: Container, user: ResolvedUser) -> None:
         user.gid,
         Path(home),
         ["sh", "-c", _SATELLITE_START_SCRIPT],
-        env=env(user, x11=False) | {"HOME": home},
+        # the satellite binds its xwls wayland socket inside XDG_RUNTIME_DIR
+        env=env(user, x11=False) | user_session_env(user) | {"HOME": home},
     )
     if returncode != 0:
         logger.warning(
