@@ -4522,9 +4522,8 @@ def test_ide_runs_the_default_ide(tmp_path: Path) -> None:
         tmp_path, lambda: ide(), layer='ides = ["pycharm"]\n'
     )
 
-    # then the ide's binary runs in the container
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["pycharm"], env=_HOME_ENV
+        1000, 1000, project_dir, ["pycharm"], env=_USER_ENV
     )
 
 
@@ -4537,9 +4536,8 @@ def test_ide_runs_a_named_ide_with_its_arguments(tmp_path: Path) -> None:
         layer='ides = ["pycharm"]\n',
     )
 
-    # then the ide's binary runs with the arguments passed on
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["pycharm", ".", "--new-window"], env=_HOME_ENV
+        1000, 1000, project_dir, ["pycharm", ".", "--new-window"], env=_USER_ENV
     )
 
 
@@ -4597,12 +4595,14 @@ def test_converge_provisions_the_ides_official_packages(tmp_path: Path) -> None:
 
         converge()
 
-    # then the ide's package is installed from the official repositories,
-    # and no AUR packages are built
+    # then PyCharm is installed from the AUR and the remaining packages come
+    # from the official repositories
     provisioner_cls.return_value.provision_packages.assert_called_once_with(
-        "arch", ["bash", "pycharm-community-edition", "xwayland-satellite"]
+        "arch", ["bash", "xwayland-satellite"]
     )
-    aur_builder_cls.return_value.install_packages.assert_called_once_with("arch", [])
+    aur_builder_cls.return_value.install_packages.assert_called_once_with(
+        "arch", ["pycharm"]
+    )
 
 
 def test_converge_installs_pycharm_standalone_on_debian(tmp_path: Path) -> None:
@@ -4692,5 +4692,5 @@ def test_ide_passes_a_leading_dash_argument_to_the_default_ide(tmp_path: Path) -
 
     # then the option is passed on to the default ide's binary
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["pycharm", "--new-window"], env=_HOME_ENV
+        1000, 1000, project_dir, ["pycharm", "--new-window"], env=_USER_ENV
     )

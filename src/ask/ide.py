@@ -45,11 +45,11 @@ class Pycharm(Ide):
     name: str = "pycharm"
     packages: dict[str, list[str]] = field(
         default_factory=lambda: {
-            # the extra repo package ships the unified build, which a
-            # JetBrains license unlocks to Pro; its launcher is /usr/bin/pycharm.
-            # PyCharm is an X11 application, bridged onto Wayland by
-            # xwayland-satellite
-            "arch": ["pycharm-community-edition", "xwayland-satellite"],
+            # AUR pycharm is the official JetBrains binary (unified build,
+            # license-unlockable to Pro); extra/pycharm-community-edition is
+            # the Apache-2.0 CE-only OSS build with no license manager.
+            # PyCharm is X11, bridged onto Wayland by xwayland-satellite
+            "arch": ["aur:pycharm", "xwayland-satellite"],
             # Debian ships no pycharm package; the tarball is fetched and
             # installed by provision_pycharm instead
             "debian": ["curl", "tar", "gzip"],
