@@ -91,7 +91,21 @@ def _launcher(
             negative="", help="Show the full traceback when a command fails."
         ),
     ] = False,
+    path: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=("-p", "--path"),
+            negative="",
+            help="Run the command as if started from this directory instead "
+            "of the current one.",
+        ),
+    ] = None,
 ) -> None:
+    if path is not None:
+        try:
+            os.chdir(path)
+        except OSError as error:
+            raise AskError(f"Cannot run from {path!r}: {error.strerror}") from None
     run(tokens, debug=debug or bool(os.environ.get("ASK_DEBUG")))
 
 
@@ -99,13 +113,16 @@ _PASSTHROUGH_COMMANDS = ("exec", "run", "agent", "ide")
 
 
 def main(tokens: Sequence[str] | None = None) -> None:
-    app.meta(_separate_passthrough(sys.argv[1:] if tokens is None else tokens))
+    try:
+        app.meta(_separate_passthrough(sys.argv[1:] if tokens is None else tokens))
+    except AskError as error:
+        # errors raised by the launcher itself (e.g. an unusable --path),
+        # outside of run()'s own reporting
+        _report(error)
 
 
 def _separate_passthrough(tokens: Sequence[str]) -> list[str]:
-    command_index = next(
-        (i for i, token in enumerate(tokens) if not token.startswith("-")), None
-    )
+    command_index = _command_index(tokens)
     if command_index is None or tokens[command_index] not in _PASSTHROUGH_COMMANDS:
         return list(tokens)
     own_options = _option_names(tokens[command_index])
@@ -116,6 +133,22 @@ def _separate_passthrough(tokens: Sequence[str]) -> list[str]:
         if token.split("=", 1)[0] not in own_options:
             return [*tokens[:index], "--", *tokens[index:]]
     return list(tokens)
+
+
+# meta options whose value is a separate token, skipped when scanning for
+# the command so the value is not mistaken for one
+_META_VALUE_OPTIONS = ("-p", "--path")
+
+
+def _command_index(tokens: Sequence[str]) -> int | None:
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.startswith("-"):
+            index += 2 if token in _META_VALUE_OPTIONS else 1
+            continue
+        return index
+    return None
 
 
 def _option_names(command: str) -> set[str]:

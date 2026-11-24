@@ -411,3 +411,77 @@ def test_ask_exec_records_the_invocation_around_the_command(tmp_path: Path) -> N
     )
     assert lines[4].startswith("exec my-project ")
     assert re.fullmatch(invocation_set, lines[5])
+
+
+def test_ask_runs_the_command_against_the_project_given_by_path(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a valid ask.toml, run from elsewhere
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    # and no flavours, so config resolution fails with the project's path
+    config_home = tmp_path / "config"
+    (config_home / "ask" / "flavors").mkdir(parents=True)
+
+    # when running ask -p <project> config from the unrelated directory
+    result = subprocess.run(
+        [str(ASK), "-p", str(project_dir), "config"],
+        check=False,
+        cwd=elsewhere,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
+        capture_output=True,
+        text=True,
+    )
+
+    # then the command resolves the project at the given path, not the CWD
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1,
+        "",
+        _error_panel(
+            f"No flavour applies to {project_dir}. Add a flavour whose when.path "
+            "matches it, or mark one with default = true."
+        ),
+    )
+
+
+def test_ask_runs_the_command_from_the_directory_given_by_path(
+    tmp_path: Path,
+) -> None:
+    # given a project directory with a valid ask.toml, run from elsewhere
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    # and a flavour matching the project
+    config_home = _config_home_with_a_default_flavor(tmp_path)
+
+    # when running ask --path <project> without a manifest in the CWD,
+    # ask exec resolves the container working directory from the given path
+    result = subprocess.run(
+        [str(ASK), "--path", str(project_dir), "exec", "--no-converge", "pwd"],
+        check=False,
+        cwd=elsewhere,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+
+    # then the exec fails on the missing incus binary, proving the project
+    # resolved at the given path rather than the CWD (which has no ask.toml)
+    assert result.returncode == 1
+    assert "incus" in result.stderr

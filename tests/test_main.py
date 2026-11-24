@@ -292,15 +292,33 @@ def test_main_runs_the_command_with_the_resolved_debug_setting(
         (["agent", "claude", "--gui"], ("agent", "--", "claude", "--gui")),
         (["converge", "--create"], ("converge", "--create")),
         (["--debug", "exec", "ls", "--debug"], ("exec", "--", "ls", "--debug")),
+        (
+            ["-p", "/project", "exec", "ls", "-la"],
+            ("exec", "--", "ls", "-la"),
+        ),
+        (
+            ["--path=/project", "run", "test", "-v"],
+            ("run", "--", "test", "-v"),
+        ),
+        (["-p", "/project", "converge"], ("converge",)),
+        (["-p", "/project"], ()),
     ],
 )
 def test_main_passes_everything_after_the_command_through_unparsed(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     tokens: list[str],
     expected_tokens: tuple[str, ...],
 ) -> None:
-    # given an environment without debugging enabled
+    # given an environment without debugging enabled, and a real directory
+    # for the global --path option to change to
     monkeypatch.delenv("ASK_DEBUG", raising=False)
+    (tmp_path / "project").mkdir()
+    tokens = [token.replace("/project", str(tmp_path / "project")) for token in tokens]
+    expected_tokens = tuple(
+        token.replace("/project", str(tmp_path / "project"))
+        for token in expected_tokens
+    )
 
     # when running a command whose trailing arguments belong to another program
     with patch("ask.run") as run_mock, pytest.raises(SystemExit):
@@ -355,3 +373,38 @@ def test_create_and_converge_flags_do_not_appear_in_help_for_commands_that_do_no
     help_output = capsys.readouterr().out
     assert "--create" not in help_output
     assert "--converge" not in help_output
+
+
+def test_main_changes_directory_before_running_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given a directory to run from, run from elsewhere
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "project"
+    target.mkdir()
+
+    # when running ask -p <target> with a command
+    with patch("ask.run") as run_mock, pytest.raises(SystemExit):
+        main(["-p", str(target), "converge"])
+
+    # then the working directory is the given path while the command runs
+    assert Path.cwd() == target
+    run_mock.assert_called_once_with(("converge",), debug=ANY)
+
+
+def test_main_reports_an_unusable_path_without_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a path that is not a directory
+    monkeypatch.chdir(tmp_path)
+    missing = tmp_path / "missing"
+
+    # when running ask -p <missing>
+    with pytest.raises(SystemExit) as exit_info:
+        main(["-p", str(missing), "converge"])
+
+    # then the error is reported without a traceback, and the directory is
+    # left unchanged
+    assert exit_info.value.code == 1
+    assert "Cannot run from" in capsys.readouterr().err
+    assert Path.cwd() == tmp_path

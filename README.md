@@ -106,6 +106,14 @@ Any options that come after the command are passed on:
 --debug
 ```
 
+Run ask against a project without changing to its directory with the global `--path`/`-p` option:
+
+```shell
+~ $ ask -p ~/my-project exec uv run pytest
+```
+
+Everything behaves as if ask was started from that directory.
+
 ### Start an agent
 
 Start the default agent with the `agent` subcommand.
