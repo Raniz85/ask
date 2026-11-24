@@ -209,12 +209,41 @@ class OhMyPi(Agent):
     aliases: tuple[str, ...] = ("omp",)
 
 
+@dataclass(frozen=True)
+class MistralVibe(Agent):
+    name: str = "mistral-vibe"
+
+    @property
+    def binary(self) -> str:
+        return "vibe"
+
+    packages: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "arch": ["aur:mistral-vibe"],
+            "debian": ["pipx", "pipx:mistral-vibe"],
+        }
+    )
+    agent_instructions_key: str = "agents_md"
+    agent_instructions_path: str = ".vibe/AGENTS.md"
+    auth_paths: list[str] = field(default_factory=lambda: [".vibe/.env"])
+    skills_paths: list[str] = field(default_factory=lambda: [".vibe/skills"])
+    config_paths: list[str] = field(
+        default_factory=lambda: [
+            ".vibe/config.toml",
+            ".vibe/agents",
+            ".vibe/prompts",
+        ]
+    )
+    aliases: tuple[str, ...] = ("vibe",)
+
+
 _AGENTS: dict[str, Agent] = {
     "claude": Claude(),
     "opencode": OpenCode(),
     "codex": Codex(),
     "pi": Pi(),
     "oh-my-pi": OhMyPi(),
+    "mistral-vibe": MistralVibe(),
 }
 
 

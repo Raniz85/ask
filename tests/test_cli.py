@@ -3349,7 +3349,8 @@ def test_agent_raises_for_an_unknown_agent_name(tmp_path: Path) -> None:
 
     assert str(error.value) == (
         "Unknown agent 'copilot' "
-        "(known: claude, codex, oh-my-pi (aliases: omp), opencode, pi)."
+        "(known: claude, codex, mistral-vibe (aliases: vibe), "
+        "oh-my-pi (aliases: omp), opencode, pi)."
     )
 
 

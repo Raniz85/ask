@@ -8,6 +8,7 @@ from ask.agent import (
     AptRepository,
     Claude,
     Codex,
+    MistralVibe,
     OhMyPi,
     OpenCode,
     Pi,
@@ -132,6 +133,28 @@ def test_oh_my_pi_has_its_packages_and_state_paths() -> None:
     ]
 
 
+def test_mistral_vibe_has_its_packages_and_state_paths() -> None:
+    # given the mistral-vibe agent
+    # when inspecting its properties
+    vibe = MistralVibe()
+
+    # then its distro-keyed packages and categorized state paths are as
+    # expected; vibe has no user-level instructions file
+    assert vibe.name == "mistral-vibe"
+    assert vibe.packages == {
+        "arch": ["aur:mistral-vibe"],
+        "debian": ["pipx", "pipx:mistral-vibe"],
+    }
+    assert vibe.agent_instructions_path == ".vibe/AGENTS.md"
+    assert vibe.auth_paths == [".vibe/.env"]
+    assert vibe.skills_paths == [".vibe/skills"]
+    assert vibe.config_paths == [
+        ".vibe/config.toml",
+        ".vibe/agents",
+        ".vibe/prompts",
+    ]
+
+
 def test_resolve_returns_claude_for_claude() -> None:
     # given the name "claude"
     # when resolving it to an agent
@@ -175,6 +198,20 @@ def test_oh_my_pi_binary_is_omp() -> None:
     assert Pi().binary == "pi"
 
 
+def test_resolve_returns_mistral_vibe_for_mistral_vibe() -> None:
+    # given the name "mistral-vibe"
+    # when resolving it to an agent
+    # then the MistralVibe agent is returned
+    assert resolve("mistral-vibe") == MistralVibe()
+
+
+def test_mistral_vibe_binary_is_vibe() -> None:
+    # given the mistral-vibe agent
+    # when reading its binary name
+    # then it is vibe, not the agent name
+    assert MistralVibe().binary == "vibe"
+
+
 def test_resolve_raises_for_unknown_agent() -> None:
     # given a name with no known agent
     # when resolving it to an agent
@@ -189,6 +226,14 @@ def test_oh_my_pi_has_omp_as_its_alias() -> None:
     # then omp is an alias, and the other agents have none
     assert OhMyPi().aliases == ("omp",)
     assert all(agent.aliases == () for agent in (Claude(), Codex(), OpenCode(), Pi()))
+
+
+def test_mistral_vibe_has_vibe_as_its_alias() -> None:
+    # given the mistral-vibe agent
+    # when reading its aliases
+    # then vibe is an alias
+    assert MistralVibe().aliases == ("vibe",)
+    assert resolve_name("vibe") == MistralVibe()
 
 
 def test_resolve_name_accepts_aliases() -> None:
@@ -216,6 +261,7 @@ def test_known_with_aliases_lists_each_agents_aliases() -> None:
     assert known_with_aliases() == [
         "claude",
         "codex",
+        "mistral-vibe (aliases: vibe)",
         "oh-my-pi (aliases: omp)",
         "opencode",
         "pi",
@@ -424,7 +470,14 @@ def test_known_names_lists_every_supported_agent_sorted() -> None:
     names = known_names()
 
     # then every supported agent is listed, sorted by name
-    assert names == ["claude", "codex", "oh-my-pi", "opencode", "pi"]
+    assert names == [
+        "claude",
+        "codex",
+        "mistral-vibe",
+        "oh-my-pi",
+        "opencode",
+        "pi",
+    ]
 
 
 def _load_problems(tmp_path: Path, toml: str) -> list[str]:
@@ -445,7 +498,7 @@ def test_loading_a_config_rejects_unknown_agents(tmp_path: Path) -> None:
 
     # then the agent is reported by its name along with the supported ones
     assert problems == [
-        "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, oh-my-pi, opencode, pi)"
+        "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, mistral-vibe, oh-my-pi, opencode, pi)"
     ]
 
 
@@ -458,7 +511,7 @@ def test_loading_a_config_rejects_an_agent_alias(tmp_path: Path) -> None:
 
     # then the alias is rejected, listing only the canonical names
     assert problems == [
-        "layers.base.agents.omp: unknown agent 'omp' (known: claude, codex, oh-my-pi, opencode, pi)"
+        "layers.base.agents.omp: unknown agent 'omp' (known: claude, codex, mistral-vibe, oh-my-pi, opencode, pi)"
     ]
 
 
@@ -471,7 +524,7 @@ def test_loading_a_config_rejects_removing_unknown_agents(tmp_path: Path) -> Non
 
     # then the agent is reported by its name along with the supported ones
     assert problems == [
-        "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, oh-my-pi, opencode, pi)"
+        "layers.base.agents.hal: unknown agent 'hal' (known: claude, codex, mistral-vibe, oh-my-pi, opencode, pi)"
     ]
 
 
@@ -502,7 +555,7 @@ def test_loading_a_config_rejects_an_unknown_default_agent(tmp_path: Path) -> No
 
     # then the default is reported along with the supported agents
     assert problems == [
-        "layers.base.agents.default: unknown agent 'hal' (known: claude, codex, oh-my-pi, opencode, pi)"
+        "layers.base.agents.default: unknown agent 'hal' (known: claude, codex, mistral-vibe, oh-my-pi, opencode, pi)"
     ]
 
 
