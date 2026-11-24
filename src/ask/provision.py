@@ -62,16 +62,29 @@ def split_aur_packages(packages: list[str]) -> tuple[list[str], list[str]]:
 
 
 _NPM_PREFIX = "npm:"
+_PIPX_PREFIX = "pipx:"
+
+
+def _split_prefixed(packages: list[str], prefix: str) -> tuple[list[str], list[str]]:
+    rest = [p for p in packages if not p.startswith(prefix)]
+    prefixed = [p.removeprefix(prefix) for p in packages if p.startswith(prefix)]
+    return rest, prefixed
 
 
 def split_npm_packages(packages: list[str]) -> tuple[list[str], list[str]]:
-    official = [p for p in packages if not p.startswith(_NPM_PREFIX)]
-    npm = [p.removeprefix(_NPM_PREFIX) for p in packages if p.startswith(_NPM_PREFIX)]
-    return official, npm
+    return _split_prefixed(packages, _NPM_PREFIX)
 
 
 def with_npm_prefix(packages: list[str]) -> list[str]:
     return [f"{_NPM_PREFIX}{package}" for package in packages]
+
+
+def split_pipx_packages(packages: list[str]) -> tuple[list[str], list[str]]:
+    return _split_prefixed(packages, _PIPX_PREFIX)
+
+
+def with_pipx_prefix(packages: list[str]) -> list[str]:
+    return [f"{_PIPX_PREFIX}{package}" for package in packages]
 
 
 def _ancestors_under_home(path: Path, home: Path) -> list[Path]:
@@ -195,6 +208,32 @@ class Provisioner:
             Path("/tmp"),
             ["npm", "uninstall", "-g", *packages],
         )
+
+    def provision_pipx_packages(self, packages: list[str]) -> None:
+        for package in packages:
+            logger.debug(
+                "installing pipx package %r in %r", package, self.container.name
+            )
+            _run_checked(
+                self.container,
+                0,
+                0,
+                Path("/tmp"),
+                ["pipx", "install", "--global", package],
+            )
+
+    def remove_pipx_packages(self, packages: list[str]) -> None:
+        for package in packages:
+            logger.debug(
+                "removing pipx package %r from %r", package, self.container.name
+            )
+            _run_checked(
+                self.container,
+                0,
+                0,
+                Path("/tmp"),
+                ["pipx", "uninstall", "--global", package],
+            )
 
     def provision_apt_repository(self, repository: AptRepository) -> None:
         logger.debug(

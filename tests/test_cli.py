@@ -1007,6 +1007,68 @@ def test_converge_removes_stale_npm_packages_with_npm(tmp_path: Path) -> None:
     provisioner.remove_packages.assert_not_called()
 
 
+def _converge_debian_project(
+    tmp_path: Path, ask_toml: str, managed_packages: list[str]
+) -> tuple[MagicMock, MagicMock]:
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text(ask_toml)
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_DEBIAN_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container_cls.return_value.get_managed_packages.return_value = managed_packages
+
+        converge()
+
+    return container_cls.return_value, provisioner_cls.return_value
+
+
+def test_converge_installs_pipx_packages_with_pipx(tmp_path: Path) -> None:
+    # given a debian project declaring pipx and a pipx package
+    # when converging it
+    _, provisioner = _converge_debian_project(
+        tmp_path, 'packages = ["pipx", "pipx:black"]\n', []
+    )
+
+    # then pipx comes from apt, and the pipx package is installed with pipx
+    provisioner.provision_packages.assert_called_once_with("debian", ["pipx", "bash"])
+    provisioner.provision_pipx_packages.assert_called_once_with(["black"])
+
+
+def test_converge_tracks_pipx_packages_by_their_prefixed_name(
+    tmp_path: Path,
+) -> None:
+    # given a debian project declaring pipx and a pipx package
+    # when converging it
+    container, _ = _converge_debian_project(
+        tmp_path, 'packages = ["pipx", "pipx:black"]\n', []
+    )
+
+    # then the pipx package is tracked with its prefix
+    container.set_managed_packages.assert_called_once_with(
+        ["pipx", "bash", "pipx:black"]
+    )
+
+
+def test_converge_removes_stale_pipx_packages_with_pipx(tmp_path: Path) -> None:
+    # given a debian project no longer declaring a pipx package the
+    # container was managing
+    # when converging it
+    _, provisioner = _converge_debian_project(tmp_path, "", ["bash", "pipx:black"])
+
+    # then the pipx package is uninstalled with pipx, not the distro package
+    # manager
+    provisioner.remove_pipx_packages.assert_called_once_with(["black"])
+    provisioner.remove_packages.assert_not_called()
+
+
 def test_converge_does_not_install_pi_standalone_on_arch(tmp_path: Path) -> None:
     # given an arch flavour enabling the pi agent, where pi comes from the AUR
     project_dir = tmp_path / "my-project"
@@ -4184,6 +4246,7 @@ def test_dump_prints_the_full_resolved_configuration(
     assert "official: git, uv, bash" in out
     assert "aur: hello, claude-code" in out
     assert "npm: (none)" in out
+    assert "pipx: (none)" in out
 
     # and all bind mounts, starting with the project directory
     project_dir = tmp_path / "my-project"

@@ -23,6 +23,9 @@ from ask.provision import (
     _ancestors_under_home,
     split_aur_packages,
     split_npm_packages,
+    split_pipx_packages,
+    with_npm_prefix,
+    with_pipx_prefix,
 )
 from ask.tool_manager import config_digest
 from ask.user import ResolvedUser
@@ -876,6 +879,89 @@ def test_remove_npm_packages_does_nothing_without_packages() -> None:
 
     # then no command runs in the container
     exec_command.assert_not_called()
+
+
+def test_with_npm_prefix_marks_packages_as_npm_packages() -> None:
+    # given npm package names
+    # when prefixing them
+    # then each is marked as an npm package
+    assert with_npm_prefix(["@openai/codex"]) == ["npm:@openai/codex"]
+
+
+def test_split_pipx_packages_separates_pipx_prefixed_packages() -> None:
+    # given a mix of official and pipx-prefixed packages
+    # when splitting them
+    official, pipx = split_pipx_packages(["git", "pipx:mistral-vibe", "python"])
+
+    # then the official packages are returned as-is, and the pipx packages
+    # have their prefix stripped
+    assert official == ["git", "python"]
+    assert pipx == ["mistral-vibe"]
+
+
+def test_with_pipx_prefix_marks_packages_as_pipx_packages() -> None:
+    # given pipx package names
+    # when prefixing them
+    # then each is marked as a pipx package
+    assert with_pipx_prefix(["mistral-vibe"]) == ["pipx:mistral-vibe"]
+
+
+def test_provision_pipx_packages_installs_each_globally_as_root() -> None:
+    # given a provisioner and pipx packages to install
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning them
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.provision_pipx_packages(["mistral-vibe", "black"])
+
+    # then each is installed globally with pipx, as root
+    assert _exec_commands(exec_command) == [
+        ["pipx", "install", "--global", "mistral-vibe"],
+        ["pipx", "install", "--global", "black"],
+    ]
+    for c in exec_command.call_args_list:
+        assert c.args[:2] == (0, 0)
+
+
+def test_provision_pipx_packages_does_nothing_without_packages() -> None:
+    # given a provisioner and no pipx packages
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning them
+    with patch.object(Container, "exec_command") as exec_command:
+        provisioner.provision_pipx_packages([])
+
+    # then no command runs in the container
+    exec_command.assert_not_called()
+
+
+def test_provision_pipx_packages_raises_when_the_install_fails() -> None:
+    # given a provisioner and a failing pipx install
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning a pipx package
+    with (
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError, match="pipx install --global mistral-vibe"),
+    ):
+        provisioner.provision_pipx_packages(["mistral-vibe"])
+
+
+def test_remove_pipx_packages_uninstalls_each_globally_as_root() -> None:
+    # given a provisioner and pipx packages to remove
+    provisioner = Provisioner(Container("my-project"))
+
+    # when removing them
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.remove_pipx_packages(["mistral-vibe", "black"])
+
+    # then each is uninstalled globally with pipx, as root
+    assert _exec_commands(exec_command) == [
+        ["pipx", "uninstall", "--global", "mistral-vibe"],
+        ["pipx", "uninstall", "--global", "black"],
+    ]
+    for c in exec_command.call_args_list:
+        assert c.args[:2] == (0, 0)
 
 
 def test_provision_pi_installs_the_standalone_binary_as_root() -> None:

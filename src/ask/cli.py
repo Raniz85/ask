@@ -6,6 +6,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, cast
@@ -140,11 +141,28 @@ def _active_tool_managers(
     ]
 
 
+@dataclass(frozen=True)
+class _Packages:
+    official: list[str]
+    aur: list[str]
+    npm: list[str]
+    pipx: list[str]
+
+    @property
+    def tracked(self) -> list[str]:
+        return (
+            self.official
+            + self.aur
+            + provision.with_npm_prefix(self.npm)
+            + provision.with_pipx_prefix(self.pipx)
+        )
+
+
 def _all_packages(
     resolved: manifest.ResolvedManifest,
     distribution: str,
     tool_managers: list[tuple[Mise, list[Path]]],
-) -> tuple[list[str], list[str], list[str]]:
+) -> _Packages:
     user_shell = shell.resolve(config.resolve_user(resolved.flavor).shell)
     package_modules: list[Module] = [
         cast(Module, user_shell),
@@ -157,7 +175,8 @@ def _all_packages(
         packages += manager.packages_for(distribution)
     official, aur = provision.split_aur_packages(packages)
     official, npm = provision.split_npm_packages(official)
-    return official, aur, npm
+    official, pipx = provision.split_pipx_packages(official)
+    return _Packages(official=official, aur=aur, npm=npm, pipx=pipx)
 
 
 def _all_mounts(resolved: manifest.ResolvedManifest) -> list[incus.Mount]:
@@ -207,7 +226,7 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
     flavor = resolved.flavor
     user = config.resolve_user(flavor)
     tool_managers = _active_tool_managers(resolved)
-    official, aur, npm = _all_packages(resolved, flavor.distribution, tool_managers)
+    packages = _all_packages(resolved, flavor.distribution, tool_managers)
     console = Console()
 
     console.print(f"project: {resolved.project_dir}")
@@ -230,9 +249,10 @@ def _print_resolved(resolved: manifest.ResolvedManifest) -> None:
     )
 
     console.print("\npackages:")
-    console.print(f"  official: {_items(official)}")
-    console.print(f"  aur: {_items(aur)}")
-    console.print(f"  npm: {_items(npm)}")
+    console.print(f"  official: {_items(packages.official)}")
+    console.print(f"  aur: {_items(packages.aur)}")
+    console.print(f"  npm: {_items(packages.npm)}")
+    console.print(f"  pipx: {_items(packages.pipx)}")
 
     console.print("\nbind mounts:")
     _print_mounts(console, _all_mounts(resolved), "  ")
@@ -349,9 +369,7 @@ def _converge_container(
 
     tool_managers = _active_tool_managers(resolved)
 
-    official_packages, aur_packages, npm_packages = _all_packages(
-        resolved, distribution, tool_managers
-    )
+    packages = _all_packages(resolved, distribution, tool_managers)
     mounts = _all_mounts(resolved)
 
     provisioner = provision.Provisioner(container)
@@ -369,10 +387,12 @@ def _converge_container(
         for repository in agent.apt_repositories_for(distribution):
             provisioner.provision_apt_repository(repository)
 
-    provisioner.provision_packages(distribution, official_packages)
-    aur_builder.install_packages(distribution, aur_packages)
-    if npm_packages:
-        provisioner.provision_npm_packages(npm_packages)
+    provisioner.provision_packages(distribution, packages.official)
+    aur_builder.install_packages(distribution, packages.aur)
+    if packages.npm:
+        provisioner.provision_npm_packages(packages.npm)
+    if packages.pipx:
+        provisioner.provision_pipx_packages(packages.pipx)
 
     # Debian has no pi, omp, or mise packages; install their standalone binaries
     if "pi" in resolved.agent_names and distribution == "debian":
@@ -395,16 +415,16 @@ def _converge_container(
     provisioner.provision_instance_env(resolved.instance_env)
     provisioner.provision_idle_shutdown(distribution, user)
 
-    resolved_packages = (
-        official_packages + aur_packages + provision.with_npm_prefix(npm_packages)
-    )
-    stale = incus.stale_packages(container.get_managed_packages(), resolved_packages)
+    tracked_packages = packages.tracked
+    stale = incus.stale_packages(container.get_managed_packages(), tracked_packages)
     if stale:
         stale_distro, stale_npm = provision.split_npm_packages(stale)
+        stale_distro, stale_pipx = provision.split_pipx_packages(stale_distro)
         provisioner.remove_npm_packages(stale_npm)
+        provisioner.remove_pipx_packages(stale_pipx)
         if stale_distro:
             provisioner.remove_packages(distribution, stale_distro)
-    container.set_managed_packages(resolved_packages)
+    container.set_managed_packages(tracked_packages)
 
     mise_provisioner = provision.MiseProvisioner(container)
     path_entries: list[Path] = []
