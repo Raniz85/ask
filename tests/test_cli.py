@@ -4515,15 +4515,17 @@ def test_dump_lists_the_resolved_taskfiles(
     assert f"taskfiles:\n  {layer_task}, {project_task}" in out
 
 
-def test_ide_runs_the_default_ide(tmp_path: Path) -> None:
+def test_ide_runs_the_default_ide_in_the_project(tmp_path: Path) -> None:
     # given a layer listing pycharm as its only ide
     # when launching the ide without a name
     project_dir, container = _run_in_project(
         tmp_path, lambda: ide(), layer='ides = ["pycharm"]\n'
     )
 
+    # then the ide's binary runs in the container with the project path, so
+    # it opens the project right away
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["pycharm"], env=_USER_ENV
+        1000, 1000, project_dir, ["pycharm", str(project_dir)], env=_USER_ENV
     )
 
 

@@ -568,6 +568,10 @@ def ide(
         raise ides.IdeError(
             f"Unknown ide {name!r} {problems.known(ides.known_with_aliases())}."
         )
+    # open the project by default; the container bind-mounts it at the same
+    # path, so the host's project path is valid inside it too
+    if not args:
+        args = (str(project_dir),)
     _exec_in_container(
         project_dir,
         resolved,
