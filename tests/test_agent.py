@@ -142,7 +142,7 @@ def test_mistral_vibe_has_its_packages_and_state_paths() -> None:
     # expected; vibe has no user-level instructions file
     assert vibe.name == "mistral-vibe"
     assert vibe.packages == {
-        "arch": ["aur:mistral-vibe"],
+        "arch": ["python-pipx", "pipx:mistral-vibe"],
         "debian": ["pipx", "pipx:mistral-vibe"],
     }
     assert vibe.agent_instructions_path == ".vibe/AGENTS.md"

@@ -219,7 +219,9 @@ class MistralVibe(Agent):
 
     packages: dict[str, list[str]] = field(
         default_factory=lambda: {
-            "arch": ["aur:mistral-vibe"],
+            # the AUR package pulls in Vibe's Python dependencies as system
+            # packages; pipx keeps them in an isolated environment
+            "arch": ["python-pipx", "pipx:mistral-vibe"],
             "debian": ["pipx", "pipx:mistral-vibe"],
         }
     )
