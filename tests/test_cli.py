@@ -4547,10 +4547,10 @@ def test_ide_rejects_an_unknown_ide_name(tmp_path: Path) -> None:
     # given a layer listing pycharm as an ide
     # when launching an ide ask doesn't know
     with pytest.raises(IdeError) as error:
-        _run_in_project(tmp_path, lambda: ide("vscode"), layer='ides = ["pycharm"]\n')
+        _run_in_project(tmp_path, lambda: ide("emacs"), layer='ides = ["pycharm"]\n')
 
     # then a clear error is raised, listing the known ides
-    assert "Unknown ide 'vscode'" in str(error.value)
+    assert "Unknown ide 'emacs'" in str(error.value)
     assert "pycharm" in str(error.value)
 
 

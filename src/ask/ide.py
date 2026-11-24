@@ -141,6 +141,44 @@ class Rustrover(JetbrainsIde):
     name: str = "rustrover"
     code: str = "RR"
 
+@dataclass(frozen=True)
+class Vscode(Ide):
+    name: str = "code"
+    aliases: tuple[str, ...] = ("vscode",)
+    # AUR visual-studio-code-bin is Microsoft's official binary; Debian ships
+    # no code package, the tarball is fetched and installed by provision_ide
+    packages: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "arch": ["aur:visual-studio-code-bin"],
+            "debian": ["curl", "tar", "gzip", "libsecret-1-0"],
+        }
+    )
+    config_paths: list[str] = field(
+        default_factory=lambda: [
+            ".config/Code",
+            ".vscode",
+        ]
+    )
+
+
+@dataclass(frozen=True)
+class Zed(Ide):
+    name: str = "zed"
+    # AUR zed-bin is the official release tarball repackaged; Debian ships no
+    # zed package, the tarball is fetched and installed by provision_ide
+    packages: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "arch": ["aur:zed-bin"],
+            "debian": ["curl", "tar", "gzip"],
+        }
+    )
+    config_paths: list[str] = field(
+        default_factory=lambda: [
+            ".config/zed",
+            ".local/share/zed",
+        ]
+    )
+
 
 _IDES: dict[str, Ide] = {
     "pycharm": Pycharm(),
@@ -153,6 +191,8 @@ _IDES: dict[str, Ide] = {
     "rider": Rider(),
     "datagrip": Datagrip(),
     "rustrover": Rustrover(),
+    "code": Vscode(),
+    "zed": Zed(),
 }
 
 

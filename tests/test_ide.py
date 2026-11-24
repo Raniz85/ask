@@ -7,6 +7,7 @@ from ask.config import ConfigError
 from ask.ide import (
     Ide,
     Pycharm,
+    Vscode,
     known_names,
     known_with_aliases,
     resolve,
@@ -46,16 +47,24 @@ def test_resolve_raises_for_unknown_ide() -> None:
     # given a name with no known ide
     # when resolving it to an ide
     # then a clear error is raised
-    with pytest.raises(ValueError, match="vscode"):
-        resolve("vscode")
+    with pytest.raises(ValueError, match="emacs"):
+        resolve("emacs")
 
 
 def test_resolve_name_returns_none_for_unknown_ide() -> None:
     # given a name with no known ide
     # when resolving it as a command-line name
     # then None is returned
-    assert resolve_name("vscode") is None
+    assert resolve_name("emacs") is None
     assert resolve_name("pycharm") == Pycharm()
+
+
+def test_resolve_name_resolves_the_vscode_alias() -> None:
+    # given vscode, the command-line alias for code
+    # when resolving it as a command-line name
+    # then the Vscode ide is returned
+    assert resolve_name("vscode") == Vscode()
+    assert resolve_name("code") == Vscode()
 
 
 def test_known_names_lists_every_supported_ide_sorted() -> None:
@@ -64,6 +73,7 @@ def test_known_names_lists_every_supported_ide_sorted() -> None:
     # then every supported ide is listed, sorted by name
     assert known_names() == [
         "clion",
+        "code",
         "datagrip",
         "goland",
         "idea",
@@ -73,6 +83,7 @@ def test_known_names_lists_every_supported_ide_sorted() -> None:
         "rubymine",
         "rustrover",
         "webstorm",
+        "zed",
     ]
 
 
@@ -82,6 +93,7 @@ def test_known_with_aliases_lists_each_ides_aliases() -> None:
     # then each ide is listed by name, with aliases where they exist
     assert known_with_aliases() == [
         "clion",
+        "code (aliases: vscode)",
         "datagrip",
         "goland",
         "idea (aliases: intellij-idea)",
@@ -91,6 +103,7 @@ def test_known_with_aliases_lists_each_ides_aliases() -> None:
         "rubymine",
         "rustrover",
         "webstorm",
+        "zed",
     ]
 
 
@@ -201,7 +214,7 @@ def test_loading_a_config_accepts_known_ides(tmp_path: Path) -> None:
 
 def test_loading_a_config_rejects_unknown_ides(tmp_path: Path) -> None:
     # given a layer listing an ide ask doesn't support
-    toml = '[layers.base]\nides = ["vscode"]\n'
+    toml = '[layers.base]\nides = ["emacs"]\n'
 
     # when loading it
     problems = _load_problems(tmp_path, toml)
@@ -209,7 +222,8 @@ def test_loading_a_config_rejects_unknown_ides(tmp_path: Path) -> None:
     # then the ide is reported by its name along with the supported ones
     assert problems == [
         (
-            "layers.base.ides.0: unknown ide 'vscode' (known: clion, datagrip, "
-            "goland, idea, phpstorm, pycharm, rider, rubymine, rustrover, webstorm)"
+            "layers.base.ides.0: unknown ide 'emacs' (known: clion, code, "
+            "datagrip, goland, idea, phpstorm, pycharm, rider, rubymine, "
+            "rustrover, webstorm, zed)"
         )
     ]

@@ -155,9 +155,9 @@ If you have multiple IDEs defined, you can start a specific one, and pass option
 ~/my-project $ ask ide pycharm .
 ```
 
-Supported IDEs: `clion`, `datagrip`, `goland`, `idea` (alias `intellij-idea`), `phpstorm`, `pycharm`, `rider`, `rubymine`, `rustrover`, `webstorm`.
+Supported IDEs: `clion`, `code` (alias `vscode`), `datagrip`, `goland`, `idea` (alias `intellij-idea`), `phpstorm`, `pycharm`, `rider`, `rubymine`, `rustrover`, `webstorm`, `zed`.
 
-The IDEs install the official JetBrains binaries (from the AUR on Arch, JetBrains' release tarball on Debian); registering a JetBrains license in the IDE unlocks the paid features. The license state lives under `~/.config/JetBrains`, which Ask mounts into the container.
+The JetBrains IDEs install the official JetBrains binaries (from the AUR on Arch, JetBrains' release tarball on Debian); registering a JetBrains license in the IDE unlocks the paid features. VS Code installs Microsoft's official binary (`visual-studio-code-bin` from the AUR, the stable tarball on Debian), and Zed installs the official release (`zed-bin` from the AUR, the GitHub release tarball on Debian). The license and settings state lives under each IDE's config directory, which Ask mounts into the container.
 
 GUI access shares the host's Wayland socket with the container. X11 applications are supported through [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite), started inside the container when the first GUI session opens and stopped when the last one closes. It is used when the `xwayland-satellite` package is installed in the container: JetBrains IDEs pull it in on Arch, and other layers can add it to their `packages`. It is not available on Debian.
 

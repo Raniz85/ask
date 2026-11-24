@@ -21,7 +21,7 @@ from pyinfra.operations import apt, files, pacman, server, systemd
 from ask import env, idle, incus
 from ask.agent import AptRepository
 from ask.errors import AskError
-from ask.ide import Ide
+from ask.ide import Ide, JetbrainsIde, Vscode, Zed
 from ask.tool_manager import config_digest
 from ask.user import ResolvedUser, home_env
 
@@ -426,15 +426,21 @@ _JETBRAINS_RELEASES_API = (
     "?code={code}&latest=true&type=release"
 )
 
+_VSCODE_TARBALL_URL = "https://update.code.visualstudio.com/latest/linux-x64/stable"
+_ZED_TARBALL_URL = (
+    "https://github.com/zed-industries/zed/releases/latest/download"
+    "/zed-linux-x86_64.tar.gz"
+)
+
 
 def _ide_install_script(ide: Ide) -> str:
-    # Debian ships no JetBrains IDE packages, so download the latest release
-    # tarball and link its launcher into PATH. The launcher is bin/<name>.sh,
-    # with a fallback to the native bin/<name> launcher some products ship.
-    code = _JETBRAINS_RELEASES_API.format(code=ide.code)
-    return f"""set -eu
-command -v {ide.binary} >/dev/null 2>&1 && exit 0
-url=$(curl -fsSL "{code}" \\
+    # Debian ships no JetBrains, VS Code, or Zed packages, so download the
+    # latest release tarball and link its launcher into PATH. JetBrains
+    # launchers are bin/<name>.sh (or bin/<name>); VS Code and Zed ship
+    # bin/<name> directly.
+    if isinstance(ide, JetbrainsIde):
+        # the releases API returns JSON; extract the x86_64 tarball link
+        fetch = f"""url=$(curl -fsSL "{_JETBRAINS_RELEASES_API.format(code=ide.code)}" \\
   | tr ',' '\\n' \\
   | grep -o 'https://download\\.jetbrains\\.com/[^"]*\\.tar\\.gz' \\
   | grep -v aarch64 \\
