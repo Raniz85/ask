@@ -590,6 +590,12 @@ class AurBuilder:
         if seen is not None and seen == self._builder_git_ref("HEAD"):
             return
 
+        if not sys.stdin.isatty():
+            raise ProvisioningError(
+                "The paru-bin PKGBUILD has not been reviewed. "
+                "Run `ask converge` from a terminal to review it."
+            )
+
         if seen is None:
             review = ["cat", "PKGBUILD"]
         else:

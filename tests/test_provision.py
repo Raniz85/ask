@@ -1187,6 +1187,7 @@ def test_ensure_paru_clones_reviews_and_builds_paru_bin_when_approved() -> None:
     with (
         patch.object(Container, "run_command", side_effect=_container_without_paru()),
         patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("ask.provision.sys.stdin.isatty", return_value=True),
         patch("builtins.input", return_value="y"),
     ):
         # when ensuring paru is present
@@ -1226,6 +1227,7 @@ def test_ensure_paru_updates_an_existing_clone_instead_of_recloning() -> None:
             side_effect=_container_without_paru(clone_exists=True),
         ),
         patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("ask.provision.sys.stdin.isatty", return_value=True),
         patch("builtins.input", return_value="y"),
     ):
         # when ensuring paru is present
@@ -1278,6 +1280,7 @@ def test_ensure_paru_shows_only_the_changes_since_the_last_review() -> None:
             ),
         ),
         patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("ask.provision.sys.stdin.isatty", return_value=True),
         patch("builtins.input", return_value="y"),
     ):
         # when ensuring paru is present
@@ -1297,6 +1300,7 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
     with (
         patch.object(Container, "run_command", side_effect=_container_without_paru()),
         patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("ask.provision.sys.stdin.isatty", return_value=True),
         patch("builtins.input", return_value="n"),
         pytest.raises(ProvisioningError) as error,
     ):
@@ -1309,6 +1313,32 @@ def test_ensure_paru_raises_without_building_when_the_user_declines() -> None:
     )
 
     # and the commit is neither marked as reviewed nor built
+    commands = _exec_commands(exec_command)
+    assert [c for c in commands if c[0] == "makepkg" or "update-ref" in c] == []
+
+
+def test_ensure_paru_raises_without_asking_when_stdin_is_not_a_terminal() -> None:
+    # given a container without paru whose PKGBUILD has never been reviewed,
+    # and no terminal to review it on
+    aur_builder = AurBuilder(Container("my-project"))
+    with (
+        patch.object(Container, "run_command", side_effect=_container_without_paru()),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+        patch("ask.provision.sys.stdin.isatty", return_value=False),
+        patch("builtins.input") as input_,
+        pytest.raises(ProvisioningError) as error,
+    ):
+        # when ensuring paru is present
+        # then a clear error is raised instead of crashing on EOF
+        aur_builder.ensure_paru()
+
+    assert str(error.value) == (
+        "The paru-bin PKGBUILD has not been reviewed. "
+        "Run `ask converge` from a terminal to review it."
+    )
+
+    # and the user is not prompted, nor is the commit marked as reviewed or built
+    input_.assert_not_called()
     commands = _exec_commands(exec_command)
     assert [c for c in commands if c[0] == "makepkg" or "update-ref" in c] == []
 
@@ -1338,6 +1368,7 @@ def test_ensure_paru_reports_failing_build_steps(
     with (
         patch.object(Container, "run_command", side_effect=_container_without_paru()),
         patch.object(Container, "exec_command", side_effect=exec_command),
+        patch("ask.provision.sys.stdin.isatty", return_value=True),
         patch("builtins.input", return_value="y"),
         pytest.raises(ProvisioningError) as error,
     ):
