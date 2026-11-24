@@ -244,6 +244,20 @@ class Container:
             text=True,
         )
 
+    def start_user_manager(self, uid: int) -> None:
+        _incus(
+            [
+                "incus",
+                "exec",
+                self.name,
+                "--",
+                "systemctl",
+                "start",
+                f"user@{uid}.service",
+            ],
+            capture=True,
+        )
+
     def exec_command(
         self,
         uid: int,

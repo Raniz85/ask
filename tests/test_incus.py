@@ -877,6 +877,53 @@ def test_run_command_runs_the_given_command_capturing_output() -> None:
     assert result.stdout == "hello\n"
 
 
+def test_start_user_manager_starts_the_users_systemd_manager() -> None:
+    # given a container
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        # when starting the systemd manager of the user with uid 1000
+        container.start_user_manager(1000)
+
+    # then its unit is started as root, waiting until it is up
+    run.assert_called_once_with(
+        [
+            "incus",
+            "exec",
+            "my-project",
+            "--",
+            "systemctl",
+            "start",
+            "user@1000.service",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_start_user_manager_reports_a_failure_to_start() -> None:
+    # given a container whose user manager fails to start
+    container = Container("my-project")
+    with (
+        patch(
+            "ask.incus.subprocess.run",
+            side_effect=subprocess.CalledProcessError(
+                1, ["incus"], stderr="Job for user@1000.service failed."
+            ),
+        ),
+        pytest.raises(IncusError) as error,
+    ):
+        # when starting it
+        container.start_user_manager(1000)
+
+    # then the failure is reported with what systemctl said
+    assert "Job for user@1000.service failed." in str(error.value)
+
+
 def test_run_command_does_not_raise_on_a_non_zero_exit() -> None:
     # given a command that exits non-zero inside the container
     container = Container("my-project")

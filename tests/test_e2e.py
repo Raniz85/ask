@@ -397,7 +397,8 @@ def test_ask_exec_records_the_invocation_around_the_command(tmp_path: Path) -> N
 
     # then the command runs successfully, and the invocation timestamp is
     # stored on the container's user.* metadata when the container is ensured
-    # running, both before the command runs and after it ends
+    # running, both before the user's systemd manager is started for the
+    # command and after the command ends
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     lines = invocations.read_text().splitlines()
     timestamp = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00"
@@ -405,5 +406,8 @@ def test_ask_exec_records_the_invocation_around_the_command(tmp_path: Path) -> N
     assert lines[0] == "list my-project --format json"
     assert re.fullmatch(invocation_set, lines[1])
     assert re.fullmatch(invocation_set, lines[2])
-    assert lines[3].startswith("exec my-project ")
-    assert re.fullmatch(invocation_set, lines[4])
+    assert re.fullmatch(
+        r"exec my-project -- systemctl start user@\d+\.service", lines[3]
+    )
+    assert lines[4].startswith("exec my-project ")
+    assert re.fullmatch(invocation_set, lines[5])

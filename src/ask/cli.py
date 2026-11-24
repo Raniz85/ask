@@ -26,6 +26,7 @@ from ask import (
     provision,
     shell,
     slug,
+    user_session,
     validation,
 )
 from ask import gui as gui_support
@@ -35,7 +36,7 @@ from ask import (
 from ask.errors import AskError
 from ask.module import Module
 from ask.tool_manager import Mise
-from ask.user import home_env
+from ask.user import ResolvedUser, home_env
 
 logger = logging.getLogger(__name__)
 
@@ -470,15 +471,15 @@ def enter(
         project_dir, resolved, create_missing, converge_changed
     )
     uid, gid = (0, 0) if root else (user.uid, user.gid)
-    home = {"HOME": "/root"} if root else home_env(user)
     _record_invocation(container)
+    user_env = {"HOME": "/root"} if root else _start_user_session(container, user)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
             uid,
             gid,
             cwd,
             [user.shell],
-            env=resolved.instance_env | home | FAKE_SSH_ENV | gui_env,
+            env=resolved.instance_env | user_env | FAKE_SSH_ENV | gui_env,
         )
     _record_invocation(container)
     sys.exit(returncode)
@@ -744,16 +745,24 @@ def _exec_in_container(
         project_dir, resolved, create_missing, converge_changed
     )
     _record_invocation(container)
+    user_env = _start_user_session(container, user)
     with gui_support.session(container, user, enabled=gui) as gui_env:
         returncode = container.exec_command(
             user.uid,
             user.gid,
             cwd,
             command,
-            env=variables | home_env(user) | gui_env,
+            env=variables | user_env | gui_env,
         )
     _record_invocation(container)
     sys.exit(returncode)
+
+
+def _start_user_session(
+    container: incus.Container, user: ResolvedUser
+) -> dict[str, str]:
+    container.start_user_manager(user.uid)
+    return home_env(user) | user_session.env(user)
 
 
 def _record_invocation(container: incus.Container) -> None:

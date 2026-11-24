@@ -48,7 +48,11 @@ _WAYLAND_MOUNT = Mount(
     container_path=Path("/home/raniz/.wayland-socket"),
 )
 _WAYLAND_ENV = {"WAYLAND_DISPLAY": "/home/raniz/.wayland-socket"}
-_HOME_ENV = {"HOME": "/home/raniz"}
+_USER_ENV = {
+    "HOME": "/home/raniz",
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+}
 _FLAVOR = 'distribution = "arch"\ndefault = true\n'
 _DEBIAN_FLAVOR = 'distribution = "debian"\ndefault = true\n'
 _PROJECT_FLAVOR = Flavor(
@@ -96,17 +100,18 @@ def _run_in_project(
     ],
     ids=["exec", "agent"],
 )
-def test_commands_run_with_the_users_home_directory(
+def test_commands_run_with_the_users_home_directory_and_session(
     tmp_path: Path, command: Callable[[], None], expected_command: list[str]
 ) -> None:
     # given a project directory and a config declaring a user
     # when running a command in the project's container
     project_dir, container = _run_in_project(tmp_path, command)
 
-    # then it runs with HOME set to the user's home directory, since incus
-    # does not set it for the user it runs commands as
+    # then it runs with HOME set to the user's home directory and with the
+    # user's systemd session, since incus sets up neither for the user it
+    # runs commands as
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, expected_command, env=_HOME_ENV
+        1000, 1000, project_dir, expected_command, env=_USER_ENV
     )
 
 
@@ -115,10 +120,11 @@ def test_enter_runs_the_shell_with_the_users_home_directory(tmp_path: Path) -> N
     # when entering the project's container
     project_dir, container = _run_in_project(tmp_path, lambda: enter())
 
-    # then the shell runs with HOME set to the user's home directory, alongside
-    # the variables that make it look like an SSH session
+    # then the shell runs with HOME set to the user's home directory and with
+    # the user's systemd session, alongside the variables that make it look
+    # like an SSH session
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -132,6 +138,44 @@ def test_enter_with_root_runs_the_shell_as_root(tmp_path: Path) -> None:
     container.exec_command.assert_called_once_with(
         0, 0, project_dir, ["bash"], env={"HOME": "/root"} | FAKE_SSH_ENV
     )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        lambda: exec("erl"),
+        lambda: agent(),
+        lambda: run("test"),
+        lambda: enter(),
+    ],
+    ids=["exec", "agent", "run", "enter"],
+)
+def test_commands_start_the_users_systemd_manager_before_running(
+    tmp_path: Path, command: Callable[[], None]
+) -> None:
+    # given a project directory and a config declaring a user
+    # when running a command in the project's container
+    _, container = _run_in_project(
+        tmp_path, command, manifest='[scripts]\ntest = "pytest"\n'
+    )
+
+    # then the user's systemd manager is started before the command runs, so
+    # its session is up even right after the instance booted
+    names = [name for name, _, _ in container.mock_calls]
+    assert "start_user_manager" in names
+    assert names.index("start_user_manager") < names.index("exec_command")
+    container.start_user_manager.assert_called_once_with(1000)
+
+
+def test_enter_with_root_does_not_start_the_users_systemd_manager(
+    tmp_path: Path,
+) -> None:
+    # given a project directory and a config declaring a user
+    # when entering the project's container with --root
+    _, container = _run_in_project(tmp_path, lambda: enter(root=True))
+
+    # then the user's systemd manager is left alone
+    container.start_user_manager.assert_not_called()
 
 
 def test_enter_with_root_sets_home_to_root_even_when_a_layer_configures_it(
@@ -179,7 +223,7 @@ def test_commands_run_with_the_instance_environment_variables(
         1000,
         project_dir,
         expected_command,
-        env={"EDITOR": "nvim", "LANG": "C.UTF-8"} | _HOME_ENV,
+        env={"EDITOR": "nvim", "LANG": "C.UTF-8"} | _USER_ENV,
     )
 
 
@@ -199,7 +243,7 @@ def test_enter_runs_the_shell_with_the_instance_environment_variables(
         1000,
         project_dir,
         ["bash"],
-        env={"EDITOR": "nvim", "LANG": "C.UTF-8"} | _HOME_ENV | FAKE_SSH_ENV,
+        env={"EDITOR": "nvim", "LANG": "C.UTF-8"} | _USER_ENV | FAKE_SSH_ENV,
     )
 
 
@@ -218,7 +262,7 @@ def test_agent_runs_with_the_agent_environment_variables(tmp_path: Path) -> None
         1000,
         project_dir,
         ["claude"],
-        env={"EDITOR": "vi", "LANG": "C.UTF-8", "AGENT": "claude"} | _HOME_ENV,
+        env={"EDITOR": "vi", "LANG": "C.UTF-8", "AGENT": "claude"} | _USER_ENV,
     )
 
 
@@ -231,7 +275,7 @@ def test_variables_ask_sets_win_over_configured_ones(tmp_path: Path) -> None:
 
     # then the shell runs with the HOME Ask sets
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -274,7 +318,7 @@ def test_exec_from_a_child_directory_runs_with_the_child_directory_as_cwd(
     assert project_dir != child_dir
     container_cls.assert_called_with("my-project")
     container.exec_command.assert_called_once_with(
-        1000, 1000, child_dir, ["erl"], env=_HOME_ENV
+        1000, 1000, child_dir, ["erl"], env=_USER_ENV
     )
 
 
@@ -287,7 +331,7 @@ def test_enter_from_a_child_directory_enters_with_the_child_directory_as_cwd(
 
     # then the shell runs with the child directory as its working directory
     container.exec_command.assert_called_once_with(
-        1000, 1000, child_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, child_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -1678,7 +1722,7 @@ def test_run_executes_script_command(tmp_path: Path) -> None:
 
     # then the script command is executed in the container
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["pytest"], env=_HOME_ENV
+        1000, 1000, project_dir, ["pytest"], env=_USER_ENV
     )
 
 
@@ -1704,7 +1748,7 @@ def test_run_executes_script_command_with_args(tmp_path: Path) -> None:
 
     # then the script command and arguments are executed in the container
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["pytest", "-v", "--cov"], env=_HOME_ENV
+        1000, 1000, project_dir, ["pytest", "-v", "--cov"], env=_USER_ENV
     )
 
 
@@ -1734,7 +1778,7 @@ def test_run_splits_the_script_command_with_shell_quoting_rules(
 
     # then the quotes are honoured and not passed through as part of the arguments
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["echo", "hello world", "hi there"], env=_HOME_ENV
+        1000, 1000, project_dir, ["echo", "hello world", "hi there"], env=_USER_ENV
     )
 
 
@@ -2164,7 +2208,7 @@ def test_enter_runs_the_resolved_users_shell(tmp_path: Path) -> None:
     # resolved user, in the project directory, with environment variables
     # that make it look like an SSH session, and ask exits with its exit code
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["zsh"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["zsh"], env=_USER_ENV | FAKE_SSH_ENV
     )
     assert exc_info.value.code == 0
 
@@ -2223,7 +2267,7 @@ def test_enter_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) ->
     acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV | _WAYLAND_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV | _WAYLAND_ENV
     )
     assert exc_info.value.code == 0
 
@@ -2259,7 +2303,7 @@ def test_enter_does_not_forward_anything_when_gui_requested_without_a_session(
     acquire_mock.assert_not_called()
     release_mock.assert_not_called()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -2293,7 +2337,7 @@ def test_enter_creates_a_missing_container_when_the_user_accepts(
     # then the container is created, and the shell is run in it afterwards
     create_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -2585,7 +2629,7 @@ def test_enter_does_not_converge_an_unchanged_configuration(
     converge_mock.assert_not_called()
     assert capsys.readouterr().err == ""
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -2624,7 +2668,7 @@ def test_enter_converges_a_changed_configuration_when_the_user_accepts(
     input_mock.assert_called_once_with(_CHANGED_PROMPT)
     converge_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -2659,7 +2703,7 @@ def test_enter_does_not_converge_a_changed_configuration_when_the_user_declines(
     # then nothing is converged, and the shell is still run
     converge_mock.assert_not_called()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -2680,7 +2724,7 @@ def test_enter_warns_about_a_changed_configuration_without_a_terminal(
     converge_mock.assert_not_called()
     assert capsys.readouterr().err == _CHANGED_WARNING
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["bash"], env=_HOME_ENV | FAKE_SSH_ENV
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
     )
 
 
@@ -2772,7 +2816,7 @@ def test_exec_converges_a_changed_configuration_when_requested(
     # then the container is converged before the command is executed
     converge_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls"], env=_HOME_ENV
+        1000, 1000, project_dir, ["ls"], env=_USER_ENV
     )
 
 
@@ -2799,7 +2843,7 @@ def test_agent_converges_a_changed_configuration_when_requested(
     # then the container is converged before the agent is executed
     converge_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude"], env=_HOME_ENV
+        1000, 1000, project_dir, ["claude"], env=_USER_ENV
     )
 
 
@@ -2860,7 +2904,7 @@ def test_exec_creates_a_missing_container_when_the_user_accepts(
     # then the container is created, and the command is run in it afterwards
     create_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls", "-la"], env=_HOME_ENV
+        1000, 1000, project_dir, ["ls", "-la"], env=_USER_ENV
     )
 
 
@@ -2920,7 +2964,7 @@ def test_exec_runs_the_command_as_the_resolved_user(tmp_path: Path) -> None:
     # user, in the project directory, and ask exits with the command's exit
     # code
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls", "-la"], env=_HOME_ENV
+        1000, 1000, project_dir, ["ls", "-la"], env=_USER_ENV
     )
     assert exc_info.value.code == 0
 
@@ -2978,12 +3022,12 @@ def test_exec_forwards_wayland_display_when_gui_is_requested(tmp_path: Path) -> 
     acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls", "-la"], env=_HOME_ENV | _WAYLAND_ENV
+        1000, 1000, project_dir, ["ls", "-la"], env=_USER_ENV | _WAYLAND_ENV
     )
     assert exc_info.value.code == 0
 
 
-def test_exec_passes_only_home_when_gui_requested_without_a_session(
+def test_exec_adds_no_gui_environment_when_gui_requested_without_a_session(
     tmp_path: Path,
 ) -> None:
     # given a project directory, a config declaring a user, and no live
@@ -3009,12 +3053,12 @@ def test_exec_passes_only_home_when_gui_requested_without_a_session(
 
         exec("ls", "-la", gui=True)
 
-    # then no gui session is acquired or released, and the command runs with
-    # only HOME set, exactly as without --gui
+    # then no gui session is acquired or released, and the command runs
+    # exactly as without --gui
     acquire_mock.assert_not_called()
     release_mock.assert_not_called()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["ls", "-la"], env=_HOME_ENV
+        1000, 1000, project_dir, ["ls", "-la"], env=_USER_ENV
     )
 
 
@@ -3074,7 +3118,7 @@ def test_agent_launches_the_first_configured_agent_when_none_given(
     # resolved user, in the project directory, and ask exits with its exit
     # code
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude"], env=_HOME_ENV
+        1000, 1000, project_dir, ["claude"], env=_USER_ENV
     )
     assert exc_info.value.code == 0
 
@@ -3106,7 +3150,7 @@ def test_agent_launches_the_default_agent_when_none_given(tmp_path: Path) -> Non
 
     # then the default agent is executed in the container
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["codex"], env=_HOME_ENV
+        1000, 1000, project_dir, ["codex"], env=_USER_ENV
     )
 
 
@@ -3133,7 +3177,7 @@ def test_agent_launches_the_named_agent_when_given(tmp_path: Path) -> None:
     # then the named agent is executed, regardless of what is configured
     container_cls.assert_called_once_with("my-project")
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude"], env=_HOME_ENV
+        1000, 1000, project_dir, ["claude"], env=_USER_ENV
     )
     assert exc_info.value.code == 0
 
@@ -3160,7 +3204,7 @@ def test_agent_launches_oh_my_pi_via_its_omp_binary(tmp_path: Path) -> None:
 
     # then its binary omp is executed, not the agent name
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["omp"], env=_HOME_ENV
+        1000, 1000, project_dir, ["omp"], env=_USER_ENV
     )
 
 
@@ -3186,7 +3230,7 @@ def test_agent_launches_oh_my_pi_via_its_omp_alias(tmp_path: Path) -> None:
 
     # then its binary omp is executed, with env keyed by the canonical agent name
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["omp"], env=_HOME_ENV
+        1000, 1000, project_dir, ["omp"], env=_USER_ENV
     )
 
 
@@ -3247,7 +3291,7 @@ def test_agent_creates_a_missing_container_when_the_user_accepts(
     # then the container is created, and the agent is run in it afterwards
     create_mock.assert_called_once_with()
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude"], env=_HOME_ENV
+        1000, 1000, project_dir, ["claude"], env=_USER_ENV
     )
 
 
@@ -3377,7 +3421,7 @@ def test_agent_forwards_extra_arguments_to_the_agent(tmp_path: Path) -> None:
 
     # then the agent is executed with those arguments appended
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude", "--resume"], env=_HOME_ENV
+        1000, 1000, project_dir, ["claude", "--resume"], env=_USER_ENV
     )
 
 
@@ -3412,7 +3456,7 @@ def test_agent_forwards_wayland_display_when_gui_is_requested(
     acquire_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     release_mock.assert_called_once_with(container, _WAYLAND_MOUNT)
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude"], env=_HOME_ENV | _WAYLAND_ENV
+        1000, 1000, project_dir, ["claude"], env=_USER_ENV | _WAYLAND_ENV
     )
 
 
@@ -3444,7 +3488,7 @@ def test_agent_treats_a_dash_prefixed_name_as_an_argument_to_the_default_agent(
 
     # then the default agent is executed with all arguments, in order
     container.exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["claude", "--resume", "--verbose"], env=_HOME_ENV
+        1000, 1000, project_dir, ["claude", "--resume", "--verbose"], env=_USER_ENV
     )
 
 
