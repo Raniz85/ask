@@ -9,6 +9,7 @@ from typing import Annotated
 from pydantic import (
     AfterValidator,
     BeforeValidator,
+    Field,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -157,7 +158,12 @@ def resolve_taskfile_paths(source: Path, taskfiles: list[Path]) -> list[Path]:
 @dataclass
 class LayerWhen:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    files: list[StrictStr]
+    files: Annotated[
+        list[StrictStr],
+        Field(
+            description="The layer applies when at least one of these files exists in the project directory."
+        ),
+    ]
 
 
 BASE_LAYER = "base"
@@ -184,35 +190,92 @@ def _validate_service_state(
 @dataclass
 class Layer:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    bind_mounts: list[HomePath] = field(default_factory=list)
-    packages: list[StrictStr] = field(default_factory=list)
+    bind_mounts: Annotated[
+        list[HomePath],
+        Field(
+            description="Host paths to bind-mount into the container; `~` expands to the home directory."
+        ),
+    ] = field(default_factory=list)
+    packages: Annotated[
+        list[StrictStr],
+        Field(
+            description="Packages to install; `aur:` prefix installs from the AUR, a `-` prefix removes a package set in a lower layer."
+        ),
+    ] = field(default_factory=list)
     services: Annotated[
-        dict[StrictStr, StrictStr], AfterValidator(_validate_service_state)
+        dict[StrictStr, StrictStr],
+        AfterValidator(_validate_service_state),
+        Field(
+            description="systemd services to manage; keys are unit names (the `.service` suffix is optional), values are `enabled`, `disabled`, or `masked`."
+        ),
     ] = field(default_factory=dict)
-    agents: Annotated[AgentTable, BeforeValidator(agent.to_table)] = field(
-        default_factory=AgentTable
-    )
-    ides: list[IdeName] = field(default_factory=list)
-    env: Env = field(default_factory=dict)
-    taskfiles: list[HomePath] = field(default_factory=list)
-    order: StrictInt = 0
-    when: LayerWhen | None = None
+    agents: Annotated[
+        AgentTable,
+        BeforeValidator(agent.to_table),
+        Field(
+            description="Agents to enable in the layer; agent names map to `true`/`false` or a settings table."
+        ),
+    ] = field(default_factory=AgentTable)
+    ides: Annotated[
+        list[IdeName], Field(description="IDEs to install and expose in the layer.")
+    ] = field(default_factory=list)
+    env: Annotated[
+        Env,
+        Field(
+            description="Environment variables to set; `false` unsets the variable instead."
+        ),
+    ] = field(default_factory=dict)
+    taskfiles: Annotated[
+        list[HomePath],
+        Field(
+            description="Extra pyinfra taskfiles to run last during converge; paths are relative to the file declaring them."
+        ),
+    ] = field(default_factory=list)
+    order: Annotated[
+        StrictInt,
+        Field(
+            description="Layers with lower order are applied first; equal orders are applied in unspecified order."
+        ),
+    ] = 0
+    when: Annotated[
+        LayerWhen | None,
+        Field(description="Condition for the layer to apply; `null` means always."),
+    ] = None
 
 
 @dataclass
 class Group:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    name: StrictStr | None = None
-    gid: StrictInt | None = None
+    name: Annotated[
+        StrictStr | None,
+        Field(
+            description="Group name; `null` mirrors the user's default group (the user's own name)."
+        ),
+    ] = None
+    gid: Annotated[
+        StrictInt | None,
+        Field(description="Group id; `null` mirrors the user's id."),
+    ] = None
 
 
 @dataclass
 class User:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    name: StrictStr | None = None
-    uid: StrictInt | None = None
-    extra_groups: list[StrictStr] = field(default_factory=list)
-    group: Group = field(default_factory=Group)
+    name: Annotated[
+        StrictStr | None,
+        Field(description="Container user name; `null` mirrors the calling user."),
+    ] = None
+    uid: Annotated[
+        StrictInt | None,
+        Field(description="Container user id; `null` mirrors the calling user."),
+    ] = None
+    extra_groups: Annotated[
+        list[StrictStr], Field(description="Additional groups for the container user.")
+    ] = field(default_factory=list)
+    group: Annotated[
+        Group,
+        Field(description="The user's primary group; mirrors the user by default."),
+    ] = field(default_factory=Group)
 
 
 def _expand_home(pattern: object) -> object:
@@ -224,9 +287,12 @@ def _expand_home(pattern: object) -> object:
 @dataclass
 class FlavorWhen:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    path: list[Annotated[re.Pattern, BeforeValidator(_expand_home)]] = field(
-        default_factory=list
-    )
+    path: Annotated[
+        list[Annotated[re.Pattern, BeforeValidator(_expand_home)]],
+        Field(
+            description="Projects whose absolute path matches one of these patterns use this flavour; `~` expands to the home directory. Matches the full path."
+        ),
+    ] = field(default_factory=list)
 
 
 def _check_distribution(name: str) -> str:
@@ -248,16 +314,39 @@ def _check_base_layer(layers: dict[str, Layer]) -> dict[str, Layer]:
 @dataclass
 class Flavor:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    distribution: Annotated[StrictStr, AfterValidator(_check_distribution)]
-    default: StrictBool = False
-    when: FlavorWhen = field(default_factory=FlavorWhen)
-    shell: Annotated[ShellOption, BeforeValidator(_flatten_options)] = field(
-        default_factory=lambda: ShellOption(name="bash")
-    )
-    user: User = field(default_factory=User)
-    layers: Annotated[dict[str, Layer], AfterValidator(_check_base_layer)] = field(
-        default_factory=dict
-    )
+    distribution: Annotated[
+        StrictStr,
+        AfterValidator(_check_distribution),
+        Field(description="The Linux distribution the container is created from."),
+    ]
+    default: Annotated[
+        StrictBool,
+        Field(
+            description="Use this flavour when no other flavour's `when.path` matches."
+        ),
+    ] = False
+    when: Annotated[
+        FlavorWhen,
+        Field(description="When this flavour applies, by matching the project path."),
+    ] = field(default_factory=FlavorWhen)
+    shell: Annotated[
+        ShellOption,
+        BeforeValidator(_flatten_options),
+        Field(
+            description="The shell to install; either a name string or a table with `name` and per-shell options (e.g. `zshrc = true`)."
+        ),
+    ] = field(default_factory=lambda: ShellOption(name="bash"))
+    user: Annotated[
+        User,
+        Field(description="The container user; mirrors the calling user by default."),
+    ] = field(default_factory=User)
+    layers: Annotated[
+        dict[str, Layer],
+        AfterValidator(_check_base_layer),
+        Field(
+            description="Named layers applied bottom-up; the `base` layer always applies and cannot have conditions."
+        ),
+    ] = field(default_factory=dict)
 
 
 def _check_single_default(flavors: dict[str, Flavor]) -> dict[str, Flavor]:

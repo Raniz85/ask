@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AfterValidator, BeforeValidator, StrictBool, StrictStr
+from pydantic import AfterValidator, BeforeValidator, Field, StrictBool, StrictStr
 from pydantic_core import PydanticCustomError
 
 from ask.env import Env
@@ -293,10 +293,30 @@ AgentName = Annotated[StrictStr, AfterValidator(_check_name)]
 @dataclass
 class AgentSettings:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    enabled: StrictBool = True
-    options: dict[str, StrictBool] = field(default_factory=dict)
-    extensions: list[StrictStr] = field(default_factory=list)
-    env: Env = field(default_factory=dict)
+    enabled: Annotated[
+        StrictBool,
+        Field(
+            description="Whether the agent is installed; `false` removes an agent enabled in a lower layer."
+        ),
+    ] = True
+    options: Annotated[
+        dict[str, StrictBool],
+        Field(
+            description="Per-agent options, e.g. `auth = false` skips mounting the agent's credentials."
+        ),
+    ] = field(default_factory=dict)
+    extensions: Annotated[
+        list[StrictStr],
+        Field(
+            description="Extensions for the agent to install; only `pi` and `oh-my-pi` support extensions."
+        ),
+    ] = field(default_factory=list)
+    env: Annotated[
+        Env,
+        Field(
+            description="Environment variables for this agent; `false` unsets the variable."
+        ),
+    ] = field(default_factory=dict)
 
 
 _ENV = "env"
@@ -354,12 +374,23 @@ ENTRIES = "entries"
 @dataclass
 class AgentTable:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    default: AgentName | None = None
-    env: Env = field(default_factory=dict)
+    default: Annotated[
+        AgentName | None,
+        Field(
+            description="Agent launched by bare `ask agent`; defaults to the first enabled agent."
+        ),
+    ] = None
+    env: Annotated[
+        Env,
+        Field(description="Environment variables shared by all agents in the layer."),
+    ] = field(default_factory=dict)
     entries: Annotated[
         dict[AgentName, Annotated[AgentSettings, BeforeValidator(_to_settings)]],
         AfterValidator(_check_options),
         AfterValidator(_check_extensions),
+        Field(
+            description="Agent name to settings; each value may also be a bare `true`/`false` for defaults."
+        ),
     ] = field(default_factory=dict)
 
 

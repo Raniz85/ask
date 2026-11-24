@@ -26,3 +26,7 @@ test:
 # Run end-to-end tests in an Incus VM (set ASK_E2E_KEEP_VM=1 to keep the VM)
 e2e:
     uv run pytest -m vm -v tests/vm
+
+# Regenerate docs/config.md from the configuration structs
+docs:
+    uv run python -m ask.docgen docs/config.md

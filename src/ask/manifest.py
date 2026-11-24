@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AfterValidator, StrictStr
+from pydantic import AfterValidator, Field, StrictStr
 from pydantic_core import PydanticCustomError
 
 from ask import agent, env, ide, tool_manager
@@ -46,17 +46,49 @@ def _validate_scripts(
 @dataclass
 class Manifest:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    packages: list[StrictStr] = field(default_factory=list)
-    bind_mounts: list[HomePath] = field(default_factory=list)
-    services: dict[StrictStr, StrictStr] = field(default_factory=dict)
-    tool_managers: list[
-        Annotated[StrictStr, AfterValidator(tool_manager.check_name)]
+    packages: Annotated[
+        list[StrictStr],
+        Field(
+            description="Packages to install; `aur:` prefix installs from the AUR, a `-` prefix removes a package set in a lower layer."
+        ),
+    ] = field(default_factory=list)
+    bind_mounts: Annotated[
+        list[HomePath],
+        Field(
+            description="Host paths to bind-mount into the container; `~` expands to the home directory."
+        ),
+    ] = field(default_factory=list)
+    services: Annotated[
+        dict[StrictStr, StrictStr],
+        Field(
+            description="systemd services to manage; keys are unit names (the `.service` suffix is optional), values are `enabled`, `disabled`, or `masked`. Manifest services take precedence over flavour layers."
+        ),
+    ] = field(default_factory=dict)
+    tool_managers: Annotated[
+        list[Annotated[StrictStr, AfterValidator(tool_manager.check_name)]],
+        Field(
+            description="Tool managers to provision the project's tools with, e.g. `mise`."
+        ),
     ] = field(default_factory=list)
     scripts: Annotated[
-        dict[StrictStr, StrictStr], AfterValidator(_validate_scripts)
+        dict[StrictStr, StrictStr],
+        AfterValidator(_validate_scripts),
+        Field(
+            description="Shell scripts exposed as `ask run <name>`; keys are names, values are shell commands."
+        ),
     ] = field(default_factory=dict)
-    env: Env = field(default_factory=dict)
-    taskfiles: list[HomePath] = field(default_factory=list)
+    env: Annotated[
+        Env,
+        Field(
+            description="Environment variables to set; `false` unsets the variable instead."
+        ),
+    ] = field(default_factory=dict)
+    taskfiles: Annotated[
+        list[HomePath],
+        Field(
+            description="Extra pyinfra taskfiles to run last during converge; paths are relative to this file."
+        ),
+    ] = field(default_factory=list)
 
 
 def load(path: Path) -> Manifest:

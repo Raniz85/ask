@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AfterValidator, StrictBool, StrictStr, ValidationInfo
+from pydantic import AfterValidator, Field, StrictBool, StrictStr, ValidationInfo
 
 from ask.incus import Mount
 from ask.problems import unknown_name, unknown_options
@@ -160,7 +160,15 @@ def _check_options(options: dict[str, bool], info: ValidationInfo) -> dict[str, 
 @dataclass
 class ShellOption:
     __pydantic_config__ = FORBID_UNKNOWN_KEYS
-    name: Annotated[StrictStr, AfterValidator(_check_name)]
-    options: Annotated[dict[str, StrictBool], AfterValidator(_check_options)] = field(
-        default_factory=dict
-    )
+    name: Annotated[
+        StrictStr,
+        AfterValidator(_check_name),
+        Field(description="The shell to install and use as the login shell."),
+    ]
+    options: Annotated[
+        dict[str, StrictBool],
+        AfterValidator(_check_options),
+        Field(
+            description="Which of the shell's dotfiles to bind-mount from the host; unknown keys are rejected."
+        ),
+    ] = field(default_factory=dict)
