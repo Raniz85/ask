@@ -58,23 +58,27 @@ class Agent:
         self, user: ResolvedUser, options: dict[str, bool] | None = None
     ) -> list[Mount]:
         options = options or {}
-        state_paths: list[str] = []
+        # (state path, readonly); auth paths hold credentials, so they are
+        # mounted read-only to keep anything in the container from modifying
+        # them on the host
+        state_paths: list[tuple[str, bool]] = []
         if self.agent_instructions_path is not None and options.get(
             self.agent_instructions_key, True
         ):
-            state_paths.append(self.agent_instructions_path)
+            state_paths.append((self.agent_instructions_path, False))
         if options.get("auth", True):
-            state_paths += self.auth_paths
+            state_paths += [(path, True) for path in self.auth_paths]
         if options.get("skills", True):
-            state_paths += self.skills_paths
+            state_paths += [(path, False) for path in self.skills_paths]
         if options.get("config", True):
-            state_paths += self.config_paths
+            state_paths += [(path, False) for path in self.config_paths]
         return [
             Mount(
                 host_path=Path.home() / state_path,
                 container_path=Path(f"/home/{user.name}") / state_path,
+                readonly=readonly,
             )
-            for state_path in state_paths
+            for state_path, readonly in state_paths
         ]
 
     def mounts_for(

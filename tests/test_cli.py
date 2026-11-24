@@ -1467,6 +1467,7 @@ def test_converge_mounts_the_state_of_configured_agents(
             Mount(
                 host_path=home_dir / ".claude" / ".credentials.json",
                 container_path=Path("/home/raniz/.claude/.credentials.json"),
+                readonly=True,
             ),
             Mount(
                 host_path=home_dir / ".claude" / "skills",

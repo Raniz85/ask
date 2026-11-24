@@ -340,11 +340,12 @@ def test_mounts_for_returns_a_mount_for_agent_instructions_auth_skills_and_confi
 
     # then every category's state paths are mounted, in agent-instructions/auth/skills/
     # config order, from the host home directory to the matching path under
-    # the user's container home
+    # the user's container home; auth paths are mounted read-only
     assert mounts == [
         Mount(
             host_path=tmp_path / state_path,
             container_path=Path("/home/raniz") / state_path,
+            readonly=state_path in claude.auth_paths,
         )
         for state_path in [
             ".claude/CLAUDE.md",
@@ -394,11 +395,12 @@ def test_mounts_for_omits_agent_instructions_when_disabled_by_its_agent_specific
         mounts = claude.mounts_for(user, {"claude_md": False})
 
     # then the agent instructions file is omitted, but every other category is still
-    # mounted
+    # mounted; auth paths are mounted read-only
     assert mounts == [
         Mount(
             host_path=tmp_path / state_path,
             container_path=Path("/home/raniz") / state_path,
+            readonly=state_path in claude.auth_paths,
         )
         for state_path in [
             ".claude/.credentials.json",
@@ -427,11 +429,12 @@ def test_mounts_for_omits_a_state_path_that_does_not_exist_on_the_host(
         mounts = claude.mounts_for(user)
 
     # then the missing skills directory is omitted, even though the skills
-    # category is enabled by default
+    # category is enabled by default; auth paths are mounted read-only
     assert mounts == [
         Mount(
             host_path=tmp_path / state_path,
             container_path=Path("/home/raniz") / state_path,
+            readonly=state_path in claude.auth_paths,
         )
         for state_path in [
             ".claude/CLAUDE.md",
@@ -440,6 +443,29 @@ def test_mounts_for_omits_a_state_path_that_does_not_exist_on_the_host(
             ".claude/settings.json",
         ]
     ]
+
+
+def test_mounts_for_mounts_auth_paths_readonly(tmp_path: Path) -> None:
+    # given the claude agent, a host home directory where every one of its
+    # state paths exists, and a resolved user
+    claude = Claude()
+    user = _user()
+    _touch(tmp_path, *_CLAUDE_STATE_PATHS)
+
+    # when resolving its mounts for that user, without passing any options
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(Path, "home", lambda: tmp_path)
+        mounts = claude.mounts_for(user)
+
+    # then the auth paths (credentials) are mounted read-only, so nothing in
+    # the container can modify the host's credentials, while the other
+    # categories stay writable
+    readonly_by_path = {mount.host_path: mount.readonly for mount in mounts}
+    assert readonly_by_path[tmp_path / ".claude/.credentials.json"] is True
+    assert readonly_by_path[tmp_path / ".claude/CLAUDE.md"] is False
+    assert readonly_by_path[tmp_path / ".claude/skills"] is False
+    assert readonly_by_path[tmp_path / ".claude.json"] is False
+    assert readonly_by_path[tmp_path / ".claude/settings.json"] is False
 
 
 def test_option_keys_are_the_instructions_key_and_the_state_categories() -> None:
