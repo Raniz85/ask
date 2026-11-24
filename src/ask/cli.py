@@ -376,6 +376,7 @@ def _converge_container(
     aur_builder = provision.AurBuilder(container)
 
     provisioner.provision_user(user)
+    provisioner.provision_user_session(user)
     container.converge(mounts)
     provisioner.fix_bind_mount_ownership(
         [mount.container_path for mount in mounts], user

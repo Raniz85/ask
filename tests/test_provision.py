@@ -1937,6 +1937,36 @@ def test_provision_idle_shutdown_installs_the_watch_and_enables_the_timer() -> N
     )
 
 
+def test_provision_user_session_enables_lingering_for_the_user() -> None:
+    # given a provisioner and the resolved user that commands run as
+    provisioner = Provisioner(Container("my-project"))
+    user = ResolvedUser(
+        name="raniz",
+        uid=1000,
+        shell="bash",
+        group_name="raniz",
+        gid=1000,
+        extra_groups=[],
+    )
+
+    # when provisioning the user's systemd session
+    with (
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State") as state_cls,
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.provision_user_session(user)
+
+    # then lingering is enabled, so the user's systemd manager runs from boot
+    add_op.assert_called_once_with(
+        state_cls.return_value,
+        server.shell,
+        commands=["loginctl enable-linger raniz"],
+    )
+
+
 def test_provision_instance_env_puts_the_profile_script_in_place() -> None:
     # given a provisioner
     provisioner = Provisioner(Container("my-project"))

@@ -331,6 +331,15 @@ class Provisioner:
                 mode="644",
             )
 
+    def provision_user_session(self, user: ResolvedUser) -> None:
+        logger.debug("enabling lingering for user %r", user.name)
+        with self.session() as state:
+            add_op(
+                state,
+                server.shell,
+                commands=[f"loginctl enable-linger {shlex.quote(user.name)}"],
+            )
+
     def provision_idle_shutdown(self, distribution: str, user: ResolvedUser) -> None:
         logger.debug("provisioning idle shutdown for user %r", user.name)
         operation = _package_operation_for(distribution)

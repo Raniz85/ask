@@ -3697,6 +3697,40 @@ def test_converge_normalizes_short_service_names_in_manifest(tmp_path: Path) -> 
     )
 
 
+def test_converge_provisions_the_user_session(tmp_path: Path) -> None:
+    # given a project directory, and a config declaring a user
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + '[user]\nname = "raniz"\nuid = 1000\n')
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then the resolved user gets a systemd session running from boot
+    provisioner_cls.return_value.provision_user_session.assert_called_once_with(
+        ResolvedUser(
+            name="raniz",
+            uid=1000,
+            shell="bash",
+            group_name="raniz",
+            gid=1000,
+            extra_groups=[],
+        )
+    )
+
+
 def test_converge_provisions_the_idle_shutdown_watch(tmp_path: Path) -> None:
     # given a project directory, and a config declaring a user
     project_dir = tmp_path / "my-project"
