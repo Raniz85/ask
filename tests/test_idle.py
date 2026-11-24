@@ -27,8 +27,8 @@ _LONG_IDLE = idle.IDLE_AFTER * 2
 _SHORT_IDLE = idle.IDLE_AFTER / 5
 
 requires_script_tools = pytest.mark.skipif(
-    any(shutil.which(tool) is None for tool in ("bash", "curl", "jq")),
-    reason="the shutdown script needs bash, curl and jq",
+    any(shutil.which(tool) is None for tool in ("bash", "curl")),
+    reason="the shutdown script needs bash and curl",
 )
 
 
