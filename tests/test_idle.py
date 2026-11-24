@@ -44,8 +44,8 @@ class _FakeInstance:
         self._bin.mkdir()
         self._sessions = directory / "sessions"
         self._sessions.write_text("")
-        self._user_pids = directory / "user-pids"
-        self._user_pids.write_text("")
+        self._user_cgroups = directory / "user-cgroups"
+        self._user_cgroups.write_text("")
         self._uptime = directory / "uptime"
         self.started(ago=_LONG_IDLE)
         self._systemctl_calls = directory / "systemctl-calls"
@@ -53,8 +53,8 @@ class _FakeInstance:
         self._stub("who", f'cat "{self._sessions}"')
         self._stub(
             "ps",
-            f'if [ "$1" = -u ] && [ "$2" = "{_USER.name}" ]; then\n'
-            f'  cat "{self._user_pids}"\n'
+            f'if echo " $* " | grep -q " -u {_USER.name} "; then\n'
+            f'  cat "{self._user_cgroups}"\n'
             'elif [ "$*" = "-o etimes= -p 1" ]; then\n'
             f'  cat "{self._uptime}"\n'
             "fi",
@@ -79,7 +79,16 @@ class _FakeInstance:
         )
 
     def run_program(self) -> None:
-        self._user_pids.write_text("   4242\n")
+        self._add_user_process("0::/.lxc")
+
+    def run_user_manager(self) -> None:
+        manager = f"0::/user.slice/user-{_USER.uid}.slice/user@{_USER.uid}.service"
+        self._add_user_process(f"{manager}/init.scope")
+        self._add_user_process(f"{manager}/app.slice/dbus-broker.service")
+
+    def _add_user_process(self, cgroup: str) -> None:
+        with self._user_cgroups.open("a") as cgroups:
+            cgroups.write(f"{cgroup}\n")
 
     def run_watchdog(self) -> subprocess.CompletedProcess[str]:
         script = self._directory / "ask-idle-shutdown"
@@ -208,6 +217,39 @@ def test_powers_off_when_only_another_user_is_logged_in(
 def test_stays_up_while_a_program_runs_as_the_user(instance: _FakeInstance) -> None:
     # given an idle instance where a program is running as the user
     instance.record_invocation(ago=_LONG_IDLE)
+    instance.run_program()
+
+    # when the watchdog runs
+    result = instance.run_watchdog()
+
+    # then the instance stays up
+    assert (result.returncode, result.stderr, instance.powered_off()) == (0, "", False)
+
+
+@requires_script_tools
+def test_powers_off_when_only_the_users_systemd_manager_runs(
+    instance: _FakeInstance,
+) -> None:
+    # given an idle instance where only the user's lingering systemd manager
+    # and the services it runs are running as the user
+    instance.record_invocation(ago=_LONG_IDLE)
+    instance.run_user_manager()
+
+    # when the watchdog runs
+    result = instance.run_watchdog()
+
+    # then the instance is powered off
+    assert (result.returncode, result.stderr, instance.powered_off()) == (0, "", True)
+
+
+@requires_script_tools
+def test_stays_up_while_a_program_runs_alongside_the_users_systemd_manager(
+    instance: _FakeInstance,
+) -> None:
+    # given an idle instance where the user's systemd manager runs, and a
+    # program started outside it is running as the user
+    instance.record_invocation(ago=_LONG_IDLE)
+    instance.run_user_manager()
     instance.run_program()
 
     # when the watchdog runs

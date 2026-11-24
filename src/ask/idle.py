@@ -56,8 +56,11 @@ if who | awk '{{print $1}}' | grep -qx "$user"; then
     exit 0
 fi
 
-# Any program running as the user keeps the instance up.
-if [ -n "$(ps -u "$user" -o pid=)" ]; then
+# Any program running as the user keeps the instance up, except those of
+# the user's lingering systemd manager, which always runs.
+user_programs=$(ps -ww -u "$user" -o cgroup= \\
+    | grep -cv "/user@{user.uid}\\.service/") || true
+if (( user_programs > 0 )); then
     exit 0
 fi
 
