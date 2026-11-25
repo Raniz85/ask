@@ -181,10 +181,19 @@ class Provisioner:
             # the unprivileged alpm user and must be able to write to the
             # shared volume
             add_op(state, files.directory, path=str(_PACMAN_CACHE_DIR), mode="1777")
+            # -Sc keeps archives still in the sync repos instead of archives
+            # still installed locally: this container must not delete entries
+            # only another container has installed
+            add_op(
+                state,
+                files.line,
+                path="/etc/pacman.conf",
+                line="CleanMethod = KeepCurrent",
+            )
 
     def clean_pacman_cache(self) -> None:
-        # -Sc keeps only versions still installed somewhere; entries dropped
-        # by every container are freed after each converge
+        # -Sc frees old versions the sync repos no longer list; archives
+        # still current stay, whoever has them installed
         result = self.container.run_command(["pacman", "-Sc", "--noconfirm"])
         if result.returncode != 0:
             raise ProvisioningError(

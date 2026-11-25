@@ -740,7 +740,7 @@ def test_share_pacman_cache_keeps_the_cache_world_writable_for_the_download_user
 
     # then the mount point keeps Arch's stock world-writable mode so pacman's
     # unprivileged alpm download user can write to it, instead of owning it
-    add_op.assert_called_once_with(
+    add_op.assert_any_call(
         ANY,
         files.directory,
         path="/var/cache/pacman/pkg",
@@ -748,7 +748,31 @@ def test_share_pacman_cache_keeps_the_cache_world_writable_for_the_download_user
     )
 
 
-def test_clean_pacman_cache_removes_packages_that_are_no_longer_installed() -> None:
+def test_share_pacman_cache_sets_clean_method_to_keep_current() -> None:
+    # given a container sharing its pacman cache with other containers
+    provisioner = Provisioner(Container("my-project"))
+
+    # when sharing pacman's cache
+    with (
+        patch("ask.provision.incus.ensure_storage_volume"),
+        patch.object(Container, "attach_volume"),
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.share_pacman_cache()
+
+    # then pacman.conf keeps archives still in the sync repos, not archives
+    # still installed locally: -Sc run by one container must not delete
+    # entries only another container has installed
+    add_op.assert_any_call(
+        ANY, files.line, path="/etc/pacman.conf", line="CleanMethod = KeepCurrent"
+    )
+
+
+def test_clean_pacman_cache_drops_versions_the_sync_repos_no_longer_list() -> None:
     # given a container after a converge
     provisioner = Provisioner(Container("my-project"))
 
@@ -758,8 +782,8 @@ def test_clean_pacman_cache_removes_packages_that_are_no_longer_installed() -> N
     ):
         provisioner.clean_pacman_cache()
 
-    # then pacman is asked to drop cache entries no container still has
-    # installed, without a prompt
+    # then pacman is asked to drop old cache entries without a prompt, keeping
+    # whatever is still current in the sync repos
     run_command.assert_called_once_with(["pacman", "-Sc", "--noconfirm"])
 
 

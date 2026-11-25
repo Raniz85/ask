@@ -33,17 +33,21 @@ world-writable.
   cache, permanently.
 - The mount point is set to mode 1777, what Arch ships, so the `alpm` download
   user can write to it; no ownership is forced.
-- After every converge, `pacman -Sc --noconfirm` runs to drop cache entries no
-  container still has installed, keeping the shared volume from growing
-  without bound. Its default answer is "yes", so `--noconfirm` really deletes.
+- `pacman.conf` gets `CleanMethod = KeepCurrent`: the default `KeepInstalled`
+  judges "still installed" per cleaning container, so one container's clean
+  would delete entries only another container has installed. `KeepCurrent`
+  keeps whatever the sync repos still list.
+- After every converge, `pacman -Sc --noconfirm` runs to drop cache versions
+  the sync repos no longer list. Its default answer is "yes", so
+  `--noconfirm` really deletes.
 
 ## Consequences
 
 - A fresh container installs declared packages from the shared cache instead
   of re-downloading them.
-- A cache entry survives only while at least one container still has that
-  version installed; the first converge after the last container drops a
-  version removes it.
+- A cache entry survives while the sync repos still list its version; the
+  first converge after a repo drops a version frees it, no matter who has it
+  installed.
 - Concurrent pacman runs in two containers download distinct `.part` temp
   files and the loser's rename overwrites a complete, identical tarball; safe.
 - The volume outlives containers and is never removed by Ask.
