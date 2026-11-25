@@ -3,7 +3,8 @@
 > _ask_ \[as:k\] liten låda -- [SAOL](https://lexin.nada.kth.se/lexin/#searchinfo=both,swe_swe,ask;)
 
 > _ask_ _noun_
-> a case for holding something -- [Cambridge Swedish/English dictionary](https://dictionary.cambridge.org/dictionary/swedish-english/ask_1)
+> a case for holding
+> something -- [Cambridge Swedish/English dictionary](https://dictionary.cambridge.org/dictionary/swedish-english/ask_1)
 
 _Ask_ creates persistent, isolated, declarative development environments for your projects.
 Each project gets its own [Incus](https://linuxcontainers.org/incus) container,
@@ -31,8 +32,7 @@ $ pipx install git+https://github.com/raniz85/ask.git
 
 </details>
 
-You also need [Incus](https://linuxcontainers.org/incus) installed and initialised
-(i.e. run `incus admin init`)
+You also need [Incus](https://linuxcontainers.org/incus) installed and initialised (i.e. run `incus admin init`)
 on your host.
 `ask setup` will attempt to install and help you set up Incus,
 but to get everything right,
@@ -53,7 +53,8 @@ Then, in any project directory, create its manifest:
 ~/my-project $ ask init
 ```
 
-Edit the generated `ask.toml` to declare packages, bind mounts, services, tool managers, scripts and custom pyinfra taskfiles.
+Edit the generated `ask.toml` to declare packages, bind mounts, services, tool managers, scripts and custom pyinfra
+taskfiles.
 Shared container configuration lives in flavour files under `~/.config/ask/flavors/`.
 
 Once configured, create the container with
@@ -128,7 +129,8 @@ If you have multiple agents defined, you can start a specific one.
 ~/my-project $ ask agent claude
 ```
 
-Agents can also be started by command-line aliases — `ask agent omp` is the same as `ask agent oh-my-pi`, and `ask agent vibe` is the same as `ask agent mistral-vibe`. Aliases work on the command line only, not in `ask.toml`.
+Agents can also be started by command-line aliases — `ask agent omp` is the same as `ask agent oh-my-pi`, and
+`ask agent vibe` is the same as `ask agent mistral-vibe`. Aliases work on the command line only, not in `ask.toml`.
 
 If the agent name is unambigous with other shortcuts, you can drop `agent`:
 
@@ -144,7 +146,8 @@ Options following the agent name, or unknown options if no name is given, are pa
 
 ### Start an IDE
 
-IDEs are listed per flavour layer and started with the `ide` subcommand, which opens them with GUI access by default (`--no-gui` disables it).
+IDEs are listed per flavour layer and started with the `ide` subcommand, which opens them with GUI access by default
+(`--no-gui` disables it).
 
 ```toml
 [layers.python]
@@ -163,9 +166,13 @@ If you have multiple IDEs defined, you can start a specific one, and pass option
 ~/my-project $ ask ide pycharm .
 ```
 
-Supported IDEs: `clion`, `code` (alias `vscode`), `datagrip`, `goland`, `idea` (alias `intellij-idea`), `phpstorm`, `pycharm`, `rider`, `rubymine`, `rustrover`, `webstorm`, `zed`.
+Supported IDEs: `clion`, `code` (alias `vscode`), `datagrip`, `goland`, `idea` (alias `intellij-idea`), `phpstorm`,
+`pycharm`, `rider`, `rubymine`, `rustrover`, `webstorm`, `zed`.
 
-The JetBrains IDEs install the official JetBrains binaries (from the AUR on Arch, JetBrains' release tarball on Debian); registering a JetBrains license in the IDE unlocks the paid features. VS Code installs Microsoft's official binary (`visual-studio-code-bin` from the AUR, the stable tarball on Debian), and Zed installs the official release (`zed-bin` from the AUR, the GitHub release tarball on Debian). The license and settings state lives under each IDE's config directory, which Ask mounts into the container.
+The JetBrains IDEs install the official JetBrains binaries (from the AUR on Arch, JetBrains' release tarball on Debian).
+VS Code installs Microsoft's official binary (`visual-studio-code-bin` from the AUR, the stable tarball on Debian), and
+Zed installs the official release (`zed-bin` from the AUR, the GitHub release tarball on Debian). The license and
+settings state lives under each IDE's config directory, which Ask mounts into the container.
 
 GUI access shares the host's Wayland socket with the container. X11 applications are supported
 through [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite), started inside the
