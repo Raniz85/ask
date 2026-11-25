@@ -695,6 +695,74 @@ def test_share_paru_cache_makes_the_aur_builder_own_the_cache_directories() -> N
     ]
 
 
+def test_share_pacman_cache_attaches_the_shared_volume_at_pacmans_cache() -> None:
+    # given a container that should share pacman's package cache with other
+    # containers
+    provisioner = Provisioner(Container("my-project"))
+
+    # when sharing pacman's cache
+    with (
+        patch("ask.provision.incus.ensure_storage_volume") as ensure_volume,
+        patch.object(Container, "attach_volume") as attach_volume,
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.share_pacman_cache()
+
+    # then the shared custom volume is ensured, and attached at pacman's
+    # stock cache directory
+    ensure_volume.assert_called_once_with("default", "ask-pacman")
+    attach_volume.assert_called_once_with(
+        "default", "ask-pacman", "pacman-cache", Path("/var/cache/pacman/pkg")
+    )
+
+
+def test_share_pacman_cache_keeps_the_cache_world_writable_for_the_download_user() -> (
+    None
+):
+    # given a container whose shared pacman volume is mounted by incus as root
+    provisioner = Provisioner(Container("my-project"))
+
+    # when sharing pacman's cache
+    with (
+        patch("ask.provision.incus.ensure_storage_volume"),
+        patch.object(Container, "attach_volume"),
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op") as add_op,
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.share_pacman_cache()
+
+    # then the mount point keeps Arch's stock world-writable mode so pacman's
+    # unprivileged alpm download user can write to it, instead of owning it
+    add_op.assert_called_once_with(
+        ANY,
+        files.directory,
+        path="/var/cache/pacman/pkg",
+        mode="1777",
+    )
+
+
+def test_clean_pacman_cache_removes_packages_that_are_no_longer_installed() -> None:
+    # given a container after a converge
+    provisioner = Provisioner(Container("my-project"))
+
+    # when cleaning the shared package cache
+    with patch.object(Container, "run_command", return_value=_completed(0)) as (
+        run_command
+    ):
+        provisioner.clean_pacman_cache()
+
+    # then pacman is asked to drop cache entries no container still has
+    # installed, without a prompt
+    run_command.assert_called_once_with(["pacman", "-Sc", "--noconfirm"])
+
+
 def _completed(returncode: int, stdout: str = "") -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout)
 

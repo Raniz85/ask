@@ -437,6 +437,8 @@ def _converge_container(
         for repository in agent.apt_repositories_for(distribution):
             provisioner.provision_apt_repository(repository)
 
+    if distribution == "arch":
+        provisioner.share_pacman_cache()
     provisioner.provision_packages(distribution, packages.official)
     aur_builder.install_packages(distribution, packages.aur)
     if packages.npm:
@@ -482,6 +484,11 @@ def _converge_container(
         if stale_distro:
             provisioner.remove_packages(distribution, stale_distro)
     container.set_managed_packages(tracked_packages)
+
+    # clean only after installs and removals: a package dropped in this
+    # converge should free its cache entry in the same run
+    if distribution == "arch":
+        provisioner.clean_pacman_cache()
 
     mise_provisioner = provision.MiseProvisioner(container)
     path_entries: list[Path] = []

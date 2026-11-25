@@ -168,6 +168,30 @@ class Provisioner:
         with self.session() as state:
             add_op(state, operation, packages=packages, update=True, upgrade=True)
 
+    def share_pacman_cache(self) -> None:
+        incus.ensure_storage_volume(_PACMAN_CACHE_POOL, _PACMAN_CACHE_VOLUME)
+        self.container.attach_volume(
+            _PACMAN_CACHE_POOL,
+            _PACMAN_CACHE_VOLUME,
+            _PACMAN_CACHE_DEVICE,
+            _PACMAN_CACHE_DIR,
+        )
+        with self.session() as state:
+            # keep Arch's stock world-writable mode: pacman's downloads run as
+            # the unprivileged alpm user and must be able to write to the
+            # shared volume
+            add_op(state, files.directory, path=str(_PACMAN_CACHE_DIR), mode="1777")
+
+    def clean_pacman_cache(self) -> None:
+        # -Sc keeps only versions still installed somewhere; entries dropped
+        # by every container are freed after each converge
+        result = self.container.run_command(["pacman", "-Sc", "--noconfirm"])
+        if result.returncode != 0:
+            raise ProvisioningError(
+                "Cleaning the shared pacman cache failed with exit status "
+                f"{result.returncode}."
+            )
+
     def remove_packages(self, distribution: str, packages: list[str]) -> None:
         logger.debug("removing packages from %s: %s", distribution, ", ".join(packages))
         operation = _package_operation_for(distribution)
@@ -584,6 +608,10 @@ _PARU_CACHE_VOLUME = "ask-paru"
 _PARU_CACHE_DEVICE = "paru-cache"
 _PARU_BIN_REPO = "https://aur.archlinux.org/paru-bin.git"
 _PARU_BIN_CLONE = _PARU_CACHE_DIR / "clone" / "paru-bin"
+_PACMAN_CACHE_DIR = Path("/var/cache/pacman/pkg")
+_PACMAN_CACHE_POOL = "default"
+_PACMAN_CACHE_VOLUME = "ask-pacman"
+_PACMAN_CACHE_DEVICE = "pacman-cache"
 _AUR_SEEN_REF = "AUR_SEEN"
 
 

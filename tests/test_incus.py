@@ -59,15 +59,43 @@ def test_image_for_unknown_distribution_raises() -> None:
         image_for("nonexistent")
 
 
-def test_container_create_launches_image_with_given_name_and_returns_it() -> None:
+def test_container_create_launches_image_with_common_config() -> None:
     # given a mocked subprocess.run
     with patch("ask.incus.subprocess.run") as run:
-        # when creating a container for the "arch" distribution named "my-project"
-        container = Container.create("my-project", "arch")
+        # when creating a container for the "debian" distribution named "my-project"
+        container = Container.create("my-project", "debian")
 
     # then incus is invoked to launch the matching image under that name, with
     # the common container configuration applied, and a Container for it is
     # returned
+    run.assert_called_once_with(
+        [
+            "incus",
+            "launch",
+            "images:debian/13",
+            "my-project",
+            "--config",
+            "security.nesting=true",
+            "--config",
+            "security.privileged=false",
+        ],
+        check=True,
+    )
+    assert container == Container("my-project")
+
+
+def test_container_create_attaches_the_shared_pacman_cache_on_arch() -> None:
+    # given mocked subprocess.run and volume helpers
+    with (
+        patch("ask.incus.subprocess.run") as run,
+        patch("ask.incus.ensure_storage_volume") as ensure_volume,
+        patch("ask.incus.Container.attach_volume") as attach_volume,
+    ):
+        # when creating a container for the "arch" distribution
+        Container.create("my-project", "arch")
+
+    # then the shared pacman cache volume is ensured and attached permanently,
+    # at pacman's stock cache directory
     run.assert_called_once_with(
         [
             "incus",
@@ -81,7 +109,10 @@ def test_container_create_launches_image_with_given_name_and_returns_it() -> Non
         ],
         check=True,
     )
-    assert container == Container("my-project")
+    ensure_volume.assert_called_once_with("default", "ask-pacman")
+    attach_volume.assert_called_once_with(
+        "default", "ask-pacman", "pacman-cache", Path("/var/cache/pacman/pkg")
+    )
 
 
 def test_device_name_for_produces_a_stable_slug_from_the_path() -> None:

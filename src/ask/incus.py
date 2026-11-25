@@ -198,7 +198,15 @@ class Container:
         for key, value in _COMMON_CONFIG.items():
             command += ["--config", f"{key}={value}"]
         _incus(command)
-        return Container(name)
+        container = Container(name)
+        # the shared package cache volume is attached at creation, not only on
+        # converge, so pacman's cache is populated permanently
+        if distribution == "arch":
+            ensure_storage_volume("default", "ask-pacman")
+            container.attach_volume(
+                "default", "ask-pacman", "pacman-cache", Path("/var/cache/pacman/pkg")
+            )
+        return container
 
     def snapshot(self) -> InstanceSnapshot | None:
         result = _incus(["incus", "list", self.name, "--format", "json"], capture=True)

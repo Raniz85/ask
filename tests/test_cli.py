@@ -694,6 +694,74 @@ def test_converge_prepares_the_user_and_mounts_before_installing_packages(
     ]
 
 
+def test_converge_shares_and_cleans_the_pacman_cache_on_arch(tmp_path: Path) -> None:
+    # given a project directory on the arch distribution
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR)
+
+    call_order: list[str] = []
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+        provisioner = provisioner_cls.return_value
+        for step in (
+            "share_pacman_cache",
+            "provision_packages",
+            "clean_pacman_cache",
+        ):
+            getattr(provisioner, step).side_effect = lambda *a, step=step, **k: (
+                call_order.append(step)
+            )
+
+        converge()
+
+    # then the shared cache is attached before packages are installed (so
+    # they populate it), and cleaned after every package change — including
+    # removals — is done
+    assert call_order == [
+        "share_pacman_cache",
+        "provision_packages",
+        "clean_pacman_cache",
+    ]
+
+
+def test_converge_does_not_touch_the_pacman_cache_on_debian(tmp_path: Path) -> None:
+    # given a project directory on the debian distribution
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_DEBIAN_FLAVOR)
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+
+        converge()
+
+    # then neither the shared pacman cache nor its cleanup is touched
+    provisioner_cls.return_value.share_pacman_cache.assert_not_called()
+    provisioner_cls.return_value.clean_pacman_cache.assert_not_called()
+
+
 def test_converge_provisions_the_instance_environment_variables(
     tmp_path: Path,
 ) -> None:
