@@ -60,8 +60,12 @@ def test_image_for_unknown_distribution_raises() -> None:
 
 
 def test_container_create_launches_image_with_common_config() -> None:
-    # given a mocked subprocess.run
-    with patch("ask.incus.subprocess.run") as run:
+    # given a mocked subprocess.run and volume helpers
+    with (
+        patch("ask.incus.subprocess.run") as run,
+        patch("ask.incus.ensure_storage_volume"),
+        patch("ask.incus.Container.attach_volume"),
+    ):
         # when creating a container for the "debian" distribution named "my-project"
         container = Container.create("my-project", "debian")
 
@@ -112,6 +116,24 @@ def test_container_create_attaches_the_shared_pacman_cache_on_arch() -> None:
     ensure_volume.assert_called_once_with("default", "ask-pacman")
     attach_volume.assert_called_once_with(
         "default", "ask-pacman", "pacman-cache", Path("/var/cache/pacman/pkg")
+    )
+
+
+def test_container_create_attaches_the_shared_apt_cache_on_debian() -> None:
+    # given mocked subprocess.run and volume helpers
+    with (
+        patch("ask.incus.subprocess.run"),
+        patch("ask.incus.ensure_storage_volume") as ensure_volume,
+        patch("ask.incus.Container.attach_volume") as attach_volume,
+    ):
+        # when creating a container for the "debian" distribution
+        Container.create("my-project", "debian")
+
+    # then the shared apt archive volume is ensured and attached permanently,
+    # at apt's stock archives directory
+    ensure_volume.assert_called_once_with("default", "ask-apt")
+    attach_volume.assert_called_once_with(
+        "default", "ask-apt", "apt-cache", Path("/var/cache/apt/archives")
     )
 
 

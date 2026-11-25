@@ -763,6 +763,46 @@ def test_clean_pacman_cache_removes_packages_that_are_no_longer_installed() -> N
     run_command.assert_called_once_with(["pacman", "-Sc", "--noconfirm"])
 
 
+def test_share_apt_cache_attaches_the_shared_volume_at_apts_archives() -> None:
+    # given a container that should share apt's archive cache with other
+    # containers
+    provisioner = Provisioner(Container("my-project"))
+
+    # when sharing apt's cache
+    with (
+        patch("ask.provision.incus.ensure_storage_volume") as ensure_volume,
+        patch.object(Container, "attach_volume") as attach_volume,
+        patch("ask.provision.Inventory"),
+        patch("ask.provision.State"),
+        patch("ask.provision.connect_all"),
+        patch("ask.provision.add_op"),
+        patch("ask.provision.run_ops"),
+    ):
+        provisioner.share_apt_cache()
+
+    # then the shared custom volume is ensured, and attached at apt's stock
+    # archives directory
+    ensure_volume.assert_called_once_with("default", "ask-apt")
+    attach_volume.assert_called_once_with(
+        "default", "ask-apt", "apt-cache", Path("/var/cache/apt/archives")
+    )
+
+
+def test_clean_apt_cache_keeps_archives_still_in_the_repo_indexes() -> None:
+    # given a container after a converge
+    provisioner = Provisioner(Container("my-project"))
+
+    # when cleaning the shared archive cache
+    with patch.object(Container, "run_command", return_value=_completed(0)) as (
+        run_command
+    ):
+        provisioner.clean_apt_cache()
+
+    # then autoclean prunes old versions but keeps archives still listed in
+    # the repo indexes, which other containers may still need to install
+    run_command.assert_called_once_with(["apt-get", "autoclean"])
+
+
 def _completed(returncode: int, stdout: str = "") -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout)
 

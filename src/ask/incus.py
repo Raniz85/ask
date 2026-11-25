@@ -199,12 +199,17 @@ class Container:
             command += ["--config", f"{key}={value}"]
         _incus(command)
         container = Container(name)
-        # the shared package cache volume is attached at creation, not only on
-        # converge, so pacman's cache is populated permanently
+        # the shared package cache volume is attached at creation, not only
+        # on converge, so the package cache is populated permanently
         if distribution == "arch":
             ensure_storage_volume("default", "ask-pacman")
             container.attach_volume(
                 "default", "ask-pacman", "pacman-cache", Path("/var/cache/pacman/pkg")
+            )
+        elif distribution == "debian":
+            ensure_storage_volume("default", "ask-apt")
+            container.attach_volume(
+                "default", "ask-apt", "apt-cache", Path("/var/cache/apt/archives")
             )
         return container
 

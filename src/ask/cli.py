@@ -439,6 +439,8 @@ def _converge_container(
 
     if distribution == "arch":
         provisioner.share_pacman_cache()
+    elif distribution == "debian":
+        provisioner.share_apt_cache()
     provisioner.provision_packages(distribution, packages.official)
     aur_builder.install_packages(distribution, packages.aur)
     if packages.npm:
@@ -489,6 +491,8 @@ def _converge_container(
     # converge should free its cache entry in the same run
     if distribution == "arch":
         provisioner.clean_pacman_cache()
+    elif distribution == "debian":
+        provisioner.clean_apt_cache()
 
     mise_provisioner = provision.MiseProvisioner(container)
     path_entries: list[Path] = []

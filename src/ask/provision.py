@@ -192,6 +192,26 @@ class Provisioner:
                 f"{result.returncode}."
             )
 
+    def share_apt_cache(self) -> None:
+        incus.ensure_storage_volume(_APT_CACHE_POOL, _APT_CACHE_VOLUME)
+        self.container.attach_volume(
+            _APT_CACHE_POOL,
+            _APT_CACHE_VOLUME,
+            _APT_CACHE_DEVICE,
+            _APT_CACHE_DIR,
+        )
+
+    def clean_apt_cache(self) -> None:
+        # autoclean keeps archives still listed in the repo indexes — the
+        # apt analogue of pacman's KeepCurrent — and prunes old versions,
+        # which no container can still install
+        result = self.container.run_command(["apt-get", "autoclean"])
+        if result.returncode != 0:
+            raise ProvisioningError(
+                "Cleaning the shared apt cache failed with exit status "
+                f"{result.returncode}."
+            )
+
     def remove_packages(self, distribution: str, packages: list[str]) -> None:
         logger.debug("removing packages from %s: %s", distribution, ", ".join(packages))
         operation = _package_operation_for(distribution)
@@ -612,6 +632,10 @@ _PACMAN_CACHE_DIR = Path("/var/cache/pacman/pkg")
 _PACMAN_CACHE_POOL = "default"
 _PACMAN_CACHE_VOLUME = "ask-pacman"
 _PACMAN_CACHE_DEVICE = "pacman-cache"
+_APT_CACHE_DIR = Path("/var/cache/apt/archives")
+_APT_CACHE_POOL = "default"
+_APT_CACHE_VOLUME = "ask-apt"
+_APT_CACHE_DEVICE = "apt-cache"
 _AUR_SEEN_REF = "AUR_SEEN"
 
 

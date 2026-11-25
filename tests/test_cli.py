@@ -734,15 +734,19 @@ def test_converge_shares_and_cleans_the_pacman_cache_on_arch(tmp_path: Path) -> 
         "provision_packages",
         "clean_pacman_cache",
     ]
+    provisioner.share_apt_cache.assert_not_called()
+    provisioner.clean_apt_cache.assert_not_called()
 
 
-def test_converge_does_not_touch_the_pacman_cache_on_debian(tmp_path: Path) -> None:
+def test_converge_shares_and_cleans_the_apt_cache_on_debian(tmp_path: Path) -> None:
     # given a project directory on the debian distribution
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
     (project_dir / "ask.toml").write_text("")
     config_path = _flavor_path(tmp_path)
     config_path.write_text(_DEBIAN_FLAVOR)
+
+    call_order: list[str] = []
 
     # when converging from within that project directory
     with (
@@ -754,12 +758,28 @@ def test_converge_does_not_touch_the_pacman_cache_on_debian(tmp_path: Path) -> N
     ):
         container = container_cls.return_value
         container.get_managed_packages.return_value = []
+        provisioner = provisioner_cls.return_value
+        for step in (
+            "share_apt_cache",
+            "provision_packages",
+            "clean_apt_cache",
+        ):
+            getattr(provisioner, step).side_effect = lambda *a, step=step, **k: (
+                call_order.append(step)
+            )
 
         converge()
 
-    # then neither the shared pacman cache nor its cleanup is touched
-    provisioner_cls.return_value.share_pacman_cache.assert_not_called()
-    provisioner_cls.return_value.clean_pacman_cache.assert_not_called()
+    # then the shared archive cache is attached before packages are installed
+    # (so they populate it), cleaned after every package change — including
+    # removals — is done, and pacman's cache is never touched
+    assert call_order == [
+        "share_apt_cache",
+        "provision_packages",
+        "clean_apt_cache",
+    ]
+    provisioner.share_pacman_cache.assert_not_called()
+    provisioner.clean_pacman_cache.assert_not_called()
 
 
 def test_converge_provisions_the_instance_environment_variables(
