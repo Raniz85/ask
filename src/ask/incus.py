@@ -23,6 +23,8 @@ _COMMON_CONFIG = {
     "security.privileged": "false",
 }
 
+_ASK_MARKER_CONFIG_KEY = "user.ask.created"
+_PROJECT_PATH_CONFIG_KEY = "user.ask.project"
 _MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
 _MANAGED_EXTENSIONS_CONFIG_KEY = "user.ask.extensions"
 _GUI_SESSIONS_CONFIG_KEY = "user.ask.gui_sessions"
@@ -136,6 +138,10 @@ class InstanceSnapshot:
             return datetime.fromisoformat(recorded)
         except ValueError:
             return None
+
+    def project_path(self) -> Path | None:
+        recorded = self.config.get(_PROJECT_PATH_CONFIG_KEY)
+        return Path(recorded) if recorded else None
 
 
 def _diff_devices(
@@ -377,6 +383,17 @@ class Container:
                 f"{_CONVERGED_HASH_CONFIG_KEY}={state.fingerprint.config_hash}",
                 f"{_CONVERGED_CONFIGURATION_CONFIG_KEY}={state.configuration}",
                 f"{_CONVERGED_AT_CONFIG_KEY}={state.at.isoformat()}",
+            ],
+        )
+
+    def set_project_path(self, path: Path) -> None:
+        _incus(
+            [
+                "incus",
+                "config",
+                "set",
+                self.name,
+                f"{_PROJECT_PATH_CONFIG_KEY}={path}",
             ],
         )
 

@@ -1513,3 +1513,43 @@ def test_move_bind_mount_adds_the_device_when_the_old_one_is_absent(
         ],
         check=True,
     )
+def test_set_project_path_stores_the_path_under_a_user_key() -> None:
+    # given a container and the project directory it belongs to
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        # when recording the project path
+        container.set_project_path(Path("/home/raniz/src/my-project"))
+
+    # then it is stored as container config under an ask key
+    run.assert_called_once_with(
+        [
+            "incus",
+            "config",
+            "set",
+            "my-project",
+            "user.ask.project=/home/raniz/src/my-project",
+        ],
+        check=True,
+    )
+
+
+def test_project_path_reads_the_recorded_path() -> None:
+    # given a snapshot with a recorded project path
+    snapshot = InstanceSnapshot(
+        status="Running", config={"user.ask.project": "/home/raniz/src/my-project"}
+    )
+
+    # then the project path is read from the config
+    assert snapshot.project_path() == Path("/home/raniz/src/my-project")
+
+
+def test_project_path_is_none_when_never_recorded() -> None:
+    # given a snapshot without any recorded project path
+    snapshot = InstanceSnapshot(status="Running", config={})
+
+    # then there is no project path
+    assert snapshot.project_path() is None

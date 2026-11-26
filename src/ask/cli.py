@@ -536,6 +536,7 @@ def _converge_container(
 
     configuration = convergence.effective_configuration(resolved)
     fingerprint = convergence.fingerprint(configuration)
+    container.set_project_path(project_dir)
     container.set_converged_state(
         incus.ConvergedState(
             fingerprint=fingerprint,

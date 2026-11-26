@@ -4997,3 +4997,33 @@ def test_ide_passes_a_leading_dash_argument_to_the_default_ide(tmp_path: Path) -
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["pycharm", "--new-window"], env=_USER_ENV
     )
+def _converge_project(tmp_path: Path) -> Mock:
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR)
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(
+            status="Running", config={}
+        )
+        container.get_managed_packages.return_value = []
+        container.get_managed_extensions.return_value = []
+        converge()
+    return container
+
+
+def test_converge_records_the_project_path_on_the_container(tmp_path: Path) -> None:
+    # given a project directory being converged
+    # when converging it
+    container = _converge_project(tmp_path)
+
+    # then the container's project path is recorded
+    container.set_project_path.assert_called_once_with(tmp_path / "my-project")
