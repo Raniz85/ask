@@ -47,6 +47,7 @@ def test_run_step_shows_full_command_and_asks_before_running(
         ["sudo", "usermod", "-v", "100000-1099999", "raniz"],
         check=True,
         input=None,
+        stdin=subprocess.DEVNULL,
         text=True,
     )
     assert ran is True
@@ -72,9 +73,25 @@ def test_run_step_pipes_the_steps_input_to_the_command(
         ["sudo", "incus", "admin", "init", "--preseed"],
         check=True,
         input="cluster: none\n",
+        stdin=None,
         text=True,
     )
     assert ran is True
+
+
+def test_run_step_keeps_the_terminal_from_commands_without_input(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # given a step without input, run where the remaining answers to setup's
+    # prompts are already waiting on the terminal
+    step = _step(["sudo", "incus", "project", "create", "user-1000"])
+
+    # when running it
+    with patch("subprocess.run") as run:
+        run_step(step, confirm=lambda prompt: True)
+
+    # then the command reads from /dev/null, so it cannot consume those answers
+    assert run.call_args.kwargs.get("stdin") == subprocess.DEVNULL
 
 
 def test_run_step_skips_when_the_user_declines(
@@ -180,6 +197,7 @@ def test_run_setup_creates_example_config_and_runs_all_steps(
         ["sudo", "incus", "project", "create", "user-1000"],
         check=True,
         input=None,
+        stdin=subprocess.DEVNULL,
         text=True,
     )
 

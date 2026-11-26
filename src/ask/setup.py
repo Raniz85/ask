@@ -54,7 +54,7 @@ class SetupStep:
     command: list[str]
     done: Callable[[], bool]
     # Optional standard input fed to the command, e.g. a preseed for an
-    # interactive wizard; None runs it without piped input.
+    # interactive wizard; None runs it with /dev/null as standard input.
     input: str | None = None
 
 
@@ -283,7 +283,13 @@ def run_step(step: SetupStep, confirm: Callable[[str], bool]) -> bool:
         print("Skipped.")
         return False
     try:
-        subprocess.run(step.command, check=True, input=step.input, text=True)
+        subprocess.run(
+            step.command,
+            check=True,
+            input=step.input,
+            stdin=subprocess.DEVNULL if step.input is None else None,
+            text=True,
+        )
     except FileNotFoundError as error:
         raise SetupError(
             f"Command {step.command[0]!r} not found. Is it installed?"
