@@ -13,6 +13,7 @@ from typing import Annotated, cast
 
 from cyclopts import Parameter
 from rich.console import Console
+from rich.table import Table
 
 from ask import (
     agent as agents,
@@ -371,6 +372,44 @@ def dump() -> None:
     project_dir = validation.find_project_dir(Path.cwd())
     resolved = _resolve_project(project_dir)
     _print_resolved(resolved)
+
+
+def ls() -> None:
+    """List all known asks (Incus containers created by ask)."""
+
+    asks = incus.list_asks()
+    if not asks:
+        print("No asks found.")
+        return
+    console = Console()
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("NAME")
+    table.add_column("STATUS")
+    table.add_column("PATH")
+    table.add_column("CREATED")
+    table.add_column("LAST CONVERGE")
+    for name, snapshot in asks:
+        path = snapshot.project_path()
+        converged_at = snapshot.converged_at()
+        table.add_row(
+            name,
+            snapshot.status,
+            str(path) if path else "-",
+            _format_timestamp(snapshot.created_at),
+            _format_datetime(converged_at) if converged_at else "never",
+        )
+    console.print(table)
+
+
+def _format_timestamp(value: str) -> str:
+    try:
+        return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return value or "-"
+
+
+def _format_datetime(value: datetime) -> str:
+    return value.strftime("%Y-%m-%d %H:%M")
 
 
 def init() -> None:

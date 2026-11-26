@@ -17,6 +17,7 @@ from ask.cli import (
     exec,
     ide,
     init,
+    ls,
     rename,
     resolve_shortcut,
     restart,
@@ -37,6 +38,7 @@ app.command(exec)
 app.command(agent)
 app.command(ide)
 app.command(init)
+app.command(ls)
 app.command(rename)
 app.command(restart)
 app.command(setup)

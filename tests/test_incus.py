@@ -20,6 +20,7 @@ from ask.incus import (
     ensure_storage_volume,
     image_for,
     known_distributions,
+    list_asks,
     stale_packages,
 )
 
@@ -82,6 +83,8 @@ def test_container_create_launches_image_with_common_config() -> None:
             "security.nesting=true",
             "--config",
             "security.privileged=false",
+            "--config",
+            "user.ask.created=true",
         ],
         check=True,
     )
@@ -110,6 +113,8 @@ def test_container_create_attaches_the_shared_pacman_cache_on_arch() -> None:
             "security.nesting=true",
             "--config",
             "security.privileged=false",
+            "--config",
+            "user.ask.created=true",
         ],
         check=True,
     )

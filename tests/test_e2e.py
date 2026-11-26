@@ -183,7 +183,8 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
         "refused\n"
         + _error_panel(
             "`incus launch images:archlinux/current my-project "
-            "--config security.nesting=true --config security.privileged=false` "
+            "--config security.nesting=true --config security.privileged=false "
+            "--config user.ask.created=true` "
             "failed with exit status 1."
         ),
     )
