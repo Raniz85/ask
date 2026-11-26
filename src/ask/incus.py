@@ -140,6 +140,15 @@ class InstanceSnapshot:
         except ValueError:
             return None
 
+    def last_invocation(self) -> datetime | None:
+        recorded = self.config.get(INVOCATION_AT_CONFIG_KEY)
+        if not recorded:
+            return None
+        try:
+            return datetime.fromisoformat(recorded)
+        except ValueError:
+            return None
+
     def project_path(self) -> Path | None:
         recorded = self.config.get(_PROJECT_PATH_CONFIG_KEY)
         return Path(recorded) if recorded else None

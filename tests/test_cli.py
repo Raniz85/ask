@@ -5102,3 +5102,35 @@ def test_ls_reports_when_there_are_no_asks(
     out = capsys.readouterr().out
     assert "no asks" in out.lower()
     assert "NAME" not in out
+
+
+def test_ls_includes_a_last_run_column(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given an ask container with a recorded invocation time
+    monkeypatch.setenv("COLUMNS", "200")
+    invoked_at = datetime(2026, 11, 26, 9, 15, tzinfo=UTC)
+    with patch("ask.cli.incus.list_asks") as list_asks:
+        list_asks.return_value = [
+            (
+                "my-project",
+                InstanceSnapshot(
+                    status="Running",
+                    config={
+                        "user.ask.project": "/home/raniz/src/my-project",
+                        "user.ask.invocation.at": invoked_at.isoformat(),
+                    },
+                    created_at="2026-11-20T08:30:00+00:00",
+                ),
+            ),
+        ]
+
+        # when listing the known asks
+        ls()
+
+    # then the table has a LAST RUN column showing the invocation time
+    out = capsys.readouterr().out
+    header_row = next(line for line in out.splitlines() if "NAME" in line)
+    assert "LAST RUN" in header_row
+    row = next(line for line in out.splitlines() if "my-project" in line)
+    assert "2026-11-26 09:15" in row

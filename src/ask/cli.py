@@ -388,15 +388,18 @@ def ls() -> None:
     table.add_column("PATH")
     table.add_column("CREATED")
     table.add_column("LAST CONVERGE")
+    table.add_column("LAST RUN")
     for name, snapshot in asks:
         path = snapshot.project_path()
         converged_at = snapshot.converged_at()
+        invoked_at = snapshot.last_invocation()
         table.add_row(
             name,
             snapshot.status,
             str(path) if path else "-",
             _format_timestamp(snapshot.created_at),
             _format_datetime(converged_at) if converged_at else "never",
+            _format_datetime(invoked_at) if invoked_at else "never",
         )
     console.print(table)
 

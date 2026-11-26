@@ -1656,3 +1656,32 @@ def test_project_path_is_none_when_never_recorded() -> None:
 
     # then there is no project path
     assert snapshot.project_path() is None
+
+
+def test_last_invocation_reads_the_recorded_time() -> None:
+    # given a snapshot with a recorded invocation time
+    snapshot = InstanceSnapshot(
+        status="Running",
+        config={"user.ask.invocation.at": "2026-11-26T09:15:00+00:00"},
+    )
+
+    # then the last invocation time is parsed from the config
+    assert snapshot.last_invocation() == datetime(2026, 11, 26, 9, 15, tzinfo=UTC)
+
+
+def test_last_invocation_is_none_when_never_recorded() -> None:
+    # given a snapshot without any recorded invocation time
+    snapshot = InstanceSnapshot(status="Running", config={})
+
+    # then there is no last invocation
+    assert snapshot.last_invocation() is None
+
+
+def test_last_invocation_is_none_when_not_a_timestamp() -> None:
+    # given a snapshot with an unreadable invocation time
+    snapshot = InstanceSnapshot(
+        status="Running", config={"user.ask.invocation.at": "not-a-time"}
+    )
+
+    # then there is no last invocation
+    assert snapshot.last_invocation() is None
