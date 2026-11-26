@@ -22,6 +22,7 @@ from ask.cli import (
     exec,
     ide,
     init,
+    ls,
     rename,
     resolve_shortcut,
     restart,
@@ -4997,6 +4998,8 @@ def test_ide_passes_a_leading_dash_argument_to_the_default_ide(tmp_path: Path) -
     container.exec_command.assert_called_once_with(
         1000, 1000, project_dir, ["pycharm", "--new-window"], env=_USER_ENV
     )
+
+
 def _converge_project(tmp_path: Path) -> Mock:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
@@ -5012,7 +5015,7 @@ def _converge_project(tmp_path: Path) -> Mock:
     ):
         container = container_cls.return_value
         container.snapshot.return_value = InstanceSnapshot(
-            status="Running", config={}
+            status="Running", config={}, created_at=""
         )
         container.get_managed_packages.return_value = []
         container.get_managed_extensions.return_value = []
@@ -5027,3 +5030,75 @@ def test_converge_records_the_project_path_on_the_container(tmp_path: Path) -> N
 
     # then the container's project path is recorded
     container.set_project_path.assert_called_once_with(tmp_path / "my-project")
+
+
+def test_ls_prints_an_aligned_table_with_path_creation_and_converge_columns(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    # given two ask containers with recorded metadata
+    converged_at = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
+    with patch("ask.cli.incus.list_asks") as list_asks:
+        list_asks.return_value = [
+            (
+                "my-project",
+                InstanceSnapshot(
+                    status="Running",
+                    config={
+                        "user.ask.project": "/home/raniz/src/my-project",
+                        "user.ask.converged.at": converged_at.isoformat(),
+                    },
+                    created_at="2026-11-20T08:30:00+00:00",
+                ),
+            ),
+            (
+                "other-project",
+                InstanceSnapshot(
+                    status="Stopped",
+                    config={"user.ask.project": "/home/raniz/src/other-project"},
+                    created_at="2026-11-21T09:45:00+00:00",
+                ),
+            ),
+        ]
+
+        # when listing the known asks
+        ls()
+
+    # then a table is printed with name, status, path, creation and last
+    # converge columns, aligned across rows
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    header_row = next(line for line in lines if "NAME" in line)
+    assert "STATUS" in header_row
+    assert (
+        "PATH" in header_row
+        and "CREATED" in header_row
+        and "LAST CONVERGE" in header_row
+    )
+    assert any("my-project" in line and "Running" in line for line in lines)
+    assert any(
+        "other-project" in line
+        and "Stopped" in line
+        and "/home/raniz/src/other-project" in line
+        for line in lines
+    )
+    assert "2026-11-20" in out and "2026-11-25" in out
+    # the never-converged ask shows a placeholder instead of a blank cell
+    assert any("never" in line.lower() for line in lines)
+    # columns align: the path column starts at the same offset in both rows
+    rows = [line for line in lines if "project" in line and "/home/" in line]
+    assert len({line.index("/home/") for line in rows}) == 1
+
+
+def test_ls_reports_when_there_are_no_asks(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # given no ask containers at all
+    with patch("ask.cli.incus.list_asks", return_value=[]):
+        # when listing the known asks
+        ls()
+
+    # then a message says so instead of printing a table
+    out = capsys.readouterr().out
+    assert "no asks" in out.lower()
+    assert "NAME" not in out

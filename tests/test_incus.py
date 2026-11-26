@@ -1518,6 +1518,104 @@ def test_move_bind_mount_adds_the_device_when_the_old_one_is_absent(
         ],
         check=True,
     )
+
+
+def test_list_asks_returns_only_containers_marked_as_asks() -> None:
+    # given several incus containers, only some of them created by ask
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _instances_result(
+            {
+                "name": "my-project",
+                "status": "Running",
+                "config": {"user.ask.converged.at": "2026-11-26T10:00:00+00:00"},
+            },
+            {"name": "unrelated", "status": "Stopped", "config": {}},
+            {
+                "name": "other-project",
+                "status": "Stopped",
+                "config": {"user.ask.packages": "git"},
+            },
+        )
+
+        # when listing the known asks
+        asks = list_asks()
+
+    # then only the ask-created containers are returned, with status and config
+    run.assert_called_once_with(
+        ["incus", "list", "--format", "json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    names = [name for name, _ in asks]
+    assert names == ["my-project", "other-project"]
+    assert asks[0] == (
+        "my-project",
+        InstanceSnapshot(
+            status="Running",
+            config={"user.ask.converged.at": "2026-11-26T10:00:00+00:00"},
+        ),
+    )
+    assert asks[1] == (
+        "other-project",
+        InstanceSnapshot(status="Stopped", config={"user.ask.packages": "git"}),
+    )
+
+
+def test_list_asks_returns_nothing_when_no_container_is_an_ask() -> None:
+    # given incus containers none of them created by ask
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _instances_result(
+            {"name": "unrelated", "status": "Running", "config": {}},
+        )
+
+        # when listing the known asks
+        asks = list_asks()
+
+    # then there are none
+    assert asks == []
+
+
+def test_list_asks_captures_the_creation_time_of_each_ask() -> None:
+    # given an ask container with a recorded creation time
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _instances_result(
+            {
+                "name": "my-project",
+                "status": "Running",
+                "config": {"user.ask.created": "true"},
+                "created_at": "2026-11-20T08:30:00.123456789+00:00",
+            },
+        )
+
+        # when listing the known asks
+        asks = list_asks()
+
+    # then the creation time is captured on the snapshot
+    assert asks[0][1].created_at == "2026-11-20T08:30:00.123456789+00:00"
+
+
+def test_snapshot_captures_the_creation_time() -> None:
+    # given a container with a recorded creation time
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = _instances_result(
+            {
+                "name": "my-project",
+                "status": "Stopped",
+                "config": {},
+                "created_at": "2026-11-20T08:30:00+00:00",
+            },
+        )
+
+        # when taking a snapshot of it
+        snapshot = container.snapshot()
+
+    # then the creation time is captured too
+    assert snapshot is not None
+    assert snapshot.created_at == "2026-11-20T08:30:00+00:00"
+
+
 def test_set_project_path_stores_the_path_under_a_user_key() -> None:
     # given a container and the project directory it belongs to
     container = Container("my-project")

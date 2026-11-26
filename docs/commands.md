@@ -75,6 +75,10 @@ Start an IDE in the project's container.
 
 Create an ask.toml template in the current directory.
 
+### `ask ls`
+
+List all known asks (Incus containers created by ask).
+
 ### `ask rename`
 
 Rename the project's directory and its container.

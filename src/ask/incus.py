@@ -119,6 +119,7 @@ class ConvergedState:
 class InstanceSnapshot:
     status: str
     config: dict[str, str]
+    created_at: str = ""
 
     def is_running(self) -> bool:
         return self.status == "Running"
@@ -142,6 +143,30 @@ class InstanceSnapshot:
     def project_path(self) -> Path | None:
         recorded = self.config.get(_PROJECT_PATH_CONFIG_KEY)
         return Path(recorded) if recorded else None
+
+
+def list_asks() -> list[tuple[str, InstanceSnapshot]]:
+    """List all Incus containers created by ask, as (name, snapshot) pairs.
+
+    A container counts as an ask only if it carries ask's own ``user.ask.*``
+    configuration; plain Incus containers are not asks.
+    """
+    result = _incus(["incus", "list", "--format", "json"], capture=True)
+    asks = []
+    for instance in json.loads(result.stdout):
+        config = instance.get("config") or {}
+        if any(key.startswith("user.ask.") for key in config):
+            asks.append(
+                (
+                    instance["name"],
+                    InstanceSnapshot(
+                        status=instance["status"],
+                        config=config,
+                        created_at=instance.get("created_at") or "",
+                    ),
+                )
+            )
+    return sorted(asks, key=lambda ask: ask[0])
 
 
 def _diff_devices(
@@ -213,6 +238,7 @@ class Container:
         command = ["incus", "launch", image_for(distribution), name]
         for key, value in _COMMON_CONFIG.items():
             command += ["--config", f"{key}={value}"]
+        command += ["--config", f"{_ASK_MARKER_CONFIG_KEY}=true"]
         _incus(command)
         container = Container(name)
         # the shared package cache volume is attached at creation, not only
@@ -234,7 +260,9 @@ class Container:
         for instance in json.loads(result.stdout):
             if instance["name"] == self.name:
                 return InstanceSnapshot(
-                    status=instance["status"], config=instance["config"]
+                    status=instance["status"],
+                    config=instance["config"],
+                    created_at=instance.get("created_at") or "",
                 )
         return None
 
