@@ -116,7 +116,7 @@ def test_incus_steps_cover_user_project_and_subuid_subgid() -> None:
     # target the user, and there is no admin-group step
     commands = [step.command for step in steps]
     assert ["sudo", "incus", "project", "create", "user-1000"] in commands
-    assert ["incus", "config", "set", "default.project", "user-1000"] in commands
+    assert ["incus", "project", "switch", "user-1000"] in commands
     assert ["sudo", "usermod", "-v", "100000-1099999", "raniz"] in commands
     assert ["sudo", "usermod", "-w", "100000-1099999", "raniz"] in commands
     assert not any("incus-admin" in shlex.join(command) for command in commands)
@@ -255,8 +255,8 @@ def test_incus_step_checks_detect_existing_state(tmp_path: Path) -> None:
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if command[:3] == ["incus", "project", "show"]:
             return _completed(0)
-        if command[:3] == ["incus", "config", "get"]:
-            return _completed(0, stdout="user-1000\n")
+        if command[:3] == ["incus", "remote", "list"]:
+            return _completed(0, stdout='{"local": {"Project": "user-1000"}}')
         raise AssertionError(f"unexpected command: {command}")
 
     # when all checks run against an already-configured system
@@ -289,6 +289,8 @@ def test_incus_step_checks_detect_missing_state(tmp_path: Path) -> None:
     subgid_file.write_text("")
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if command[:3] == ["incus", "remote", "list"]:
+            return _completed(0, stdout='{"local": {"Project": ""}}')
         return _completed(1)
 
     # when all checks run

@@ -1,3 +1,4 @@
+import json
 import os
 import shlex
 import shutil
@@ -211,11 +212,8 @@ def incus_steps(username: str, uid: int) -> list[SetupStep]:
         ),
         SetupStep(
             description=f"Use the Incus project {project!r} by default.",
-            command=["incus", "config", "set", "default.project", project],
-            done=lambda: (
-                _command_output(["incus", "config", "get", "default.project"])
-                == project
-            ),
+            command=["incus", "project", "switch", project],
+            done=lambda: _default_project() == project,
         ),
         SetupStep(
             description=f"Map subordinate UIDs for {username!r} in /etc/subuid, "
@@ -230,6 +228,19 @@ def incus_steps(username: str, uid: int) -> list[SetupStep]:
             done=lambda: _has_sufficient_subid_range(Path("/etc/subgid"), username),
         ),
     ]
+
+
+def _default_project() -> str:
+    # The project the incus CLI uses by default is client configuration
+    # (~/.config/incus/config.yml), not a server key, so read it from the
+    # remote table. Works without a running daemon.
+    result = subprocess.run(
+        ["incus", "remote", "list", "--format", "json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)["local"].get("Project", "")
 
 
 def run_step(step: SetupStep, confirm: Callable[[str], bool]) -> bool:
