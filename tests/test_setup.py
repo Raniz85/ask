@@ -446,7 +446,9 @@ def test_incus_install_steps_for_debian_use_the_zabbly_repo_and_apt() -> None:
         next(i for i, c in enumerate(commands) if "zabbly-incus-stable.list" in c),
         next(i for i, c in enumerate(commands) if c == "sudo apt-get update"),
         next(i for i, c in enumerate(commands) if c == "sudo apt-get install -y incus"),
-        next(i for i, c in enumerate(commands) if c == "sudo incus admin init"),
+        next(
+            i for i, c in enumerate(commands) if c == "sudo incus admin init --preseed"
+        ),
     ]
     assert order == sorted(order)
 
