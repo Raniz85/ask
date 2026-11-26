@@ -1,3 +1,4 @@
+import json
 import re
 
 import pytest
@@ -32,16 +33,19 @@ def test_setup_configures_incus_and_writes_a_default_flavor(vm: Vm) -> None:
     result = vm.ask("setup", cwd=HOME, input="y\n" * 5, terminal=True)
 
     # then the default flavour is written, Incus uses the user's project by
-    # default and the user has subordinate IDs for the containers
     assert (
         result.returncode,
         vm.run(["test", "-f", str(FLAVOR)]).returncode,
-        vm.run(["incus", "config", "get", "default.project"]).stdout,
-        vm.run(["grep", f"^{USER}:", "/etc/subuid", "/etc/subgid"]).stdout,
+        json.loads(vm.run(["incus", "remote", "list", "--format", "json"]).stdout)[
+            "local"
+        ]["Project"],
+        vm.run(
+            ["grep", "-e", f"^{USER}:100000:1000000$", "/etc/subuid", "/etc/subgid"]
+        ).stdout,
     ) == (
-        1,
         0,
-        f"user-{uid}\n",
+        0,
+        f"user-{uid}",
         f"/etc/subuid:{USER}:100000:1000000\n/etc/subgid:{USER}:100000:1000000\n",
     )
 
@@ -56,7 +60,7 @@ def test_init_writes_the_manifest_template(vm: Vm) -> None:
     # then the manifest template is written
     assert (result.returncode, vm.read_file(PROJECT_DIR / "ask.toml")) == (
         0,
-        INIT_TEMPLATE.upper(),
+        INIT_TEMPLATE,
     )
 
 
@@ -66,8 +70,9 @@ def test_create_launches_and_converges_the_container(vm: Vm) -> None:
     vm.write_file(FLAVOR, vm.read_file(FLAVOR) + AGENTS)
     vm.write_file(PROJECT_DIR / "ask.toml", MANIFEST)
 
-    # when running ask create
-    result = vm.ask("create", cwd=PROJECT_DIR)
+    # when running ask create in a terminal: converging AUR packages reviews
+    # the paru-bin PKGBUILD, which needs an interactive terminal
+    result = vm.ask("create", cwd=PROJECT_DIR, input="y\n", terminal=True)
 
     # then the container is running, recorded as converged and has the AUR
     # package installed
@@ -77,7 +82,7 @@ def test_create_launches_and_converges_the_container(vm: Vm) -> None:
         instance["status"],
         "user.ask.converged.hash" in instance["config"],
         vm.ask("exec", "pacman", "-Q", "pfetch", cwd=PROJECT_DIR).returncode,
-    ) == (0, "Stopped", True, 0)
+    ) == (0, "Running", True, 0)
 
 
 def test_enter_opens_a_shell_in_the_container(vm: Vm) -> None:
@@ -90,7 +95,7 @@ def test_enter_opens_a_shell_in_the_container(vm: Vm) -> None:
     )
 
     # then the command ran inside the container
-    assert (result.returncode, PROJECT.upper() in result.stdout) == (0, False)
+    assert (result.returncode, PROJECT.upper() in result.stdout) == (0, True)
 
 
 def test_exec_runs_a_command_in_the_project_directory(vm: Vm) -> None:
@@ -98,7 +103,7 @@ def test_exec_runs_a_command_in_the_project_directory(vm: Vm) -> None:
     result = vm.ask("exec", "pwd", cwd=PROJECT_DIR)
 
     # then it runs in the bind-mounted project directory
-    assert (result.returncode, result.stdout) == (0, f"{HOME}\n")
+    assert (result.returncode, result.stdout) == (0, f"{PROJECT_DIR}\n")
 
 
 def test_exec_runs_a_command_with_the_configured_environment(vm: Vm) -> None:
@@ -106,7 +111,7 @@ def test_exec_runs_a_command_with_the_configured_environment(vm: Vm) -> None:
     result = vm.ask("exec", "printenv", "ASK_E2E", cwd=PROJECT_DIR)
 
     # then its configured value is printed
-    assert (result.returncode, result.stdout) == (0, "")
+    assert (result.returncode, result.stdout) == (0, "hello\n")
 
 
 def test_agent_runs_the_configured_agent(vm: Vm) -> None:
@@ -114,7 +119,7 @@ def test_agent_runs_the_configured_agent(vm: Vm) -> None:
     result = vm.ask("agent", "opencode", "--", "--version", cwd=PROJECT_DIR)
 
     # then the agent prints it
-    assert (result.returncode, bool(VERSION.search(result.stdout))) == (0, False)
+    assert (result.returncode, bool(VERSION.search(result.stdout))) == (0, True)
 
 
 def test_stop_stops_the_container(vm: Vm) -> None:
@@ -123,7 +128,7 @@ def test_stop_stops_the_container(vm: Vm) -> None:
 
     # then it is stopped
     [instance] = vm.instances(PROJECT)
-    assert (result.returncode, instance["status"]) == (0, "Running")
+    assert (result.returncode, instance["status"]) == (0, "Stopped")
 
 
 def test_destroy_deletes_the_container(vm: Vm) -> None:
@@ -131,4 +136,4 @@ def test_destroy_deletes_the_container(vm: Vm) -> None:
     result = vm.ask("destroy", cwd=PROJECT_DIR)
 
     # then it no longer exists
-    assert (result.returncode, vm.instances(PROJECT)) == (0, [{}])
+    assert (result.returncode, vm.instances(PROJECT)) == (0, [])

@@ -18,6 +18,11 @@ BOOT_TIMEOUT_SECONDS = 300
 
 PROVISION = f"""\
 pacman -Syu --noconfirm --needed incus uv sudo
+# incus 7.6.0 opens two concurrent connections to incus-user on every CLI
+# call, whose racing user setups poison the project and break all further
+# unprivileged access (lxc/incus#4297, fixed for 7.7). Downgrade until Arch
+# ships a fixed release.
+pacman -U --noconfirm https://archive.archlinux.org/packages/i/incus/incus-7.5.1-1-x86_64.pkg.tar.zst
 grep -q '^root:' /etc/subuid || echo root:1000000:1000000000 >> /etc/subuid
 grep -q '^root:' /etc/subgid || echo root:1000000:1000000000 >> /etc/subgid
 systemctl enable incus.socket incus-user.socket
