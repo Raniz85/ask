@@ -407,7 +407,8 @@ def test_ask_exec_records_the_invocation_around_the_command(tmp_path: Path) -> N
     assert re.fullmatch(invocation_set, lines[1])
     assert re.fullmatch(invocation_set, lines[2])
     assert re.fullmatch(
-        r"exec my-project -- systemctl start user@\d+\.service", lines[3]
+        r"exec my-project --disable-stdin -- systemctl start user@\d+\.service",
+        lines[3],
     )
     assert lines[4].startswith("exec my-project ")
     assert re.fullmatch(invocation_set, lines[5])

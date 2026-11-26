@@ -61,6 +61,7 @@ def _start_satellite(container: Container, user: ResolvedUser) -> None:
         ["sh", "-c", _SATELLITE_START_SCRIPT],
         # the satellite binds its xwls wayland socket inside XDG_RUNTIME_DIR
         env=env(user, x11=False) | user_session_env(user) | {"HOME": home},
+        interactive=False,
     )
     if returncode != 0:
         logger.warning(

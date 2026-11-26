@@ -878,6 +878,21 @@ def test_exec_command_does_not_capture_or_check_the_result() -> None:
     assert "stdin" not in kwargs
 
 
+def test_exec_command_disables_stdin_when_not_interactive() -> None:
+    # given a non-interactive command to run inside the container
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+
+        # when executing it
+        container.exec_command(
+            1000, 1000, Path("/project"), ["true"], interactive=False
+        )
+
+    # then incus does not forward the caller's stdin to it
+    assert "--disable-stdin" in run.call_args.args[0]
+
+
 def test_exec_command_returns_the_commands_exit_code() -> None:
     # given a command that exits non-zero inside the container
     container = Container("my-project")
@@ -983,10 +998,19 @@ def test_run_command_runs_the_given_command_capturing_output() -> None:
         # when running it
         result = container.run_command(["pacman", "-Qq", "paru"])
 
-    # then incus exec is invoked with the command, capturing output rather
-    # than inheriting the caller's stdio
+    # then incus exec is invoked with the command, capturing output and
+    # disabling stdin rather than inheriting the caller's stdio
     run.assert_called_once_with(
-        ["incus", "exec", "my-project", "--", "pacman", "-Qq", "paru"],
+        [
+            "incus",
+            "exec",
+            "my-project",
+            "--disable-stdin",
+            "--",
+            "pacman",
+            "-Qq",
+            "paru",
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -1005,12 +1029,14 @@ def test_start_user_manager_starts_the_users_systemd_manager() -> None:
         # when starting the systemd manager of the user with uid 1000
         container.start_user_manager(1000)
 
-    # then its unit is started as root, waiting until it is up
+    # then its unit is started as root, without the caller's stdin, waiting
+    # until it is up
     run.assert_called_once_with(
         [
             "incus",
             "exec",
             "my-project",
+            "--disable-stdin",
             "--",
             "systemctl",
             "start",

@@ -642,11 +642,11 @@ def _run_checked(
     cwd: Path,
     command: list[str],
     env: dict[str, str] | None = None,
+    interactive: bool = False,
 ) -> None:
-    if env:
-        returncode = container.exec_command(uid, gid, cwd, command, env=env)
-    else:
-        returncode = container.exec_command(uid, gid, cwd, command)
+    returncode = container.exec_command(
+        uid, gid, cwd, command, env=env, interactive=interactive
+    )
     if returncode != 0:
         raise ProvisioningError(
             f"`{shlex.join(command)}` failed in container "
@@ -757,9 +757,14 @@ class AurBuilder:
         return uid, gid
 
     def _run_as_builder(
-        self, uid: int, gid: int, cwd: Path, command: list[str]
+        self,
+        uid: int,
+        gid: int,
+        cwd: Path,
+        command: list[str],
+        interactive: bool = False,
     ) -> None:
-        _run_checked(self.container, uid, gid, cwd, command)
+        _run_checked(self.container, uid, gid, cwd, command, interactive=interactive)
 
     def _builder_git_ref(self, ref: str) -> str | None:
         result = self.container.run_command(
@@ -848,7 +853,11 @@ class AurBuilder:
 
         uid, gid = self._builder_ids()
         self._run_as_builder(
-            uid, gid, _AUR_BUILD_HOME, ["paru", "-S", "--needed", *packages]
+            uid,
+            gid,
+            _AUR_BUILD_HOME,
+            ["paru", "-S", "--needed", *packages],
+            interactive=True,
         )
 
 

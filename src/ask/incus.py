@@ -249,7 +249,7 @@ class Container:
         )
 
     def run_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
-        full_command = ["incus", "exec", self.name, "--", *command]
+        full_command = ["incus", "exec", self.name, "--disable-stdin", "--", *command]
         logger.debug("executing %s", shlex.join(full_command))
         return subprocess.run(
             full_command,
@@ -264,6 +264,7 @@ class Container:
                 "incus",
                 "exec",
                 self.name,
+                "--disable-stdin",
                 "--",
                 "systemctl",
                 "start",
@@ -279,6 +280,7 @@ class Container:
         cwd: Path,
         command: list[str],
         env: dict[str, str] | None = None,
+        interactive: bool = True,
     ) -> int:
         env_args = [
             arg
@@ -296,6 +298,7 @@ class Container:
             "--cwd",
             str(cwd),
             *env_args,
+            *([] if interactive else ["--disable-stdin"]),
             "--",
             *command,
         ]

@@ -876,6 +876,9 @@ def _container_without_paru(
     return run_command
 
 
+_NON_INTERACTIVE = {"env": None, "interactive": False}
+
+
 def _exec_commands(exec_command: MagicMock) -> list[list[str]]:
     return [c.args[3] for c in exec_command.call_args_list]
 
@@ -1047,6 +1050,19 @@ def test_provision_npm_packages_installs_them_globally_as_root() -> None:
     ]
     for c in exec_command.call_args_list:
         assert c.args[:2] == (0, 0)
+
+
+def test_provisioning_commands_do_not_read_the_terminal() -> None:
+    # given a provisioner
+    provisioner = Provisioner(Container("my-project"))
+
+    # when provisioning a command that needs no input
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.provision_npm_packages(["opencode-ai"])
+
+    # then it runs without the terminal, so it cannot consume input meant for
+    # later prompts
+    assert exec_command.call_args.kwargs.get("interactive") is False
 
 
 def test_provision_npm_packages_does_nothing_without_packages() -> None:
@@ -1461,10 +1477,23 @@ def test_ensure_paru_clones_reviews_and_builds_paru_bin_when_approved() -> None:
                     "https://aur.archlinux.org/paru-bin.git",
                     str(_CLONE),
                 ],
+                **_NON_INTERACTIVE,
             ),
-            call(1001, 1001, _CLONE, ["cat", "PKGBUILD"]),
-            call(1001, 1001, _CLONE, ["git", "update-ref", "AUR_SEEN", "HEAD"]),
-            call(1001, 1001, _CLONE, ["makepkg", "-si", "--noconfirm"]),
+            call(1001, 1001, _CLONE, ["cat", "PKGBUILD"], **_NON_INTERACTIVE),
+            call(
+                1001,
+                1001,
+                _CLONE,
+                ["git", "update-ref", "AUR_SEEN", "HEAD"],
+                **_NON_INTERACTIVE,
+            ),
+            call(
+                1001,
+                1001,
+                _CLONE,
+                ["makepkg", "-si", "--noconfirm"],
+                **_NON_INTERACTIVE,
+            ),
         ]
     )
 
@@ -1615,7 +1644,9 @@ def test_ensure_paru_reports_failing_build_steps(
     # given a container without paru where one build step fails
     aur_builder = AurBuilder(Container("my-project"))
 
-    def exec_command(uid: int, gid: int, cwd: Path, command: list[str]) -> int:
+    def exec_command(
+        uid: int, gid: int, cwd: Path, command: list[str], **kwargs: object
+    ) -> int:
         return 128 if command[0] == failing_command else 0
 
     with (
@@ -1698,6 +1729,8 @@ def test_install_packages_builds_the_builder_and_paru_then_installs() -> None:
         1001,
         Path("/home/aur"),
         ["paru", "-S", "--needed", "yay-bin", "some-other-pkg"],
+        env=None,
+        interactive=True,
     )
 
 
@@ -1985,6 +2018,7 @@ def test_mise_trust_shows_the_config_and_trusts_it_when_approved(
             project_dir,
             ["mise", "trust", str(project_dir / ".config/mise/config.toml")],
             env={"HOME": "/home/raniz"},
+            interactive=False,
         ),
         call(
             1000,
@@ -1992,6 +2026,7 @@ def test_mise_trust_shows_the_config_and_trusts_it_when_approved(
             project_dir,
             ["mise", "trust", str(project_dir / "mise.toml")],
             env={"HOME": "/home/raniz"},
+            interactive=False,
         ),
     ]
 
@@ -2121,7 +2156,12 @@ def test_mise_install_installs_the_tools_as_the_user_in_the_project(
     # then mise installs them as the user with their home directory, from the
     # project directory
     exec_command.assert_called_once_with(
-        1000, 1000, project_dir, ["mise", "install"], env={"HOME": "/home/raniz"}
+        1000,
+        1000,
+        project_dir,
+        ["mise", "install"],
+        env={"HOME": "/home/raniz"},
+        interactive=False,
     )
 
 

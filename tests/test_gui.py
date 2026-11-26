@@ -250,6 +250,21 @@ def test_acquire_starts_the_x11_bridge_when_it_is_installed(
     )
 
 
+def test_acquire_starts_the_x11_bridge_without_the_terminal(
+    tmp_path: Path,
+) -> None:
+    # given a container with xwayland-satellite installed, and no active gui
+    # sessions
+    container = _mock_container(0, satellite_installed=True)
+
+    # when acquiring a gui session
+    with patch("ask.gui._lock_path", return_value=tmp_path / "lock"):
+        acquire(container, _MOUNT, _USER)
+
+    # then the background bridge does not hold on to the caller's stdin
+    assert container.exec_command.call_args.kwargs.get("interactive") is False
+
+
 def test_acquire_does_not_start_the_x11_bridge_when_it_is_not_installed(
     tmp_path: Path,
 ) -> None:
