@@ -53,6 +53,35 @@ class SetupStep:
     description: str
     command: list[str]
     done: Callable[[], bool]
+    # Optional standard input fed to the command, e.g. a preseed for an
+    # interactive wizard; None runs it without piped input.
+    input: str | None = None
+
+
+# Answers every question `incus admin init` asks with its default: no
+# clustering, a dir-backed storage pool, a bridge network with DHCP/NAT,
+# no remote access and no MAAS. Fed to `incus admin init --preseed` so the
+# initialisation never blocks on a terminal.
+INCUS_PRESEED = """\
+config: {}
+networks:
+- name: incusbr0
+  type: bridge
+  config:
+    ipv4.address: auto
+    ipv6.address: none
+storage_pools:
+- name: default
+  driver: dir
+profiles:
+- name: default
+  devices:
+    root:
+      path: /
+      pool: default
+      type: disk
+cluster: none
+"""
 
 
 def project_name(uid: int) -> str:
@@ -136,8 +165,9 @@ def _sources_file_matches(path: Path, line: str) -> bool:
 def _init_incus_step() -> SetupStep:
     return SetupStep(
         description="Initialise Incus on this machine.",
-        command=["sudo", "incus", "admin", "init"],
+        command=["sudo", "incus", "admin", "init", "--preseed"],
         done=lambda: _command_succeeds(["incus", "list"]),
+        input=INCUS_PRESEED,
     )
 
 
@@ -253,7 +283,7 @@ def run_step(step: SetupStep, confirm: Callable[[str], bool]) -> bool:
         print("Skipped.")
         return False
     try:
-        subprocess.run(step.command, check=True)
+        subprocess.run(step.command, check=True, input=step.input, text=True)
     except FileNotFoundError as error:
         raise SetupError(
             f"Command {step.command[0]!r} not found. Is it installed?"

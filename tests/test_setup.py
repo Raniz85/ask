@@ -44,7 +44,35 @@ def test_run_step_shows_full_command_and_asks_before_running(
     assert shlex.join(step.command) in out
     assert "sudo usermod -v 100000-1099999 raniz" in out
     run.assert_called_once_with(
-        ["sudo", "usermod", "-v", "100000-1099999", "raniz"], check=True
+        ["sudo", "usermod", "-v", "100000-1099999", "raniz"],
+        check=True,
+        input=None,
+        text=True,
+    )
+    assert ran is True
+
+
+def test_run_step_pipes_the_steps_input_to_the_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # given a step that feeds a preseed to an interactive command
+    step = SetupStep(
+        description="do a thing",
+        command=["sudo", "incus", "admin", "init", "--preseed"],
+        done=lambda: False,
+        input="cluster: none\n",
+    )
+
+    # when running it with a confirmation that accepts
+    with patch("subprocess.run") as run:
+        ran = run_step(step, confirm=lambda prompt: True)
+
+    # then the preseed was piped to the command's standard input
+    run.assert_called_once_with(
+        ["sudo", "incus", "admin", "init", "--preseed"],
+        check=True,
+        input="cluster: none\n",
+        text=True,
     )
     assert ran is True
 
@@ -149,7 +177,10 @@ def test_run_setup_creates_example_config_and_runs_all_steps(
     out = capsys.readouterr().out
     assert str(example) in out
     run.assert_called_once_with(
-        ["sudo", "incus", "project", "create", "user-1000"], check=True
+        ["sudo", "incus", "project", "create", "user-1000"],
+        check=True,
+        input=None,
+        text=True,
     )
 
 
@@ -362,10 +393,17 @@ def test_incus_install_steps_for_arch_install_and_init_via_pacman() -> None:
     # when building the incus installation steps for Arch Linux
     steps = incus_install_steps("arch")
 
-    # then incus is installed with pacman and initialised with incus admin init
+    # then incus is installed with pacman and initialised non-interactively
+    # with a preseed covering the default storage pool, network and profile
     commands = [step.command for step in steps]
     assert ["sudo", "pacman", "-S", "--needed", "--noconfirm", "incus"] in commands
-    assert ["sudo", "incus", "admin", "init"] in commands
+    init = next(step for step in steps if "init" in step.command)
+    assert init.command == ["sudo", "incus", "admin", "init", "--preseed"]
+    assert init.input is not None
+    assert "cluster: none" in init.input
+    assert "driver: dir" in init.input
+    assert "ipv4.address: auto" in init.input
+    assert "pool: default" in init.input
 
 
 def test_incus_install_steps_are_empty_for_unsupported_distributions() -> None:
@@ -398,7 +436,9 @@ def test_incus_install_steps_for_debian_use_the_zabbly_repo_and_apt() -> None:
     assert ["sudo", "apt-get", "install", "-y", "incus"] in [
         step.command for step in steps
     ]
-    assert ["sudo", "incus", "admin", "init"] in [step.command for step in steps]
+    assert ["sudo", "incus", "admin", "init", "--preseed"] in [
+        step.command for step in steps
+    ]
 
     # and the steps run in dependency order: key, repo, update, install, init
     order = [

@@ -29,8 +29,9 @@ def test_setup_configures_incus_and_writes_a_default_flavor(vm: Vm) -> None:
     # given a user without any Ask configuration
     uid = vm.run(["id", "-u"]).stdout.strip()
 
-    # when running ask setup and accepting every step
-    result = vm.ask("setup", cwd=HOME, input="y\n" * 5, terminal=True)
+    # when running ask setup and accepting every step; the host incus is
+    # already initialised by the fixture, so six prompts remain
+    result = vm.ask("setup", cwd=HOME, input="y\n" * 6, terminal=True)
 
     # then the default flavour is written, Incus uses the user's project by
     assert (
