@@ -2710,6 +2710,13 @@ _CHANGED_WARNING = (
     "ask: warning: configuration has changed since the container was last "
     "converged; run `ask converge` to apply it\n"
 )
+_STALE_PROMPT = (
+    "The container has not been converged in over a week. Converge now? [Y/n] "
+)
+_STALE_WARNING = (
+    "ask: warning: the container has not been converged in over a week; "
+    "run `ask converge` to update it\n"
+)
 
 
 def _project(tmp_path: Path) -> tuple[Path, Path]:
