@@ -473,6 +473,22 @@ def _converge_container(
     if services:
         provisioner.provision_services(services)
 
+    # Remove extensions previous converges installed that the configuration
+    # no longer lists, then record the desired ones
+    tracked_extensions = [
+        f"{name}:{extension}"
+        for name, extensions in resolved.agent_extensions.items()
+        for extension in extensions
+    ]
+    stale_extensions = incus.stale_packages(
+        container.get_managed_extensions(), tracked_extensions
+    )
+    for tracked_extension in stale_extensions:
+        agent_name, _, extension = tracked_extension.partition(":")
+        binary = agents.resolve(agent_name).binary
+        provisioner.remove_pi_extensions(user, [extension], binary=binary)
+    container.set_managed_extensions(tracked_extensions)
+
     provisioner.provision_instance_env(resolved.instance_env)
     provisioner.provision_idle_shutdown(distribution, user)
 

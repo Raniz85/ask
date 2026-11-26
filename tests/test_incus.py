@@ -446,6 +446,70 @@ def test_set_managed_packages_stores_an_empty_value_for_no_packages() -> None:
     )
 
 
+def test_get_managed_extensions_returns_empty_list_when_unset() -> None:
+    # given a container with no previously tracked extensions
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="\n"
+        )
+
+        # when reading the previously managed extensions
+        extensions = container.get_managed_extensions()
+
+    # then there are none
+    assert extensions == []
+
+
+def test_get_managed_extensions_returns_the_tracked_extensions() -> None:
+    # given a container with previously tracked extensions
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="pi:@foo/bar,oh-my-pi:npm:@baz/qux\n"
+        )
+
+        # when reading the previously managed extensions
+        extensions = container.get_managed_extensions()
+
+    # then the tracked extensions are returned
+    assert extensions == ["pi:@foo/bar", "oh-my-pi:npm:@baz/qux"]
+    run.assert_called_once_with(
+        ["incus", "config", "get", "my-project", "user.ask.extensions"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_set_managed_extensions_stores_the_given_extensions() -> None:
+    # given a list of extensions to track
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when storing them as managed
+        container.set_managed_extensions(["pi:@foo/bar"])
+
+    # then they are stored, comma-separated, under the custom config key
+    run.assert_called_once_with(
+        ["incus", "config", "set", "my-project", "user.ask.extensions=pi:@foo/bar"],
+        check=True,
+    )
+
+
+def test_set_managed_extensions_stores_an_empty_value_for_no_extensions() -> None:
+    # given no extensions to track
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        # when storing them as managed
+        container.set_managed_extensions([])
+
+    # then the custom config key is cleared
+    run.assert_called_once_with(
+        ["incus", "config", "set", "my-project", "user.ask.extensions="],
+        check=True,
+    )
+
+
 def test_add_gui_device_adds_a_shifted_disk_device_with_the_gui_prefix() -> None:
     # given a container and a gui mount
     container = Container("my-project")

@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import subprocess
 from collections.abc import Callable
@@ -934,6 +935,91 @@ def test_provision_pi_extensions_raises_when_an_install_fails() -> None:
         pytest.raises(ProvisioningError, match=r"`pi install @foo/bar`"),
     ):
         provisioner.provision_pi_extensions(_provisioner_user(), ["@foo/bar"])
+
+
+def test_remove_pi_extensions_removes_each_extension_as_the_user() -> None:
+    # given a provisioner, a resolved user, and pi extensions
+    provisioner = Provisioner(Container("my-project"))
+    user = _provisioner_user()
+
+    # when removing the extensions
+    with patch.object(Container, "exec_command", return_value=0) as exec_command:
+        provisioner.remove_pi_extensions(
+            user, ["@foo/bar", "https://example.com/ext.git"]
+        )
+
+    # then `pi remove` runs for each extension, as the user, in their home
+    # directory, with HOME set
+    assert _exec_commands(exec_command) == [
+        ["pi", "remove", "@foo/bar"],
+        ["pi", "remove", "https://example.com/ext.git"],
+    ]
+    for c in exec_command.call_args_list:
+        assert c.args[:3] == (1000, 1000, Path("/home/raniz"))
+        assert c.kwargs["env"] == {"HOME": "/home/raniz"}
+
+
+def test_remove_pi_extensions_does_nothing_without_extensions() -> None:
+    # given a provisioner, a resolved user, and no extensions
+    provisioner = Provisioner(Container("my-project"))
+
+    # when removing them
+    with patch.object(Container, "exec_command") as exec_command:
+        provisioner.remove_pi_extensions(_provisioner_user(), [])
+
+    # then no command runs in the container
+    exec_command.assert_not_called()
+
+
+def test_remove_pi_extensions_raises_when_a_removal_fails() -> None:
+    # given a provisioner, a resolved user, an extension, and a failing removal
+    provisioner = Provisioner(Container("my-project"))
+
+    # when removing the extension
+    with (
+        patch.object(Container, "exec_command", return_value=1),
+        pytest.raises(ProvisioningError, match=r"`pi remove @foo/bar`"),
+    ):
+        provisioner.remove_pi_extensions(_provisioner_user(), ["@foo/bar"])
+
+
+def test_remove_pi_extensions_uninstalls_omp_plugins_by_their_installed_name() -> None:
+    # given a provisioner, a resolved user, and an oh-my-pi extension whose
+    # plugin omp installed under a bare name
+    provisioner = Provisioner(Container("my-project"))
+    user = _provisioner_user()
+    package_json = json.dumps({"dependencies": {"@foo/bar": "npm:@foo/bar@^1.0.0"}})
+
+    # when removing the extension
+    with (
+        patch.object(
+            Container, "run_command", return_value=_completed(0, package_json)
+        ),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+    ):
+        provisioner.remove_pi_extensions(user, ["npm:@foo/bar"], binary="omp")
+
+    # then omp uninstalls the plugin by its installed name
+    assert _exec_commands(exec_command) == [["omp", "plugin", "uninstall", "@foo/bar"]]
+
+
+def test_remove_pi_extensions_uninstalls_omp_plugins_by_the_derived_name_when_the_store_is_missing() -> (
+    None
+):
+    # given a provisioner, a resolved user, and an oh-my-pi extension, with
+    # omp's plugin store missing from the container
+    provisioner = Provisioner(Container("my-project"))
+    user = _provisioner_user()
+
+    # when removing the extension
+    with (
+        patch.object(Container, "run_command", return_value=_completed(1)),
+        patch.object(Container, "exec_command", return_value=0) as exec_command,
+    ):
+        provisioner.remove_pi_extensions(user, ["npm:@foo/bar@1.2.3"], binary="omp")
+
+    # then the plugin name is derived from the source, version stripped
+    assert _exec_commands(exec_command) == [["omp", "plugin", "uninstall", "@foo/bar"]]
 
 
 def test_split_npm_packages_separates_npm_prefixed_packages() -> None:

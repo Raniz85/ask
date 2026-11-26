@@ -101,12 +101,12 @@ Known IDEs: `clion`, `code`, `datagrip`, `goland`, `idea`, `phpstorm`, `pycharm`
 
 _Per-agent settings (`[layers.<layer>.agents.<name>]`, or `true`/`false` shorthand):_
 
-| Key          | Type                       | Required | Description                                                                                            |
-| ------------ | -------------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `enabled`    | boolean                    | no       | Whether the agent is installed; `false` removes an agent enabled in a lower layer. Defaults to `true`. |
-| `options`    | table of boolean           | no       | Per-agent options, e.g. `auth = false` skips mounting the agent's credentials.                         |
-| `extensions` | list                       | no       | Extensions for the agent to install; only `pi` and `oh-my-pi` support extensions.                      |
-| `env`        | table of string or boolean | no       | Environment variables for this agent; `false` unsets the variable.                                     |
+| Key          | Type                       | Required | Description                                                                                                                                              |
+| ------------ | -------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`    | boolean                    | no       | Whether the agent is installed; `false` removes an agent enabled in a lower layer. Defaults to `true`.                                                   |
+| `options`    | table of boolean           | no       | Per-agent options, e.g. `auth = false` skips mounting the agent's credentials.                                                                           |
+| `extensions` | list                       | no       | Extensions for the agent to install; only `pi` and `oh-my-pi` support extensions. Extensions removed from the configuration are uninstalled on converge. |
+| `env`        | table of string or boolean | no       | Environment variables for this agent; `false` unsets the variable.                                                                                       |
 
 _Layer-level agent table (`[layers.<layer>.agents]`):_
 

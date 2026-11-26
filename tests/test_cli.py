@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import ANY, MagicMock, Mock, call, patch
 
 import pytest
 
@@ -1201,6 +1201,81 @@ def test_converge_removes_stale_pipx_packages_with_pipx(tmp_path: Path) -> None:
     # manager
     provisioner.remove_pipx_packages.assert_called_once_with(["black"])
     provisioner.remove_packages.assert_not_called()
+
+
+def test_converge_removes_stale_pi_extensions(tmp_path: Path) -> None:
+    # given a flavour no longer declaring an extension for pi the container
+    # was previously managing
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + "[layers.base.agents]\npi = true\n"
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+        container.get_managed_extensions.return_value = ["pi:@foo/bar"]
+
+        converge()
+
+    # then the stale extension is removed with pi, and the now-empty desired
+    # list is recorded
+    provisioner_cls.return_value.remove_pi_extensions.assert_called_once_with(
+        ANY, ["@foo/bar"], binary="pi"
+    )
+    container.set_managed_extensions.assert_called_once_with([])
+
+
+def test_converge_removes_stale_omp_extensions_with_the_omp_binary(
+    tmp_path: Path,
+) -> None:
+    # given a flavour enabling oh-my-pi with one extension, and a container
+    # that was previously managing an extension no longer declared
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(
+        _FLAVOR
+        + '[layers.base.agents]\noh-my-pi = { extensions = ["npm:@foo/keep"] }\n'
+        + '[user]\nname = "raniz"\nuid = 1000\n'
+    )
+
+    # when converging from within that project directory
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner") as provisioner_cls,
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.get_managed_packages.return_value = []
+        container.get_managed_extensions.return_value = [
+            "oh-my-pi:npm:@foo/old",
+            "oh-my-pi:npm:@foo/keep",
+        ]
+
+        converge()
+
+    # then only the stale extension is removed, with omp, and the desired
+    # list is recorded
+    provisioner_cls.return_value.remove_pi_extensions.assert_called_once_with(
+        ANY, ["npm:@foo/old"], binary="omp"
+    )
+    container.set_managed_extensions.assert_called_once_with(["oh-my-pi:npm:@foo/keep"])
 
 
 def test_converge_does_not_install_pi_standalone_on_arch(tmp_path: Path) -> None:

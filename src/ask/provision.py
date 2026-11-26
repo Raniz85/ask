@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import shlex
 import sys
@@ -338,6 +339,32 @@ class Provisioner:
                 env=home_env(user),
             )
 
+    def remove_pi_extensions(
+        self, user: ResolvedUser, extensions: list[str], binary: str = "pi"
+    ) -> None:
+        if not extensions:
+            return
+        home = Path(f"/home/{user.name}")
+        for extension in extensions:
+            command = (
+                [
+                    "omp",
+                    "plugin",
+                    "uninstall",
+                    _omp_plugin_name(self.container, user, extension),
+                ]
+                if binary == "omp"
+                else [binary, "remove", extension]
+            )
+            _run_checked(
+                self.container,
+                user.uid,
+                user.gid,
+                home,
+                command,
+                env=home_env(user),
+            )
+
     def fix_bind_mount_ownership(
         self, bind_mounts: list[Path], user: ResolvedUser
     ) -> None:
@@ -625,6 +652,31 @@ def _run_checked(
             f"`{shlex.join(command)}` failed in container "
             f"{container.name!r} with exit status {returncode}."
         )
+
+
+def _omp_plugin_name(
+    container: incus.Container, user: ResolvedUser, source: str
+) -> str:
+    # omp records installed plugins by name in ~/.omp/plugins/package.json,
+    # mapping plugin name to install source; `omp plugin uninstall` wants
+    # that name, not the source
+    unprefixed = source.removeprefix("npm:")
+    base, sep, tail = unprefixed.rpartition("@")
+    # strip an explicit version, keeping the scope of a scoped name
+    name = base if sep and "/" not in tail else unprefixed
+    result = container.run_command(
+        ["cat", str(Path(f"/home/{user.name}") / ".omp/plugins/package.json")]
+    )
+    try:
+        dependencies = json.loads(result.stdout)["dependencies"]
+        return next(
+            k for k, recorded in dependencies.items() if k == name or recorded == source
+        )
+    except (json.JSONDecodeError, KeyError, StopIteration, TypeError):
+        # shortcut: omp's plugin store is gone (fresh home) or the source is
+        # a local path (linked plugins are not recorded in package.json),
+        # when to upgrade: also read omp-plugins.lock.json
+        return name
 
 
 _AUR_BUILD_USER = "aur"

@@ -24,6 +24,7 @@ _COMMON_CONFIG = {
 }
 
 _MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
+_MANAGED_EXTENSIONS_CONFIG_KEY = "user.ask.extensions"
 _GUI_SESSIONS_CONFIG_KEY = "user.ask.gui_sessions"
 _CONVERGED_VERSION_CONFIG_KEY = "user.ask.converged.version"
 _CONVERGED_HASH_CONFIG_KEY = "user.ask.converged.hash"
@@ -322,6 +323,25 @@ class Container:
         )
         value = result.stdout.strip()
         return value.split(",") if value else []
+
+    def get_managed_extensions(self) -> list[str]:
+        result = _incus(
+            ["incus", "config", "get", self.name, _MANAGED_EXTENSIONS_CONFIG_KEY],
+            capture=True,
+        )
+        value = result.stdout.strip()
+        return value.split(",") if value else []
+
+    def set_managed_extensions(self, extensions: list[str]) -> None:
+        _incus(
+            [
+                "incus",
+                "config",
+                "set",
+                self.name,
+                f"{_MANAGED_EXTENSIONS_CONFIG_KEY}={','.join(extensions)}",
+            ],
+        )
 
     def set_managed_packages(self, packages: list[str]) -> None:
         _incus(

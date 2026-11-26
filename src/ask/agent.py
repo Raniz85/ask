@@ -308,7 +308,7 @@ class AgentSettings:
     extensions: Annotated[
         list[StrictStr],
         Field(
-            description="Extensions for the agent to install; only `pi` and `oh-my-pi` support extensions."
+            description="Extensions for the agent to install; only `pi` and `oh-my-pi` support extensions. Extensions removed from the configuration are uninstalled on converge."
         ),
     ] = field(default_factory=list)
     env: Annotated[
