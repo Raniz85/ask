@@ -128,6 +128,15 @@ class InstanceSnapshot:
             return None
         return Fingerprint(version=version, config_hash=config_hash)
 
+    def converged_at(self) -> datetime | None:
+        recorded = self.config.get(_CONVERGED_AT_CONFIG_KEY)
+        if not recorded:
+            return None
+        try:
+            return datetime.fromisoformat(recorded)
+        except ValueError:
+            return None
+
 
 def _diff_devices(
     existing: set[str], desired: dict[str, Mount]

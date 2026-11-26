@@ -708,6 +708,45 @@ def test_converged_fingerprint_is_the_recorded_version_and_hash() -> None:
     assert fingerprint == Fingerprint(version="0.1.0", config_hash="abc123")
 
 
+def test_converged_at_is_none_when_never_recorded() -> None:
+    # given a snapshot of a container without a recorded convergence time
+    snapshot = InstanceSnapshot(status="Running", config={})
+
+    # when reading the time of the last convergence
+    converged_at = snapshot.converged_at()
+
+    # then there is none
+    assert converged_at is None
+
+
+def test_converged_at_is_none_when_not_a_timestamp() -> None:
+    # given a snapshot with an unreadable convergence time
+    snapshot = InstanceSnapshot(
+        status="Running", config={"user.ask.converged.at": "not a timestamp"}
+    )
+
+    # when reading the time of the last convergence
+    converged_at = snapshot.converged_at()
+
+    # then there is none
+    assert converged_at is None
+
+
+def test_converged_at_is_the_recorded_time() -> None:
+    # given a snapshot with a recorded convergence time
+    recorded = datetime(2026, 11, 9, 12, 30, tzinfo=UTC)
+    snapshot = InstanceSnapshot(
+        status="Running",
+        config={"user.ask.converged.at": recorded.isoformat()},
+    )
+
+    # when reading the time of the last convergence
+    converged_at = snapshot.converged_at()
+
+    # then the recorded time is returned
+    assert converged_at == recorded
+
+
 def test_set_converged_state_stores_every_part_of_the_state_at_once() -> None:
     # given the state of a convergence
     container = Container("my-project")

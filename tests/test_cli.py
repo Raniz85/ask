@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, Mock, call, patch
 
@@ -2747,6 +2747,23 @@ _STALE_SNAPSHOT = InstanceSnapshot(
 )
 
 
+def _old_converged_snapshot(project_dir: Path, age: timedelta) -> InstanceSnapshot:
+    converged = fingerprint(
+        effective_configuration(
+            ResolvedManifest(Manifest(), _PROJECT_FLAVOR, project_dir)
+        )
+    )
+    at = datetime.now(UTC) - age
+    return InstanceSnapshot(
+        status="Running",
+        config={
+            "user.ask.converged.version": converged.version,
+            "user.ask.converged.hash": converged.config_hash,
+            "user.ask.converged.at": at.isoformat(),
+        },
+    )
+
+
 def _enter_with(
     project_dir: Path,
     config_path: Path,
@@ -2918,6 +2935,116 @@ def test_enter_skips_converging_a_changed_configuration_when_requested(
     # when entering the container with changes not to be converged
     _, input_mock, converge_mock = _enter_with(
         project_dir, config_path, _STALE_SNAPSHOT, tty=True, converge_changed=False
+    )
+
+    # then nothing is asked, converged or warned about
+    input_mock.assert_not_called()
+    converge_mock.assert_not_called()
+    assert capsys.readouterr().err == ""
+
+
+def test_enter_asks_to_converge_a_container_not_converged_in_over_a_week(
+    tmp_path: Path,
+) -> None:
+    # given a project whose configuration is unchanged but whose container was
+    # last converged eight days ago
+    project_dir, config_path = _project(tmp_path)
+    snapshot = _old_converged_snapshot(project_dir, age=timedelta(days=8))
+
+    # when entering the container from a terminal
+    _, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, snapshot, tty=True
+    )
+
+    # then the user is asked to converge, and it happens on the default answer
+    input_mock.assert_called_once_with(_STALE_PROMPT)
+    converge_mock.assert_called_once_with()
+
+
+def test_enter_does_not_ask_to_converge_a_container_converged_six_days_ago(
+    tmp_path: Path,
+) -> None:
+    # given a project whose configuration is unchanged and whose container was
+    # last converged six days ago
+    project_dir, config_path = _project(tmp_path)
+    snapshot = _old_converged_snapshot(project_dir, age=timedelta(days=6))
+
+    # when entering the container from a terminal
+    _, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, snapshot, tty=True
+    )
+
+    # then nothing is asked or converged
+    input_mock.assert_not_called()
+    converge_mock.assert_not_called()
+
+
+def test_enter_does_not_ask_twice_for_a_never_converged_container(
+    tmp_path: Path,
+) -> None:
+    # given a project whose container has no recorded convergence at all
+    project_dir, config_path = _project(tmp_path)
+    snapshot = InstanceSnapshot(status="Running", config={})
+
+    # when entering the container from a terminal
+    _, input_mock, _ = _enter_with(project_dir, config_path, snapshot, tty=True)
+
+    # then the user is only asked once, about the missing convergence
+    input_mock.assert_called_once_with(_CHANGED_PROMPT)
+
+
+def test_enter_warns_about_a_container_not_converged_in_over_a_week_without_a_terminal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a project whose configuration is unchanged but whose container was
+    # last converged eight days ago
+    project_dir, config_path = _project(tmp_path)
+    snapshot = _old_converged_snapshot(project_dir, age=timedelta(days=8))
+
+    # when entering the container without a terminal
+    container, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, snapshot, tty=False
+    )
+
+    # then nothing is asked or converged, a warning is printed, and the shell
+    # is still run
+    input_mock.assert_not_called()
+    converge_mock.assert_not_called()
+    assert capsys.readouterr().err == _STALE_WARNING
+    container.exec_command.assert_called_once_with(
+        1000, 1000, project_dir, ["bash"], env=_USER_ENV | FAKE_SSH_ENV
+    )
+
+
+def test_enter_converges_a_container_not_converged_in_over_a_week_when_requested(
+    tmp_path: Path,
+) -> None:
+    # given a project whose configuration is unchanged but whose container was
+    # last converged eight days ago
+    project_dir, config_path = _project(tmp_path)
+    snapshot = _old_converged_snapshot(project_dir, age=timedelta(days=8))
+
+    # when entering the container with changes to be converged
+    _, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, snapshot, tty=True, converge_changed=True
+    )
+
+    # then the container is converged without asking
+    input_mock.assert_not_called()
+    converge_mock.assert_called_once_with()
+
+
+def test_enter_skips_a_container_not_converged_in_over_a_week_when_requested(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given a project whose configuration is unchanged but whose container was
+    # last converged eight days ago
+    project_dir, config_path = _project(tmp_path)
+    snapshot = _old_converged_snapshot(project_dir, age=timedelta(days=8))
+
+    # when entering the container with changes not to be converged
+    _, input_mock, converge_mock = _enter_with(
+        project_dir, config_path, snapshot, tty=True, converge_changed=False
     )
 
     # then nothing is asked, converged or warned about

@@ -7,7 +7,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, cast
 
@@ -47,6 +47,10 @@ logger = logging.getLogger(__name__)
 # in-instance idle watch keeps the instance up while Ask is using it. Must
 # stay well below the idle threshold in ask.idle.
 _INVOCATION_REFRESH_INTERVAL = 60
+
+# How long a container may go without converging before Ask asks to converge
+# it again even when its configuration has not changed.
+_CONVERGENCE_MAX_AGE = timedelta(weeks=1)
 
 # Command-specific arguments for CLI
 CreateMissing = Annotated[
@@ -98,6 +102,14 @@ CHANGED_PROMPT = (
 CHANGED_WARNING = (
     "ask: warning: configuration has changed since the container was last "
     "converged; run `ask converge` to apply it"
+)
+
+STALE_PROMPT = (
+    "The container has not been converged in over a week. Converge now? [Y/n] "
+)
+STALE_WARNING = (
+    "ask: warning: the container has not been converged in over a week; "
+    "run `ask converge` to update it"
 )
 
 
@@ -862,6 +874,28 @@ def _configuration_changed(
     return changed
 
 
+def _convergence_is_stale(snapshot: incus.InstanceSnapshot) -> bool:
+    converged_at = snapshot.converged_at()
+    if converged_at is None:
+        return False
+    stale = datetime.now(UTC) - converged_at > _CONVERGENCE_MAX_AGE
+    logger.debug(
+        "container converged at %s: convergence %s",
+        converged_at.isoformat(),
+        "stale" if stale else "fresh",
+    )
+    return stale
+
+
+def _should_converge_stale(converge_changed: bool | None) -> bool:
+    if converge_changed is not None:
+        return converge_changed
+    if not sys.stdin.isatty():
+        print(STALE_WARNING, file=sys.stderr)
+        return False
+    return _confirm(STALE_PROMPT)
+
+
 def _should_converge(converge_changed: bool | None) -> bool:
     if converge_changed is not None:
         return converge_changed
@@ -888,6 +922,14 @@ def _converged_container(
                     converge()
                 else:
                     logger.debug("skipping convergence of container %r", container.name)
+            elif _convergence_is_stale(snapshot):
+                if _should_converge_stale(converge_changed):
+                    logger.debug("converging stale container %r", container.name)
+                    converge()
+                else:
+                    logger.debug(
+                        "skipping convergence of stale container %r", container.name
+                    )
     return container
 
 
