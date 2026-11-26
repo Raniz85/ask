@@ -1685,3 +1685,52 @@ def test_last_invocation_is_none_when_not_a_timestamp() -> None:
 
     # then there is no last invocation
     assert snapshot.last_invocation() is None
+
+
+def test_flavour_reads_the_recorded_flavour() -> None:
+    # given a snapshot with a recorded flavour and layers
+    snapshot = InstanceSnapshot(
+        status="Running",
+        config={
+            "user.ask.flavour": "arch",
+            "user.ask.layers": "base,work",
+        },
+    )
+
+    # then the flavour name and layer names are exposed
+    assert snapshot.flavour() == "arch"
+    assert snapshot.layers() == ["base", "work"]
+
+
+def test_flavour_and_layers_are_none_when_never_recorded() -> None:
+    # given a snapshot without recorded flavour metadata
+    snapshot = InstanceSnapshot(status="Running", config={})
+
+    # then there is no flavour and no layers
+    assert snapshot.flavour() is None
+    assert snapshot.layers() == []
+
+
+def test_set_flavour_stores_the_flavour_and_layers_under_user_keys() -> None:
+    # given a container, a flavour name and its active layers
+    container = Container("my-project")
+    with patch("ask.incus.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        # when recording the flavour metadata
+        container.set_flavour("arch", ["base", "work"])
+
+    # then both are stored as container config under ask keys, in one call
+    run.assert_called_once_with(
+        [
+            "incus",
+            "config",
+            "set",
+            "my-project",
+            "user.ask.flavour=arch",
+            "user.ask.layers=base,work",
+        ],
+        check=True,
+    )

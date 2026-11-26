@@ -69,7 +69,7 @@ def resolve_project(
     flavors_dir: Path, cfg: Config, m: Manifest, project_dir: Path
 ) -> ResolvedManifest:
     flavor_name, flavor = config.select_flavor(cfg, project_dir)
-    resolved = ResolvedManifest(m, flavor, project_dir)
+    resolved = ResolvedManifest(m, flavor, flavor_name, project_dir)
     problems: list[str] = []
     for layer_name in resolved.layer_names:
         problems += _missing_bind_mounts(

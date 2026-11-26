@@ -147,7 +147,7 @@ def test_resolve_project_resolves_the_manifest_against_the_selected_flavor(
     )
 
     # then the manifest is resolved against that flavour, for the project
-    assert resolved == ResolvedManifest(m, flavor, tmp_path)
+    assert resolved == ResolvedManifest(m, flavor, "arch", tmp_path)
 
 
 def test_resolve_project_reports_projects_no_flavor_applies_to(

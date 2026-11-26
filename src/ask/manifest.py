@@ -112,6 +112,7 @@ class _MergedAgent:
 class ResolvedManifest:
     manifest: Manifest
     flavor: Flavor
+    flavor_name: str
     project_dir: Path
 
     def _matched_files(self, layer: Layer) -> list[str] | None:

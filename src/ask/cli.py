@@ -386,6 +386,8 @@ def ls() -> None:
     table.add_column("NAME")
     table.add_column("STATUS")
     table.add_column("PATH")
+    table.add_column("FLAVOUR")
+    table.add_column("LAYERS")
     table.add_column("CREATED")
     table.add_column("LAST CONVERGE")
     table.add_column("LAST RUN")
@@ -397,6 +399,8 @@ def ls() -> None:
             name,
             snapshot.status,
             str(path) if path else "-",
+            snapshot.flavour() or "-",
+            ",".join(snapshot.layers()) or "-",
             _format_timestamp(snapshot.created_at),
             _format_datetime(converged_at) if converged_at else "never",
             _format_datetime(invoked_at) if invoked_at else "never",
@@ -579,6 +583,7 @@ def _converge_container(
     configuration = convergence.effective_configuration(resolved)
     fingerprint = convergence.fingerprint(configuration)
     container.set_project_path(project_dir)
+    container.set_flavour(resolved.flavor_name, resolved.layer_names)
     container.set_converged_state(
         incus.ConvergedState(
             fingerprint=fingerprint,

@@ -223,7 +223,7 @@ def _resolved(
     project_dir: Path = _NO_PROJECT_FILES,
 ) -> ResolvedManifest:
     flavor = Flavor(distribution="arch", layers=layers)
-    return ResolvedManifest(manifest or Manifest(), flavor, project_dir)
+    return ResolvedManifest(manifest or Manifest(), flavor, "test", project_dir)
 
 
 def test_layer_names_applies_the_base_layer_first() -> None:
@@ -898,7 +898,7 @@ def test_services_merges_services_from_layers(tmp_path: Path) -> None:
     (project_dir / "pyproject.toml").touch()
 
     # when resolving the manifest
-    resolved = ResolvedManifest(Manifest(), flavor, project_dir)
+    resolved = ResolvedManifest(Manifest(), flavor, "test", project_dir)
 
     # then the services from both layers are merged
     assert resolved.services == {
@@ -926,7 +926,7 @@ def test_services_ignores_layers_that_do_not_apply(tmp_path: Path) -> None:
     # pyproject.toml does not exist
 
     # when resolving the manifest
-    resolved = ResolvedManifest(Manifest(), flavor, project_dir)
+    resolved = ResolvedManifest(Manifest(), flavor, "test", project_dir)
 
     # then only the services from the base layer are included
     assert resolved.services == {"sshd.service": "enabled"}

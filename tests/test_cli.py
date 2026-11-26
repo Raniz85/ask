@@ -2093,7 +2093,7 @@ def test_converge_records_the_converged_state_last(tmp_path: Path) -> None:
     # then the effective configuration, its fingerprint and the time are
     # recorded as the last thing done to the container
     configuration = effective_configuration(
-        ResolvedManifest(Manifest(), _PROJECT_FLAVOR, project_dir)
+        ResolvedManifest(Manifest(), _PROJECT_FLAVOR, "arch", project_dir)
     )
     # the clock is read once to record the invocation and once for the
     # converged state
@@ -2734,7 +2734,7 @@ def _converged_snapshot(
 ) -> InstanceSnapshot:
     converged = fingerprint(
         effective_configuration(
-            ResolvedManifest(m or Manifest(), _PROJECT_FLAVOR, project_dir)
+            ResolvedManifest(m or Manifest(), _PROJECT_FLAVOR, "arch", project_dir)
         )
     )
     return InstanceSnapshot(
@@ -2758,7 +2758,7 @@ _STALE_SNAPSHOT = InstanceSnapshot(
 def _old_converged_snapshot(project_dir: Path, age: timedelta) -> InstanceSnapshot:
     converged = fingerprint(
         effective_configuration(
-            ResolvedManifest(Manifest(), _PROJECT_FLAVOR, project_dir)
+            ResolvedManifest(Manifest(), _PROJECT_FLAVOR, "arch", project_dir)
         )
     )
     at = datetime.now(UTC) - age
@@ -5134,3 +5134,71 @@ def test_ls_includes_a_last_run_column(
     assert "LAST RUN" in header_row
     row = next(line for line in out.splitlines() if "my-project" in line)
     assert "2026-11-26 09:15" in row
+
+
+def test_converge_records_the_flavour_and_layers_on_the_container(
+    tmp_path: Path,
+) -> None:
+    # given a project converging with the default flavour and one extra layer
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+    config_path = _flavor_path(tmp_path)
+    config_path.write_text(_FLAVOR + "[layers.base]\n[layers.work]\n")
+    with (
+        patch("ask.cli.Path.cwd", return_value=project_dir),
+        patch("ask.cli.config.default_dir", return_value=config_path.parent),
+        patch("ask.cli.incus.Container") as container_cls,
+        patch("ask.cli.provision.Provisioner"),
+        patch("ask.cli.provision.AurBuilder"),
+    ):
+        container = container_cls.return_value
+        container.snapshot.return_value = InstanceSnapshot(status="Running", config={})
+        container.get_managed_packages.return_value = []
+        container.get_managed_extensions.return_value = []
+        converge()
+
+    # then the flavour name and the active layer names are recorded
+    container.set_flavour.assert_called_once_with("arch", ["base", "work"])
+
+
+def test_ls_includes_flavour_and_layers_columns(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given ask containers with recorded flavour metadata
+    monkeypatch.setenv("COLUMNS", "220")
+    with patch("ask.cli.incus.list_asks") as list_asks:
+        list_asks.return_value = [
+            (
+                "my-project",
+                InstanceSnapshot(
+                    status="Running",
+                    config={
+                        "user.ask.project": "/home/raniz/src/my-project",
+                        "user.ask.flavour": "arch",
+                        "user.ask.layers": "base,work",
+                    },
+                    created_at="2026-11-20T08:30:00+00:00",
+                ),
+            ),
+            (
+                "other-project",
+                InstanceSnapshot(
+                    status="Stopped",
+                    config={"user.ask.project": "/home/raniz/src/other-project"},
+                    created_at="2026-11-21T09:45:00+00:00",
+                ),
+            ),
+        ]
+
+        # when listing the known asks
+        ls()
+
+    # then the table has FLAVOUR and LAYERS columns
+    out = capsys.readouterr().out
+    header_row = next(line for line in out.splitlines() if "NAME" in line)
+    assert "FLAVOUR" in header_row and "LAYERS" in header_row
+    row = next(line for line in out.splitlines() if "my-project" in line)
+    assert "arch" in row and "base,work" in row
+    other = next(line for line in out.splitlines() if "other-project" in line)
+    assert "-" in other

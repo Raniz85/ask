@@ -35,7 +35,9 @@ def test_effective_configuration_contains_everything_that_converge_uses(
     )
 
     # when building the effective configuration
-    configuration = effective_configuration(ResolvedManifest(m, flavor, tmp_path))
+    configuration = effective_configuration(
+        ResolvedManifest(m, flavor, "test", tmp_path)
+    )
 
     # then it holds the flavour's distribution, shell and user, the layers that
     # apply, in order, and the manifest
@@ -100,9 +102,9 @@ def test_effective_configuration_ignores_layers_that_do_not_apply(
 
     # when building the effective configuration for both
     configurations = (
-        effective_configuration(ResolvedManifest(Manifest(), flavor, tmp_path)),
+        effective_configuration(ResolvedManifest(Manifest(), flavor, "test", tmp_path)),
         effective_configuration(
-            ResolvedManifest(Manifest(), flavor_with_unapplied_layer, tmp_path)
+            ResolvedManifest(Manifest(), flavor_with_unapplied_layer, "test", tmp_path)
         ),
     )
 
@@ -128,10 +130,10 @@ def test_effective_configuration_ignores_the_default_agent(tmp_path: Path) -> No
     # when building the effective configuration for both
     configurations = (
         effective_configuration(
-            ResolvedManifest(Manifest(), flavor("claude"), tmp_path)
+            ResolvedManifest(Manifest(), flavor("claude"), "test", tmp_path)
         ),
         effective_configuration(
-            ResolvedManifest(Manifest(), flavor("codex"), tmp_path)
+            ResolvedManifest(Manifest(), flavor("codex"), "test", tmp_path)
         ),
     )
 
@@ -159,8 +161,12 @@ def test_effective_configuration_ignores_agent_environment_variables(
 
     # when building the effective configuration for both
     configurations = (
-        effective_configuration(ResolvedManifest(Manifest(), flavor("a"), tmp_path)),
-        effective_configuration(ResolvedManifest(Manifest(), flavor("b"), tmp_path)),
+        effective_configuration(
+            ResolvedManifest(Manifest(), flavor("a"), "test", tmp_path)
+        ),
+        effective_configuration(
+            ResolvedManifest(Manifest(), flavor("b"), "test", tmp_path)
+        ),
     )
 
     # then they are identical, as agent variables only matter when an agent is
@@ -177,7 +183,7 @@ def test_effective_configuration_changes_with_instance_environment_variables(
 
     # when building the effective configuration
     configuration = json.loads(
-        effective_configuration(ResolvedManifest(m, flavor, tmp_path))
+        effective_configuration(ResolvedManifest(m, flavor, "test", tmp_path))
     )
 
     # then it holds the variables, as they are provisioned on the instance
@@ -193,7 +199,7 @@ def test_effective_configuration_changes_when_a_layer_starts_to_apply(
         distribution="arch",
         layers={"python": Layer(when=LayerWhen(files=["pyproject.toml"]))},
     )
-    resolved = ResolvedManifest(Manifest(), flavor, tmp_path)
+    resolved = ResolvedManifest(Manifest(), flavor, "test", tmp_path)
     before = effective_configuration(resolved)
 
     # and the project gaining a pyproject.toml
@@ -215,7 +221,7 @@ def test_effective_configuration_contains_the_projects_mise_config(
 
     # when building the effective configuration
     configuration = effective_configuration(
-        ResolvedManifest(m, Flavor(distribution="arch"), tmp_path)
+        ResolvedManifest(m, Flavor(distribution="arch"), "test", tmp_path)
     )
 
     # then it holds the contents of the mise config, by file
@@ -232,7 +238,7 @@ def test_effective_configuration_leaves_out_config_of_tool_managers_not_opted_in
 
     # when building the effective configuration
     configuration = effective_configuration(
-        ResolvedManifest(Manifest(), Flavor(distribution="arch"), tmp_path)
+        ResolvedManifest(Manifest(), Flavor(distribution="arch"), "test", tmp_path)
     )
 
     # then the mise config is not part of it
@@ -254,7 +260,7 @@ def test_effective_configuration_contains_the_pi_extensions(tmp_path: Path) -> N
 
     # when building the effective configuration
     configuration = json.loads(
-        effective_configuration(ResolvedManifest(Manifest(), flavor, tmp_path))
+        effective_configuration(ResolvedManifest(Manifest(), flavor, "test", tmp_path))
     )
 
     # then it holds the extensions, as they are provisioned on the instance
@@ -282,10 +288,10 @@ def test_effective_configuration_changes_with_the_pi_extensions(
     # when building the effective configuration for both
     configurations = (
         effective_configuration(
-            ResolvedManifest(Manifest(), flavor(["@foo/bar"]), tmp_path)
+            ResolvedManifest(Manifest(), flavor(["@foo/bar"]), "test", tmp_path)
         ),
         effective_configuration(
-            ResolvedManifest(Manifest(), flavor(["@foo/baz"]), tmp_path)
+            ResolvedManifest(Manifest(), flavor(["@foo/baz"]), "test", tmp_path)
         ),
     )
 
@@ -317,7 +323,7 @@ def test_effective_configuration_contains_taskfile_digests(tmp_path: Path) -> No
 
     # when building the effective configuration
     configuration = json.loads(
-        effective_configuration(ResolvedManifest(m, flavor, tmp_path))
+        effective_configuration(ResolvedManifest(m, flavor, "test", tmp_path))
     )
 
     # then every taskfile is represented by the hash of its contents
@@ -334,7 +340,9 @@ def test_effective_configuration_changes_with_taskfile_contents(tmp_path: Path) 
     def configuration_with(contents: str) -> str:
         task.write_text(contents)
         flavor = Flavor(distribution="arch", layers={"base": Layer(taskfiles=[task])})
-        return effective_configuration(ResolvedManifest(Manifest(), flavor, tmp_path))
+        return effective_configuration(
+            ResolvedManifest(Manifest(), flavor, "test", tmp_path)
+        )
 
     # then the effective configuration changes with the taskfile's contents
     assert configuration_with("a = 1\n") != configuration_with("a = 2\n")

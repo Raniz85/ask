@@ -25,6 +25,8 @@ _COMMON_CONFIG = {
 
 _ASK_MARKER_CONFIG_KEY = "user.ask.created"
 _PROJECT_PATH_CONFIG_KEY = "user.ask.project"
+_FLAVOUR_CONFIG_KEY = "user.ask.flavour"
+_LAYERS_CONFIG_KEY = "user.ask.layers"
 _MANAGED_PACKAGES_CONFIG_KEY = "user.ask.packages"
 _MANAGED_EXTENSIONS_CONFIG_KEY = "user.ask.extensions"
 _GUI_SESSIONS_CONFIG_KEY = "user.ask.gui_sessions"
@@ -152,6 +154,13 @@ class InstanceSnapshot:
     def project_path(self) -> Path | None:
         recorded = self.config.get(_PROJECT_PATH_CONFIG_KEY)
         return Path(recorded) if recorded else None
+
+    def flavour(self) -> str | None:
+        return self.config.get(_FLAVOUR_CONFIG_KEY) or None
+
+    def layers(self) -> list[str]:
+        recorded = self.config.get(_LAYERS_CONFIG_KEY)
+        return recorded.split(",") if recorded else []
 
 
 def list_asks() -> list[tuple[str, InstanceSnapshot]]:
@@ -442,6 +451,18 @@ class Container:
                 "set",
                 self.name,
                 f"{INVOCATION_AT_CONFIG_KEY}={at.isoformat()}",
+            ],
+        )
+
+    def set_flavour(self, name: str, layers: list[str]) -> None:
+        _incus(
+            [
+                "incus",
+                "config",
+                "set",
+                self.name,
+                f"{_FLAVOUR_CONFIG_KEY}={name}",
+                f"{_LAYERS_CONFIG_KEY}={','.join(layers)}",
             ],
         )
 
