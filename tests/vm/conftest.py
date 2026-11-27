@@ -30,6 +30,14 @@ incus admin init --minimal
 incus network create incusbr0 2>/dev/null || true
 incus profile device remove default eth0 2>/dev/null || true
 incus profile device add default eth0 nic nictype=bridged parent=incusbr0
+sysctl -w net.ipv4.ip_forward=1
+# Incus's own NAT rules are missing on CI runners, so add them by hand
+subnet=$(ip -4 addr show incusbr0 | awk '/inet /{{print $2; exit}}')
+iptables -t nat -C POSTROUTING -s "$subnet" ! -o incusbr0 -j MASQUERADE 2>/dev/null \\
+  || iptables -t nat -A POSTROUTING -s "$subnet" ! -o incusbr0 -j MASQUERADE
+iptables -C FORWARD -i incusbr0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i incusbr0 -j ACCEPT
+iptables -C FORWARD -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \\
+  || iptables -A FORWARD -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 """
 
 PROVISION = f"""\
