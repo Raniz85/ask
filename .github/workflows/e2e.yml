@@ -1,0 +1,42 @@
+name: E2E
+
+on:
+  push:
+    branches:
+      - main
+      - "workflow-*"
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: End-to-end tests in an Incus VM
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify nested virtualization is available
+        run: test -w /dev/kvm
+
+      - name: Install Incus
+        run: |
+          curl -fsSL https://pkgs.zabbly.com/incus/stable.asc \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/zabbly-incus.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/etc/apt/keyrings/zabbly-incus.gpg] https://pkgs.zabbly.com/incus/stable ${VERSION_CODENAME} main" \
+            | sudo tee /etc/apt/sources.list.d/zabbly-incus.list
+          sudo apt-get update
+          sudo apt-get install -y incus
+
+      - name: Start Incus
+        run: |
+          sudo systemctl enable --now incus.service incus.socket
+          sudo incus admin init --minimal
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Run the E2E tests
+        run: "$HOME/.local/bin/uv run pytest -m vm -v tests/vm"
