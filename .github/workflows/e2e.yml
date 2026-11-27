@@ -57,6 +57,8 @@ jobs:
           sudo ss -lunp | grep -E ':67\b' || echo "nothing listening on dhcp"
           ip addr show incusbr0
           sudo iptables -t nat -S | head -20 || true
+          sudo nft list ruleset | head -60 || true
+          sysctl net.ipv4.ip_forward
           incus launch images:archlinux/current/cloud ask-e2e-smoke --vm \
             --config security.secureboot=false || true
           for i in $(seq 1 60); do
@@ -64,6 +66,7 @@ jobs:
             sleep 5
           done
           incus exec ask-e2e-smoke -- ip addr || true
+          incus exec ask-e2e-smoke -- ping -c1 -W3 "$(ip -4 addr show incusbr0 | awk '/inet /{print $2}' | cut -d/ -f1)" || true
           incus exec ask-e2e-smoke -- ping -c1 -W3 1.1.1.1 || true
           incus delete --force ask-e2e-smoke || true
 
