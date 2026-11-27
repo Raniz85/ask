@@ -9,8 +9,9 @@
 _Ask_ creates persistent, isolated, declarative development environments for your projects.
 Each project gets its own [Incus](https://linuxcontainers.org/incus) container,
 provisioned with [PyInfra](https://pyinfra.com),
-configured by a single `ask.toml` in the project root.
-Containers shut down when idle and start again on demand, so they cost nothing when you're not using them.
+
+Distributions inside the containers are limited to Arch Linux and Debian right now.
+More distributions may come in the future.
 
 ## Installation
 
@@ -55,7 +56,7 @@ Then, in any project directory, create its manifest:
 
 Edit the generated `ask.toml` to declare packages, bind mounts, services, tool managers, scripts and custom pyinfra
 taskfiles.
-Shared container configuration lives in flavour files under `~/.config/ask/flavors/`.
+Shared container configuration lives in flavour files under `$XDG_CONFIG_HOME/ask/flavors/`.
 
 Once configured, create the container with
 
@@ -152,7 +153,7 @@ IDEs are listed per flavour layer and started with the `ide` subcommand, which o
 ```toml
 [layers.python]
 ides = [
-  "pycharm",
+    "pycharm",
 ]
 ```
 
@@ -177,8 +178,8 @@ settings state lives under each IDE's config directory, which Ask mounts into th
 GUI access shares the host's Wayland socket with the container. X11 applications are supported
 through [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite), started inside the
 container when the first GUI session opens and stopped when the last one closes. It is used when
-the `xwayland-satellite` package is installed in the container: JetBrains IDEs pull it in on Arch
-(and build it from source on Debian), and other layers can add it to their `packages`.
+the `xwayland-satellite` package is installed in the container: JetBrains IDEs pull it in on Arch (and build it from
+source on Debian), and other layers can add it to their `packages`.
 
 ### Management
 
@@ -192,3 +193,8 @@ To apply configuration changes explicitly, or to manage the container by hand:
 ~/my-project $ ask destroy               # delete the container and its configuration entirely
 ~/ $ ask rename my-project your-project  # rename the ask and the project directory
 ```
+
+## More
+
+Look at the [examples](examples/) or read the documentation for the [cli commands](docs/commands.md)
+or [configuration](docs/config.md)
