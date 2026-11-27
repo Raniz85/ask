@@ -29,9 +29,9 @@ def test_setup_configures_incus_and_writes_a_default_flavor(vm: Vm) -> None:
     # given a user without any Ask configuration
     uid = vm.run(["id", "-u"]).stdout.strip()
 
-    # when running ask setup and accepting every step; the host incus is
-    # already initialised by the fixture, so six prompts remain
-    result = vm.ask("setup", cwd=HOME, input="y\n" * 6, terminal=True)
+    # when running ask setup with --assume-yes, accepting every step without
+    # a terminal; the host incus is already initialised by the fixture
+    result = vm.ask("--assume-yes", "setup", cwd=HOME)
 
     # then the default flavour is written, Incus uses the user's project by
     assert (
@@ -71,9 +71,9 @@ def test_create_launches_and_converges_the_container(vm: Vm) -> None:
     vm.write_file(FLAVOR, vm.read_file(FLAVOR) + AGENTS)
     vm.write_file(PROJECT_DIR / "ask.toml", MANIFEST)
 
-    # when running ask create in a terminal: converging AUR packages reviews
-    # the paru-bin PKGBUILD, which needs an interactive terminal
-    result = vm.ask("create", cwd=PROJECT_DIR, input="y\n", terminal=True)
+    # when running ask create with --assume-yes, so converging AUR packages
+    # skips the paru-bin PKGBUILD review without a terminal
+    result = vm.ask("--assume-yes", "create", cwd=PROJECT_DIR)
 
     # then the container is running, recorded as converged and has the AUR
     # package installed

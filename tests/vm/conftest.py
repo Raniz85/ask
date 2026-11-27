@@ -10,19 +10,29 @@ from pathlib import Path
 import pytest
 
 VM_NAME = "ask-e2e"
-# ASK_E2E_VM=0 runs the tests in a plain container instead of a VM, for
-# hosts without nested virtualization (e.g. CI runners)
-IN_VM = os.environ.get("ASK_E2E_VM", "1") == "1"
-IMAGE = "images:archlinux/current/cloud" if IN_VM else "images:archlinux/current"
+IMAGE = "images:archlinux/current/cloud"
 USER = "tester"
 HOME = Path("/home") / USER
 ASK = HOME / ".local" / "bin" / "ask"
 BOOT_TIMEOUT_SECONDS = 300
 
+# ASK_E2E_HOST=1 runs the tests directly on the host instead of in a
+# dedicated VM, for ephemeral machines that are already throwaway (CI runners)
+ON_HOST = os.environ.get("ASK_E2E_HOST") == "1"
+
+# Provisioning for host mode, run as root: the workflow installs Incus and
+# uv itself, so only the test user and the rootless Incus setup remain
+HOST_PROVISION = f"""\
+useradd --create-home --groups incus {USER} 2>/dev/null || true
+echo '{USER} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/{USER}
+systemctl enable --now incus.socket incus-user.socket
+incus admin init --minimal
+incus network create incusbr0 2>/dev/null || true
+incus profile device remove default eth0 2>/dev/null || true
+incus profile device add default eth0 nic nictype=bridged parent=incusbr0
+"""
+
 PROVISION = f"""\
-# Container images don't pick up the DHCP DNS server, so use the bridge
-# gateway (which runs dnsmasq) directly
-echo "nameserver $(ip route | awk '/default/ {{print $3; exit}}')" > /etc/resolv.conf
 # Slow mirrors must not abort the 380 MiB download; pacman's default
 # download timeout kills any mirror slower than ~1 byte/sec for 10s.
 pacman -Syu --noconfirm --needed --disable-download-timeout incus uv sudo
@@ -89,6 +99,22 @@ class Vm:
         return [i for i in json.loads(result.stdout) if i["name"] == name]
 
 
+@dataclass(frozen=True)
+class Host(Vm):
+    """The test machine is the host itself (host mode): run as root via sudo."""
+
+    def run_as_root(
+        self, command: list[str], input: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["sudo", *command],
+            check=False,
+            input=input,
+            capture_output=True,
+            text=True,
+        )
+
+
 def _incus(*args: str) -> None:
     subprocess.run(["incus", *args], check=True)
 
@@ -124,21 +150,24 @@ def _build_wheel(out_dir: Path) -> Path:
 @pytest.fixture(scope="session")
 def vm(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Vm]:
     wheel = _build_wheel(tmp_path_factory.mktemp("dist"))
-    instance_args = (
-        ["--vm", "--config", "security.secureboot=false"]
-        if IN_VM
-        # nesting lets the container run its own Incus for the tests
-        else ["--config", "security.nesting=true"]
-    )
+    if ON_HOST:
+        host = Host("localhost")
+        result = host.run_as_root(["bash", "-euxc", HOST_PROVISION])
+        assert result.returncode == 0, result.stdout + result.stderr
+        host.run(["uv", "tool", "install", str(wheel)]).check_returncode()
+        yield host
+        return
     _incus(
         "launch",
         IMAGE,
         VM_NAME,
-        *instance_args,
+        "--vm",
         "--config",
         "limits.cpu=4",
         "--config",
         "limits.memory=4GiB",
+        "--config",
+        "security.secureboot=false",
         "--device",
         "root,size=30GiB",
     )

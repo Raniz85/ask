@@ -11,8 +11,8 @@ permissions:
 
 jobs:
   e2e:
-    name: End-to-end tests in an Incus container
-    runs-on: ubuntu-latest
+    name: End-to-end tests on the runner host
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -25,30 +25,22 @@ jobs:
           echo "deb [signed-by=/etc/apt/keyrings/zabbly-incus.gpg] https://pkgs.zabbly.com/incus/stable ${VERSION_CODENAME} main" \
             | sudo tee /etc/apt/sources.list.d/zabbly-incus.list
           sudo apt-get update
-          sudo apt-get install -y incus
+          sudo apt-get install -y incus dnsmasq
 
-      - name: Start Incus
-        run: |
-          sudo systemctl enable --now incus.service incus.socket
-          sudo incus admin init --minimal
-          sudo incus network create incusbr0 2>/dev/null || true
-          sudo incus profile device remove default eth0 2>/dev/null || true
-          sudo incus profile device add default eth0 nic nictype=bridged parent=incusbr0
-          # The tests invoke incus as the runner user, not via sudo
-          sudo usermod -aG incus-admin "$USER"
-          sudo chmod 666 /var/lib/incus/unix.socket
-          sudo rm -rf "/home/$USER/.config/incus"
-          # Incus's own NAT rules are missing on the runner, so add them by hand
-          subnet=$(ip -4 addr show incusbr0 | awk '/inet /{print $2}')
-          sudo iptables -t nat -A POSTROUTING -s "$subnet" ! -o incusbr0 -j MASQUERADE
-          sudo iptables -A FORWARD -i incusbr0 -j ACCEPT
-          sudo iptables -A FORWARD -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+      # Rootless Incus containers need unprivileged user namespaces, which
+      # Ubuntu 24.04 restricts via AppArmor by default
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+        run: |
+          curl -LsSf https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/uv-*/uv /usr/local/bin/uv
 
       - name: Run the E2E tests
         env:
-          # No nested VM on the ephemeral runner; use a plain container
-          ASK_E2E_VM: "0"
-        run: "$HOME/.local/bin/uv run pytest -m vm -v tests/vm"
+          # The runner is already ephemeral, so run the tests directly on the
+          # host instead of launching a temporary VM
+          ASK_E2E_HOST: "1"
+        run: uv run pytest -m vm -v tests/vm
