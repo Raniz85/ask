@@ -51,9 +51,16 @@ jobs:
 
       - name: Smoke-test launching a VM
         run: |
+          incus network list
+          incus profile show default
           incus launch images:archlinux/current/cloud ask-e2e-smoke --vm \
-            --config limits.cpu=4 --config limits.memory=4GiB \
-            --config security.secureboot=false --device root,size=30GiB || true
+            --config security.secureboot=false || true
+          for i in $(seq 1 60); do
+            incus exec ask-e2e-smoke -- true 2>/dev/null && break
+            sleep 5
+          done
+          incus exec ask-e2e-smoke -- ip addr || true
+          incus exec ask-e2e-smoke -- ping -c1 -W3 1.1.1.1 || true
           incus delete --force ask-e2e-smoke || true
 
       - name: Run the E2E tests
