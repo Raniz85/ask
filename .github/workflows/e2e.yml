@@ -41,5 +41,13 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
+      - name: Smoke-test launching a VM
+        run: |
+          sudo incus info || true
+          sudo incus storage list || true
+          sudo incus launch images:archlinux/current/cloud ask-e2e-smoke --vm \
+            --config security.secureboot=false || true
+          sudo incus delete --force ask-e2e-smoke || true
+
       - name: Run the E2E tests
         run: "$HOME/.local/bin/uv run pytest -m vm -v tests/vm"
