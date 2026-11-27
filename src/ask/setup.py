@@ -232,6 +232,16 @@ def incus_install_steps(distribution: str) -> list[SetupStep]:
     return []
 
 
+def _project_is_restricted(project: str) -> bool:
+    try:
+        return (
+            _command_output(["incus", "project", "get", project, "restricted"])
+            == "true"
+        )
+    except subprocess.CalledProcessError:
+        return False
+
+
 def incus_steps(username: str, uid: int) -> list[SetupStep]:
     project = project_name(uid)
     return [
@@ -239,6 +249,14 @@ def incus_steps(username: str, uid: int) -> list[SetupStep]:
             description=f"Create the Incus project {project!r} that holds Ask containers.",
             command=["sudo", "incus", "project", "create", project],
             done=lambda: _command_succeeds(["incus", "project", "show", project]),
+        ),
+        SetupStep(
+            description=f"Allow the project {project!r} to bind-mount host "
+            "directories into containers (the rootless Incus daemon marks its "
+            "auto-created user project restricted, which forbids shifted "
+            "bind mounts).",
+            command=["sudo", "incus", "project", "set", project, "restricted=false"],
+            done=lambda: not _project_is_restricted(project),
         ),
         SetupStep(
             description=f"Use the Incus project {project!r} by default.",

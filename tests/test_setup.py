@@ -157,10 +157,18 @@ def test_incus_steps_cover_user_project_and_subuid_subgid() -> None:
     # when building the incus setup steps for a user with uid 1000
     steps = incus_steps("raniz", 1000)
 
-    # then the user project is created with sudo, the subuid/subgid steps
-    # target the user, and there is no admin-group step
+    # then the user project is created with sudo and unrestricted, the
+    # subuid/subgid steps target the user, and there is no admin-group step
     commands = [step.command for step in steps]
     assert ["sudo", "incus", "project", "create", "user-1000"] in commands
+    assert [
+        "sudo",
+        "incus",
+        "project",
+        "set",
+        "user-1000",
+        "restricted=false",
+    ] in commands
     assert ["incus", "project", "switch", "user-1000"] in commands
     assert ["sudo", "usermod", "-v", "100000-1099999", "raniz"] in commands
     assert ["sudo", "usermod", "-w", "100000-1099999", "raniz"] in commands
@@ -298,12 +306,14 @@ def _patch_subid_files(tmp_path: Path) -> tuple[Path, Path]:
 def test_incus_step_checks_detect_existing_state(tmp_path: Path) -> None:
     # given the incus steps for a user with uid 1000
     steps = incus_steps("raniz", 1000)
-    project, default, subuid, subgid = steps
+    project, unrestrict, default, subuid, subgid = steps
     subuid_file, subgid_file = _patch_subid_files(tmp_path)
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if command[:3] == ["incus", "project", "show"]:
             return _completed(0)
+        if command[:4] == ["incus", "project", "get", "user-1000"]:
+            return _completed(0, stdout="false")
         if command[:3] == ["incus", "remote", "list"]:
             return _completed(0, stdout='{"local": {"Project": "user-1000"}}')
         raise AssertionError(f"unexpected command: {command}")
@@ -321,9 +331,10 @@ def test_incus_step_checks_detect_existing_state(tmp_path: Path) -> None:
         results = [step.done() for step in steps]
 
     # then every step reports itself as done
-    assert results == [True, True, True, True]
+    assert results == [True, True, True, True, True]
     assert [step.description for step in steps] == [
         project.description,
+        unrestrict.description,
         default.description,
         subuid.description,
         subgid.description,
@@ -352,8 +363,10 @@ def test_incus_step_checks_detect_missing_state(tmp_path: Path) -> None:
         )
         results = [step.done() for step in steps]
 
-    # then every step reports itself as pending
-    assert results == [False, False, False, False]
+    # then every step reports itself as pending, except the unrestrict check,
+    # which reports done because the project does not exist yet (the create
+    # step before it makes a non-restricted project)
+    assert results == [False, True, False, False, False]
 
 
 def test_subid_check_accepts_any_start_as_long_as_the_span_is_large_enough(
