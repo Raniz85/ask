@@ -27,17 +27,19 @@ useradd --create-home --groups incus {USER} 2>/dev/null || true
 echo '{USER} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/{USER}
 systemctl enable --now incus.socket incus-user.socket
 incus admin init --minimal
-incus network create incusbr0 2>/dev/null || true
-incus profile device remove default eth0 2>/dev/null || true
-incus profile device add default eth0 nic nictype=bridged parent=incusbr0
-sysctl -w net.ipv4.ip_forward=1
+"""
+
+# The rootless daemon gives the user's project its own bridge incusbr-<uid>;
 # Incus's own NAT rules are missing on CI runners, so add them by hand
-subnet=$(ip -4 addr show incusbr0 | awk '/inet /{{print $2; exit}}')
-iptables -t nat -C POSTROUTING -s "$subnet" ! -o incusbr0 -j MASQUERADE 2>/dev/null \\
-  || iptables -t nat -A POSTROUTING -s "$subnet" ! -o incusbr0 -j MASQUERADE
-iptables -C FORWARD -i incusbr0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i incusbr0 -j ACCEPT
-iptables -C FORWARD -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \\
-  || iptables -A FORWARD -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+HOST_NAT = f"""\
+bridge=incusbr-$(id -u {USER})
+sysctl -w net.ipv4.ip_forward=1
+subnet=$(ip -4 addr show "$bridge" | awk '/inet /{{print $2; exit}}')
+iptables -t nat -C POSTROUTING -s "$subnet" ! -o "$bridge" -j MASQUERADE 2>/dev/null \\
+  || iptables -t nat -A POSTROUTING -s "$subnet" ! -o "$bridge" -j MASQUERADE
+iptables -C FORWARD -i "$bridge" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "$bridge" -j ACCEPT
+iptables -C FORWARD -o "$bridge" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \\
+  || iptables -A FORWARD -o "$bridge" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 """
 
 PROVISION = f"""\
@@ -161,6 +163,11 @@ def vm(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Vm]:
     if ON_HOST:
         host = Host("localhost")
         result = host.run_as_root(["bash", "-euxc", HOST_PROVISION])
+        assert result.returncode == 0, result.stdout + result.stderr
+        # trigger the rootless daemon so it creates the user's bridge network,
+        # then NAT that bridge
+        host.run(["incus", "list"]).check_returncode()
+        result = host.run_as_root(["bash", "-euxc", HOST_NAT])
         assert result.returncode == 0, result.stdout + result.stderr
         # pytest's tmp dir is only readable by the invoking user; stage the
         # wheel where the test user can read it
