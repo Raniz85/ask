@@ -13,16 +13,17 @@ permissions:
 
 jobs:
   deb:
-    name: Build .deb for ${{ matrix.target }}
+    name: Build .deb for ${{ matrix.image }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - debian:13
+        include:
+          - image: debian:13
+            slug: debian-13
     # Build inside the target distribution so bundled wheels match its glibc
-    container: ${{ matrix.target }}
+    container: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -87,5 +88,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          name: ask-${{ steps.version.outputs.version }}-deb-${{ replace(matrix.target, ':', '-') }}
+          name: ask-${{ steps.version.outputs.version }}-deb-${{ matrix.slug }}
           path: ask_*_amd64.deb
