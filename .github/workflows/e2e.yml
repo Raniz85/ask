@@ -53,6 +53,10 @@ jobs:
         run: |
           incus network list
           incus profile show default
+          pgrep -a dnsmasq || echo "no dnsmasq running"
+          sudo ss -lunp | grep -E ':67\b' || echo "nothing listening on dhcp"
+          ip addr show incusbr0
+          sudo iptables -t nat -S | head -20 || true
           incus launch images:archlinux/current/cloud ask-e2e-smoke --vm \
             --config security.secureboot=false || true
           for i in $(seq 1 60); do
