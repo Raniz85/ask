@@ -37,6 +37,9 @@ jobs:
         run: |
           sudo systemctl enable --now incus.service incus.socket
           sudo incus admin init --minimal
+          # The tests invoke incus as the runner user, not via sudo
+          sudo usermod -aG incus-admin "$USER"
+          sudo chmod 666 /var/lib/incus/unix.socket
 
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
