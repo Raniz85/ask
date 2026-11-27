@@ -1,0 +1,91 @@
+name: Package
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - "workflow-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    name: Build .deb for ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - debian:13
+    # Build inside the target distribution so bundled wheels match its glibc
+    container: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install python3, uv and curl
+        run: |
+          apt-get update
+          apt-get install -y python3 python3-venv curl ca-certificates
+          curl -LsSf https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C /tmp
+          install -m 0755 /tmp/uv-*/uv /usr/local/bin/uv
+
+      # The target python version is whatever the target distribution ships
+      - name: Detect target python version
+        id: python
+        run: |
+          MINOR=$(python3 -c 'import sys; print(sys.version_info.minor)')
+          echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
+          python3 --version
+
+      # Build the venv at its final path /opt/ask so entry-point shebangs
+      # point at /opt/ask/bin/python on the target host
+      - name: Create venv at /opt/ask and install package
+        run: |
+          python3 -m venv /opt/ask
+          uv pip install --python /opt/ask/bin/python .
+
+      - name: Read package version
+        id: version
+        run: |
+          echo "version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Build .deb with nfpm
+        run: |
+          NFPM_VERSION=$(curl -s https://api.github.com/repos/goreleaser/nfpm/releases/latest | grep -oP '"tag_name":\s*"v\K[0-9.]+')
+          curl -sL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" | tar -xz -C /tmp
+          install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
+          VERSION=${{ steps.version.outputs.version }}
+          cat > nfpm.yaml <<EOF
+          name: ask
+          version: "$VERSION"
+          arch: amd64
+          maintainer: Daniel Raniz Raneland <raniz@raneland.se>
+          description: Persistent containers for projects
+          license: MIT
+          homepage: https://github.com/raniz85/ask
+          depends:
+            - "python3.${{ steps.python.outputs.minor }}"
+          contents:
+            - src: /opt/ask
+              dst: /opt/ask
+            - src: /opt/ask/bin/ask
+              dst: /usr/bin/ask
+              type: symlink
+          EOF
+          nfpm pkg --packager deb --target "ask_${VERSION}_amd64.deb" --config nfpm.yaml
+
+      - name: Verify package
+        run: |
+          apt-get install -y dpkg
+          dpkg-deb --info ask_*_amd64.deb
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: ask-${{ steps.version.outputs.version }}-deb-${{ replace(matrix.target, ':', '-') }}
+          path: ask_*_amd64.deb
