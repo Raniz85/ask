@@ -5,15 +5,15 @@ distribution = "arch"
 default = true
 
 # The shell to use, defaults to bash if unset
-shell = "zsh"
+# shell = "zsh"
 
 # Or with full options (defaults shown)
-# [shell]
-# name = "zsh"
-# zshrc = true
-# zprofile = false
-# zshenv = false
-#
+[shell]
+name = "zsh"
+zshrc = true
+zprofile = false
+zshenv = false
+
 # Available options per shell (defaults shown)
 # bash:   bashrc = true, bash_profile = false, profile = false
 # zsh:    zshrc = true, zprofile = false, zshenv = false
@@ -23,16 +23,16 @@ shell = "zsh"
 # tcsh:   tcshrc = true, login = false
 
 # Optional user definition, mirrors the calling user if unset
-# [user]
-# name = "raniz"
-# uid = 1000
+[user]
+name = "raniz"
+uid = 1000
 
 # Except groups, which defaults to just a group with the same name as the user
-# extra_groups = []
+extra_groups = ["usb", "dialout"]
 
-# [user.group]
-# name = "raniz"
-# gid = 1000
+[user.group]
+name = "raniz"
+gid = 1000
 
 # The base layer, this layer always exists and is always applied as the lowest layer
 [layers.base]
@@ -49,7 +49,6 @@ bind_mounts = [
   # NeoVim configuration
   "~/.config/nvim",
   "~/.local/share/nvim",
-
   # Pacman mirrors
   "/etc/pacman.d/mirrorlist",
 ]
@@ -63,27 +62,36 @@ services."man-db.timer" = "enabled"
 [layers.base.agents]
 default = "pi"
 # Can be just true to set default options
-pi = true
+# pi = true
 
 # Environment variables can be set for agents specifically
-# env.GIT_COMMITTER_NAME = "My autonumous agent"
-# env.GIT_COMMITTER_EMAIL = "agent@mydomain.com"
-# env.GIT_AUTHOR_NAME = "My autonumous agent"
-# env.GIT_AUTHOR_EMAIL = "agent@mydomain.com"
+env.GIT_COMMITTER_NAME = "My autonumous agent"
+env.GIT_COMMITTER_EMAIL = "agent@mydomain.com"
+env.GIT_AUTHOR_NAME = "My autonumous agent"
+env.GIT_AUTHOR_EMAIL = "agent@mydomain.com"
 
 # Or with full options (defaults shown)
-# claude = { claude_md: true, auth: true, skills: true, config: true }
-# opencode = { agents_md: true, auth: true, skills: true, config: true }
-# codex = { agents_md: true, auth: true, skills: true, config: true }
+claude = { claude_md = true, auth = true, skills = true, config = true }
+opencode = { agents_md = true, auth = true, skills = true, config = true }
+codex = { agents_md = true, auth = true, skills = true, config = true }
 
-# [layers.base.agents.pi]
-# system_md = true
-# auth = true
-# skills = true
-# config = true
-# extensions = [
-#   "npm:pi-subagents",
-# ]
+[layers.base.agents.pi]
+system_md = true
+auth = true
+skills = true
+config = true
+extensions = [
+  "npm:pi-subagents",
+]
+
+[layers.base.agents.oh-my-pi]
+agents_md = true
+auth = true
+skills = true
+config = true
+extensions = [
+  "modern-web-guidance",
+]
 
 [layers.python]
 # If multiple layers are applied, ordering _may_ be important.

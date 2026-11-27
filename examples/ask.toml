@@ -1,7 +1,9 @@
+# Install project tools with mise
 tool_managers = [
   "mise",
 ]
 
+# Straight installation of packages
 packages = [
   "uv",
   "python",
