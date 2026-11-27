@@ -117,8 +117,8 @@ def test_exec_runs_a_command_with_the_configured_environment(vm: Vm) -> None:
 
 
 def test_agent_runs_the_configured_agent(vm: Vm) -> None:
-    # when asking the agent for its version
-    result = vm.ask("agent", "opencode", "--", "--version", cwd=PROJECT_DIR)
+    # when asking the configured default agent for its version
+    result = vm.ask("agent", "--version", cwd=PROJECT_DIR)
 
     # then the agent prints it
     assert result.returncode == 0, result.stdout + result.stderr
