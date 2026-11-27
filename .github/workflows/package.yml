@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  deb:
-    name: Build .deb for ${{ matrix.image }}
+  package:
+    name: Build .${{ matrix.packager }} for ${{ matrix.image }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -22,22 +22,64 @@ jobs:
         include:
           - image: debian:12
             slug: debian-12
+            packager: deb
+            arch: amd64
           - image: debian:13
             slug: debian-13
+            packager: deb
+            arch: amd64
           - image: debian:sid
             slug: debian-sid
+            packager: deb
+            arch: amd64
           - image: ubuntu:24.04
             slug: ubuntu-24.04
+            packager: deb
+            arch: amd64
           - image: ubuntu:24.10
             slug: ubuntu-24.10
+            packager: deb
+            arch: amd64
           - image: ubuntu:25.04
             slug: ubuntu-25.04
+            packager: deb
+            arch: amd64
           - image: ubuntu:25.10
             slug: ubuntu-25.10
+            packager: deb
+            arch: amd64
           - image: ubuntu:26.04
             slug: ubuntu-26.04
+            packager: deb
+            arch: amd64
           - image: ubuntu:26.10
             slug: ubuntu-26.10
+            packager: deb
+            arch: amd64
+          - image: fedora:45
+            slug: fedora-45
+            packager: rpm
+            arch: x86_64
+          - image: fedora:46
+            slug: fedora-46
+            packager: rpm
+            arch: x86_64
+          - image: fedora:rawhide
+            slug: fedora-rawhide
+            packager: rpm
+            arch: x86_64
+          - image: opensuse/leap:15.6
+            slug: opensuse-leap-15.6
+            packager: rpm
+            arch: x86_64
+          - image: opensuse/leap:16.0
+            slug: opensuse-leap-16.0
+            packager: rpm
+            arch: x86_64
+          - image: opensuse/tumbleweed
+            slug: opensuse-tumbleweed
+            packager: rpm
+            arch: x86_64
     # Build inside the target distribution so bundled wheels match its glibc
     container: ${{ matrix.image }}
     steps:
@@ -45,19 +87,31 @@ jobs:
 
       - name: Install uv and curl
         run: |
-          # 24.10 is EOL and only served from old-releases; fix sources before the first apt-get update
-          if [ "${{ matrix.image }}" = "ubuntu:24.10" ]; then
-            sed -i 's|archive.ubuntu.com|old-releases.ubuntu.com|g; s|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources
-          fi
-          apt-get update
-          apt-get install -y curl ca-certificates
+          case "${{ matrix.image }}" in
+            fedora:*)
+              dnf install -y curl ca-certificates
+              ;;
+            opensuse/*)
+              zypper install -y curl ca-certificates
+              ;;
+            ubuntu:24.10)
+              # 24.10 is EOL and only served from old-releases; fix sources before apt-get update
+              sed -i 's|archive.ubuntu.com|old-releases.ubuntu.com|g; s|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources
+              apt-get update
+              apt-get install -y curl ca-certificates
+              ;;
+            *)
+              apt-get update
+              apt-get install -y curl ca-certificates
+              ;;
+          esac
           curl -LsSf https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
             | tar -xz -C /tmp
           install -m 0755 /tmp/uv-*/uv /usr/local/bin/uv
 
       # Bundle a standalone python at the final path /opt/ask so entry-point
       # shebangs point at /opt/ask/bin/python3.13 on the target host; no
-      # system python dependency (debian 12 has no python3.13 in its repos)
+      # system python dependency
       - name: Bundle python 3.13 at /opt/ask and install package
         run: |
           uv python install 3.13
@@ -69,7 +123,7 @@ jobs:
         run: |
           echo "version=$(/opt/ask/bin/python3.13 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> "$GITHUB_OUTPUT"
 
-      - name: Build .deb with nfpm
+      - name: Build package with nfpm
         run: |
           # Resolve latest release via redirect; the API is unauthenticated and rate-limited on shared runners
           NFPM_VERSION=$(curl -sIL -o /dev/null -w '%{url_effective}' https://github.com/goreleaser/nfpm/releases/latest | grep -oP '/tag/v\K[0-9.]+' || true)
@@ -80,7 +134,7 @@ jobs:
           cat > nfpm.yaml <<EOF
           name: ask
           version: "$VERSION"
-          arch: amd64
+          arch: ${{ matrix.arch }}
           maintainer: Daniel Raniz Raneland <raniz@raneland.se>
           description: Persistent containers for projects
           license: MIT
@@ -92,13 +146,17 @@ jobs:
               dst: /usr/bin/ask
               type: symlink
           EOF
-          nfpm pkg --packager deb --target "ask_${VERSION}_amd64.deb" --config nfpm.yaml
+          nfpm pkg --packager ${{ matrix.packager }} --target "ask_${VERSION}_${{ matrix.arch }}.${{ matrix.packager }}" --config nfpm.yaml
 
       - name: Verify package
-        run: dpkg-deb --info ask_*_amd64.deb
+        run: |
+          case "${{ matrix.packager }}" in
+            deb) dpkg-deb --info ask_*.deb ;;
+            rpm) rpm -qip ask_*.rpm ;;
+          esac
 
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          name: ask-${{ steps.version.outputs.version }}-deb-${{ matrix.slug }}
-          path: ask_*_amd64.deb
+          name: ask-${{ steps.version.outputs.version }}-${{ matrix.slug }}
+          path: ask_*.${{ matrix.packager }}
