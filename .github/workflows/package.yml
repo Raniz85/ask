@@ -78,7 +78,13 @@ jobs:
               dst: /usr/bin/ask
               type: symlink
           EOF
+          nfpm --version
+          cat nfpm.yaml
+          ls -la /opt/ask/bin/ask
+          set +e
           nfpm pkg --packager deb --target "ask_${VERSION}_amd64.deb" --config nfpm.yaml
+          echo "NFPM_EXIT=$?"
+          exit $?
 
       - name: Verify package
         run: |
