@@ -11,9 +11,15 @@ permissions:
 
 jobs:
   e2e:
-    name: End-to-end tests on the runner host
+    name: End-to-end tests (${{ matrix.distribution }}) on the runner host
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        distribution:
+          - arch
+          - debian
     steps:
       - uses: actions/checkout@v4
 
@@ -43,4 +49,5 @@ jobs:
           # The runner is already ephemeral, so run the tests directly on the
           # host instead of launching a temporary VM
           ASK_E2E_HOST: "1"
+          ASK_E2E_DISTRIBUTION: ${{ matrix.distribution }}
         run: uv run pytest -m vm -v tests/vm

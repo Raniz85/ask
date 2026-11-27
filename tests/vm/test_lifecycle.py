@@ -1,4 +1,5 @@
 import json
+import os
 import re
 
 import pytest
@@ -8,6 +9,10 @@ from ask.cli import INIT_TEMPLATE
 
 pytestmark = pytest.mark.vm
 
+# The guest distribution under test; the CI workflow runs this suite once per
+# distribution (ASK_E2E_DISTRIBUTION)
+DISTRIBUTION = os.environ.get("ASK_E2E_DISTRIBUTION", "arch")
+
 PROJECT = "my-project"
 PROJECT_DIR = HOME / PROJECT
 FLAVOR = HOME / ".config" / "ask" / "flavors" / "default.toml"
@@ -16,8 +21,14 @@ AGENTS = """
 default = "opencode"
 opencode = true
 """
-MANIFEST = """\
-packages = ["aur:pfetch"]
+# one package from the distribution's own repositories, and how to verify it
+PACKAGE = {"arch": "aur:pfetch", "debian": "sl"}[DISTRIBUTION]
+PACKAGE_QUERY = {
+    "arch": ["pacman", "-Q", "pfetch"],
+    "debian": ["dpkg", "-s", "sl"],
+}[DISTRIBUTION]
+MANIFEST = f"""\
+packages = ["{PACKAGE}"]
 
 [env]
 ASK_E2E = "hello"
@@ -66,9 +77,12 @@ def test_init_writes_the_manifest_template(vm: Vm) -> None:
 
 
 def test_create_launches_and_converges_the_container(vm: Vm) -> None:
-    # given a flavour with an agent and a manifest with an AUR package and an
-    # environment variable
-    vm.write_file(FLAVOR, vm.read_file(FLAVOR) + AGENTS)
+    # given a flavour for the guest distribution under test, with an agent,
+    # and a manifest with a distribution package and an environment variable
+    flavour = vm.read_file(FLAVOR).replace(
+        'distribution = "arch"', f'distribution = "{DISTRIBUTION}"'
+    )
+    vm.write_file(FLAVOR, flavour + AGENTS)
     vm.write_file(PROJECT_DIR / "ask.toml", MANIFEST)
 
     # when running ask create with --assume-yes, so converging AUR packages
@@ -76,14 +90,14 @@ def test_create_launches_and_converges_the_container(vm: Vm) -> None:
     result = vm.ask("--assume-yes", "create", cwd=PROJECT_DIR)
     assert result.returncode == 0, result.stdout + result.stderr
 
-    # then the container is running, recorded as converged and has the AUR
+    # then the container is running, recorded as converged and has the
     # package installed
     [instance] = vm.instances(PROJECT)
     assert (
         result.returncode,
         instance["status"],
         "user.ask.converged.hash" in instance["config"],
-        vm.ask("exec", "pacman", "-Q", "pfetch", cwd=PROJECT_DIR).returncode,
+        vm.ask("exec", *PACKAGE_QUERY, cwd=PROJECT_DIR).returncode,
     ) == (0, "Running", True, 0)
 
 
