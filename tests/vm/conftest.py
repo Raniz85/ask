@@ -154,7 +154,12 @@ def vm(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Vm]:
         host = Host("localhost")
         result = host.run_as_root(["bash", "-euxc", HOST_PROVISION])
         assert result.returncode == 0, result.stdout + result.stderr
-        host.run(["uv", "tool", "install", str(wheel)]).check_returncode()
+        # pytest's tmp dir is only readable by the invoking user; stage the
+        # wheel where the test user can read it
+        host.run_as_root(
+            ["install", "-m", "0644", str(wheel), f"/tmp/{wheel.name}"]
+        ).check_returncode()
+        host.run(["uv", "tool", "install", f"/tmp/{wheel.name}"]).check_returncode()
         yield host
         return
     _incus(
