@@ -25,7 +25,7 @@ jobs:
 
       - name: Install Incus
         run: |
-          curl -fsSL https://pkgs.zabbly.com/incus/stable.asc \
+          curl -fsSL https://pkgs.zabbly.com/key.asc \
             | sudo gpg --dearmor -o /etc/apt/keyrings/zabbly-incus.gpg
           . /etc/os-release
           echo "deb [signed-by=/etc/apt/keyrings/zabbly-incus.gpg] https://pkgs.zabbly.com/incus/stable ${VERSION_CODENAME} main" \
