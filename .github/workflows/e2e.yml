@@ -38,7 +38,7 @@ jobs:
           sudo systemctl enable --now incus.service incus.socket
           sudo incus admin init --minimal
           # --minimal creates no network, leaving VMs without connectivity
-          sudo incus network create incusbr0
+          sudo incus network create incusbr0 2>/dev/null || true
           sudo incus profile device set default eth0 nictype=bridged parent=incusbr0 2>/dev/null \
             || sudo incus profile device add default eth0 nic nictype=bridged parent=incusbr0
           # The tests invoke incus as the runner user, not via sudo
