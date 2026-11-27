@@ -57,7 +57,9 @@ jobs:
 
       - name: Build .deb with nfpm
         run: |
-          NFPM_VERSION=$(curl -s https://api.github.com/repos/goreleaser/nfpm/releases/latest | grep -oP '"tag_name":\s*"v\K[0-9.]+')
+          # Resolve latest release via redirect; the API is unauthenticated and rate-limited on shared runners
+          NFPM_VERSION=$(curl -sIL -o /dev/null -w '%{url_effective}' https://github.com/goreleaser/nfpm/releases/latest | grep -oP '/tag/v\K[0-9.]+' || true)
+          test -n "$NFPM_VERSION" || { echo "could not resolve latest nfpm version" >&2; exit 1; }
           curl -sL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" | tar -xz -C /tmp
           install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           VERSION=${{ steps.version.outputs.version }}
@@ -78,13 +80,7 @@ jobs:
               dst: /usr/bin/ask
               type: symlink
           EOF
-          nfpm --version
-          cat nfpm.yaml
-          ls -la /opt/ask/bin/ask
-          set +e
           nfpm pkg --packager deb --target "ask_${VERSION}_amd64.deb" --config nfpm.yaml
-          echo "NFPM_EXIT=$?"
-          exit $?
 
       - name: Verify package
         run: |
