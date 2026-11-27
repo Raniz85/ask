@@ -30,7 +30,6 @@ jobs:
           - { image: ubuntu:24.04,    slug: ubuntu-24.04,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
           - { image: ubuntu:24.04,    slug: ubuntu-24.04-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
           - { image: ubuntu:24.10,    slug: ubuntu-24.10,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
-          - { image: ubuntu:24.10,    slug: ubuntu-24.10-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
           - { image: ubuntu:25.04,    slug: ubuntu-25.04,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
           - { image: ubuntu:25.04,    slug: ubuntu-25.04-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
           - { image: ubuntu:25.10,    slug: ubuntu-25.10,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
@@ -50,10 +49,6 @@ jobs:
           - { image: rockylinux:9,        slug: rockylinux-9-aarch64,  packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
           - { image: almalinux:9,         slug: almalinux-9,           packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
           - { image: almalinux:9,         slug: almalinux-9-aarch64,   packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
-          - { image: redhat/ubi9,         slug: ubi9,                  packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
-          - { image: redhat/ubi9,         slug: ubi9-aarch64,          packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
-          - { image: amazonlinux:2023,    slug: amazonlinux-2023,      packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
-          - { image: amazonlinux:2023,    slug: amazonlinux-2023-aarch64, packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
           - { image: opensuse/leap:16.0,   slug: opensuse-leap-16.0,        packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
           - { image: opensuse/leap:16.0,   slug: opensuse-leap-16.0-aarch64, packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
           - { image: opensuse/tumbleweed, slug: opensuse-tumbleweed,       packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
@@ -68,8 +63,11 @@ jobs:
       - name: Install uv and curl
         run: |
           case "${{ matrix.image }}" in
-            fedora:*|rockylinux:*|almalinux:*|redhat/*|amazonlinux:*)
+            fedora:*)
               dnf install -y curl ca-certificates
+              ;;
+            rockylinux:*|almalinux:*)
+              dnf install -y ca-certificates  # curl-minimal already provides curl
               ;;
             opensuse/*)
               zypper install -y curl ca-certificates
