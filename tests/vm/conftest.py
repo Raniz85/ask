@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 
 VM_NAME = "ask-e2e"
-IMAGE = "images:archlinux/current/cloud"
+# ASK_E2E_VM=0 runs the tests in a plain container instead of a VM, for
+# hosts without nested virtualization (e.g. CI runners)
+IN_VM = os.environ.get("ASK_E2E_VM", "1") == "1"
+IMAGE = "images:archlinux/current/cloud" if IN_VM else "images:archlinux/current"
 USER = "tester"
 HOME = Path("/home") / USER
 ASK = HOME / ".local" / "bin" / "ask"
@@ -118,17 +121,21 @@ def _build_wheel(out_dir: Path) -> Path:
 @pytest.fixture(scope="session")
 def vm(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Vm]:
     wheel = _build_wheel(tmp_path_factory.mktemp("dist"))
+    instance_args = (
+        ["--vm", "--config", "security.secureboot=false"]
+        if IN_VM
+        # nesting lets the container run its own Incus for the tests
+        else ["--config", "security.nesting=true"]
+    )
     _incus(
         "launch",
         IMAGE,
         VM_NAME,
-        "--vm",
+        *instance_args,
         "--config",
         "limits.cpu=4",
         "--config",
         "limits.memory=4GiB",
-        "--config",
-        "security.secureboot=false",
         "--device",
         "root,size=30GiB",
     )

@@ -11,17 +11,11 @@ permissions:
 
 jobs:
   e2e:
-    name: End-to-end tests in an Incus VM
+    name: End-to-end tests in an Incus container
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
-      - name: Enable nested virtualization
-        run: |
-          ls -l /dev/kvm
-          sudo chmod 666 /dev/kvm
-          test -w /dev/kvm
 
       - name: Install Incus
         run: |
@@ -37,7 +31,6 @@ jobs:
         run: |
           sudo systemctl enable --now incus.service incus.socket
           sudo incus admin init --minimal
-          # --minimal creates no network, leaving VMs without connectivity
           sudo incus network create incusbr0 2>/dev/null || true
           sudo incus profile device remove default eth0 2>/dev/null || true
           sudo incus profile device add default eth0 nic nictype=bridged parent=incusbr0
@@ -45,30 +38,17 @@ jobs:
           sudo usermod -aG incus-admin "$USER"
           sudo chmod 666 /var/lib/incus/unix.socket
           sudo rm -rf "/home/$USER/.config/incus"
+          # Incus's own NAT rules are missing on the runner, so add them by hand
+          subnet=$(ip -4 addr show incusbr0 | awk '/inet /{print $2}')
+          sudo iptables -t nat -A POSTROUTING -s "$subnet" ! -o incusbr0 -j MASQUERADE
+          sudo iptables -A FORWARD -i incusbr0 -j ACCEPT
+          sudo iptables -A FORWARD -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-      - name: Smoke-test launching a VM
-        run: |
-          incus network list
-          incus profile show default
-          pgrep -a dnsmasq || echo "no dnsmasq running"
-          sudo ss -lunp | grep -E ':67\b' || echo "nothing listening on dhcp"
-          ip addr show incusbr0
-          sudo iptables -t nat -S | head -20 || true
-          sudo nft list ruleset | head -60 || true
-          sysctl net.ipv4.ip_forward
-          incus launch images:archlinux/current/cloud ask-e2e-smoke --vm \
-            --config security.secureboot=false || true
-          for i in $(seq 1 60); do
-            incus exec ask-e2e-smoke -- true 2>/dev/null && break
-            sleep 5
-          done
-          incus exec ask-e2e-smoke -- ip addr || true
-          incus exec ask-e2e-smoke -- ping -c1 -W3 "$(ip -4 addr show incusbr0 | awk '/inet /{print $2}' | cut -d/ -f1)" || true
-          incus exec ask-e2e-smoke -- ping -c1 -W3 1.1.1.1 || true
-          incus delete --force ask-e2e-smoke || true
-
       - name: Run the E2E tests
+        env:
+          # No nested VM on the ephemeral runner; use a plain container
+          ASK_E2E_VM: "0"
         run: "$HOME/.local/bin/uv run pytest -m vm -v tests/vm"
