@@ -62,7 +62,7 @@ jobs:
         run: |
           uv python install 3.13
           cp -a "$(dirname "$(uv python find 3.13)")/.." /opt/ask
-          uv pip install --python /opt/ask/bin/python3.13 .
+          uv pip install --python /opt/ask/bin/python3.13 --break-system-packages .
 
       - name: Read package version
         id: version
