@@ -46,11 +46,10 @@ jobs:
 
       - name: Smoke-test launching a VM
         run: |
-          sudo incus info || true
-          sudo incus storage list || true
-          sudo incus launch images:archlinux/current/cloud ask-e2e-smoke --vm \
-            --config security.secureboot=false || true
-          sudo incus delete --force ask-e2e-smoke || true
+          incus launch images:archlinux/current/cloud ask-e2e-smoke --vm \
+            --config limits.cpu=4 --config limits.memory=4GiB \
+            --config security.secureboot=false --device root,size=30GiB || true
+          incus delete --force ask-e2e-smoke || true
 
       - name: Run the E2E tests
         run: "$HOME/.local/bin/uv run pytest -m vm -v tests/vm"
