@@ -19,7 +19,7 @@ from pyinfra.api.output import set_echo
 from pyinfra.context import ctx_config, ctx_host, ctx_state
 from pyinfra.operations import apt, files, pacman, server, systemd
 
-from ask import env, idle, incus
+from ask import env, idle, incus, interactive
 from ask.agent import AptRepository
 from ask.errors import AskError
 from ask.ide import Ide, JetbrainsIde, Vscode, Zed
@@ -805,23 +805,26 @@ class AurBuilder:
         if seen is not None and seen == self._builder_git_ref("HEAD"):
             return
 
-        if not sys.stdin.isatty():
-            raise ProvisioningError(
-                "The paru-bin PKGBUILD has not been reviewed. "
-                "Run `ask converge` from a terminal to review it."
-            )
+        if not interactive.assume_yes:
+            if not sys.stdin.isatty():
+                raise ProvisioningError(
+                    "The paru-bin PKGBUILD has not been reviewed. "
+                    "Run `ask converge` from a terminal to review it."
+                )
 
-        if seen is None:
-            review = ["cat", "PKGBUILD"]
-        else:
-            review = ["git", "--no-pager", "diff", _AUR_SEEN_REF, "HEAD"]
-        self._run_as_builder(uid, gid, _PARU_BIN_CLONE, review)
+            if seen is None:
+                review = ["cat", "PKGBUILD"]
+            else:
+                review = ["git", "--no-pager", "diff", _AUR_SEEN_REF, "HEAD"]
+            self._run_as_builder(uid, gid, _PARU_BIN_CLONE, review)
 
-        answer = input("Proceed with building paru-bin from the PKGBUILD above? [y/N] ")
-        if answer.strip().lower() not in ("y", "yes"):
-            raise ProvisioningError(
-                "The paru build was declined. Cannot install AUR packages."
+            answer = input(
+                "Proceed with building paru-bin from the PKGBUILD above? [y/N] "
             )
+            if answer.strip().lower() not in ("y", "yes"):
+                raise ProvisioningError(
+                    "The paru build was declined. Cannot install AUR packages."
+                )
         self._run_as_builder(
             uid, gid, _PARU_BIN_CLONE, ["git", "update-ref", _AUR_SEEN_REF, "HEAD"]
         )
@@ -852,12 +855,15 @@ class AurBuilder:
         self.ensure_paru()
 
         uid, gid = self._builder_ids()
+        command = ["paru", "-S", "--needed", *packages]
+        if interactive.assume_yes:
+            command += ["--noconfirm", "--batchinstall"]
         self._run_as_builder(
             uid,
             gid,
             _AUR_BUILD_HOME,
-            ["paru", "-S", "--needed", *packages],
-            interactive=True,
+            command,
+            interactive=not interactive.assume_yes,
         )
 
 
@@ -874,20 +880,21 @@ class MiseProvisioner:
         digest = config_digest(project_dir, config_files)
         if self.container.get_trusted_config_digest(_MISE) == digest:
             return
-        if not sys.stdin.isatty():
-            raise ProvisioningError(
-                "The mise config has not been reviewed. "
-                "Run `ask converge` from a terminal to review it."
-            )
+        if not interactive.assume_yes:
+            if not sys.stdin.isatty():
+                raise ProvisioningError(
+                    "The mise config has not been reviewed. "
+                    "Run `ask converge` from a terminal to review it."
+                )
 
-        for config_file in config_files:
-            print(f"==> {config_file} <==")
-            print((project_dir / config_file).read_text())
-        answer = input("Trust the mise config above and install its tools? [y/N] ")
-        if answer.strip().lower() not in ("y", "yes"):
-            raise ProvisioningError(
-                "The mise config was declined. Cannot install its tools."
-            )
+            for config_file in config_files:
+                print(f"==> {config_file} <==")
+                print((project_dir / config_file).read_text())
+            answer = input("Trust the mise config above and install its tools? [y/N] ")
+            if answer.strip().lower() not in ("y", "yes"):
+                raise ProvisioningError(
+                    "The mise config was declined. Cannot install its tools."
+                )
 
         for config_file in config_files:
             _run_checked(

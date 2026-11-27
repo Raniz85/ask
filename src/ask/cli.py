@@ -22,6 +22,7 @@ from ask import (
     config,
     convergence,
     incus,
+    interactive,
     manifest,
     problems,
     provision,
@@ -870,6 +871,8 @@ def rename(
 
 
 def _confirm(prompt: str) -> bool:
+    if interactive.assume_yes:
+        return True
     if not sys.stdin.isatty():
         return False
     try:
@@ -938,6 +941,8 @@ def _convergence_is_stale(snapshot: incus.InstanceSnapshot) -> bool:
 def _should_converge_stale(converge_changed: bool | None) -> bool:
     if converge_changed is not None:
         return converge_changed
+    if interactive.assume_yes:
+        return True
     if not sys.stdin.isatty():
         print(STALE_WARNING, file=sys.stderr)
         return False
@@ -947,6 +952,8 @@ def _should_converge_stale(converge_changed: bool | None) -> bool:
 def _should_converge(converge_changed: bool | None) -> bool:
     if converge_changed is not None:
         return converge_changed
+    if interactive.assume_yes:
+        return True
     if not sys.stdin.isatty():
         print(CHANGED_WARNING, file=sys.stderr)
         return False

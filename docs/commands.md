@@ -2,6 +2,8 @@
 
 Every ask command operates on the project in the current directory,
 or the one given with the global `--path`/`-p` option.
+Pass the global `--assume-yes` option to answer yes to every prompt,
+for running ask without a terminal.
 
 <!-- ask:gen:commands -->
 

@@ -153,7 +153,7 @@ IDEs are listed per flavour layer and started with the `ide` subcommand, which o
 ```toml
 [layers.python]
 ides = [
-    "pycharm",
+  "pycharm",
 ]
 ```
 

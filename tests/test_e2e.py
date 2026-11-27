@@ -190,6 +190,56 @@ def test_ask_creates_a_missing_container_without_asking_when_requested(
     )
 
 
+def test_ask_creates_a_missing_container_when_assuming_yes(tmp_path: Path) -> None:
+    # given a project directory with a valid ask.toml
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "ask.toml").write_text("")
+
+    # and a global configuration with a default flavour
+    config_home = _config_home_with_a_default_flavor(tmp_path)
+
+    # and an incus command that knows of no containers and refuses to launch one
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_incus = fake_bin / "incus"
+    fake_incus.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = list ]; then echo "[]"; fi\n'
+        'if [ "$1" = launch ]; then echo refused >&2; exit 1; fi\n'
+    )
+    fake_incus.chmod(0o755)
+
+    # when running ask --assume-yes exec from within the project directory,
+    # with no terminal to answer the create prompt on
+    result = subprocess.run(
+        [str(ASK), "--assume-yes", "exec", "true"],
+        check=False,
+        cwd=project_dir,
+        env={
+            "PATH": str(fake_bin),
+            "XDG_CONFIG_HOME": str(config_home),
+            "COLUMNS": str(TERMINAL_WIDTH),
+        },
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+
+    # then the user is not asked anything, and the container is launched
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1,
+        "",
+        "refused\n"
+        + _error_panel(
+            "`incus launch images:archlinux/current my-project "
+            "--config security.nesting=true --config security.privileged=false "
+            "--config user.ask.created=true` "
+            "failed with exit status 1."
+        ),
+    )
+
+
 def _project_with_an_unconverged_container(tmp_path: Path) -> tuple[Path, dict]:
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()

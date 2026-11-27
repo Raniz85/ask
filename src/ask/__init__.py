@@ -7,6 +7,7 @@ import cyclopts
 from cyclopts.panel import CycloptsPanel
 from rich.console import Console
 
+from ask import interactive
 from ask.cli import (
     agent,
     converge,
@@ -102,7 +103,14 @@ def _launcher(
             "of the current one.",
         ),
     ] = None,
+    assume_yes: Annotated[
+        bool,
+        cyclopts.Parameter(
+            help="Answer yes to every prompt, for running ask without a terminal."
+        ),
+    ] = False,
 ) -> None:
+    interactive.assume_yes = assume_yes
     if path is not None:
         try:
             os.chdir(path)
