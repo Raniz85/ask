@@ -74,6 +74,7 @@ def test_create_launches_and_converges_the_container(vm: Vm) -> None:
     # when running ask create with --assume-yes, so converging AUR packages
     # skips the paru-bin PKGBUILD review without a terminal
     result = vm.ask("--assume-yes", "create", cwd=PROJECT_DIR)
+    assert result.returncode == 0, result.stdout + result.stderr
 
     # then the container is running, recorded as converged and has the AUR
     # package installed
