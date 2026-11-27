@@ -20,6 +20,9 @@ ASK = HOME / ".local" / "bin" / "ask"
 BOOT_TIMEOUT_SECONDS = 300
 
 PROVISION = f"""\
+# Container images don't pick up the DHCP DNS server, so use the bridge
+# gateway (which runs dnsmasq) directly
+echo "nameserver $(ip route | awk '/default/ {{print $3; exit}}')" > /etc/resolv.conf
 # Slow mirrors must not abort the 380 MiB download; pacman's default
 # download timeout kills any mirror slower than ~1 byte/sec for 10s.
 pacman -Syu --noconfirm --needed --disable-download-timeout incus uv sudo
