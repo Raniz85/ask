@@ -68,10 +68,6 @@ jobs:
             slug: fedora-rawhide
             packager: rpm
             arch: x86_64
-          - image: opensuse/leap:15.6
-            slug: opensuse-leap-15.6
-            packager: rpm
-            arch: x86_64
           - image: opensuse/leap:16.0
             slug: opensuse-leap-16.0
             packager: rpm
