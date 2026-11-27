@@ -17,8 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify nested virtualization is available
-        run: test -w /dev/kvm
+      - name: Enable nested virtualization
+        run: |
+          ls -l /dev/kvm
+          sudo chmod 666 /dev/kvm
+          test -w /dev/kvm
 
       - name: Install Incus
         run: |
