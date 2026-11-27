@@ -82,6 +82,9 @@ def test_create_launches_and_converges_the_container(vm: Vm) -> None:
     flavour = vm.read_file(FLAVOR).replace(
         'distribution = "arch"', f'distribution = "{DISTRIBUTION}"'
     )
+    if DISTRIBUTION == "debian":
+        # trixie has no uv package
+        flavour = flavour.replace('  "uv",\n', "")
     vm.write_file(FLAVOR, flavour + AGENTS)
     vm.write_file(PROJECT_DIR / "ask.toml", MANIFEST)
 
