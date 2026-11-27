@@ -13,70 +13,54 @@ permissions:
 
 jobs:
   package:
-    name: Build .${{ matrix.packager }} for ${{ matrix.image }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: Build .${{ matrix.packager }} for ${{ matrix.image }} (${{ matrix.nfpm_arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          - image: debian:12
-            slug: debian-12
-            packager: deb
-            arch: amd64
-          - image: debian:13
-            slug: debian-13
-            packager: deb
-            arch: amd64
-          - image: debian:sid
-            slug: debian-sid
-            packager: deb
-            arch: amd64
-          - image: ubuntu:24.04
-            slug: ubuntu-24.04
-            packager: deb
-            arch: amd64
-          - image: ubuntu:24.10
-            slug: ubuntu-24.10
-            packager: deb
-            arch: amd64
-          - image: ubuntu:25.04
-            slug: ubuntu-25.04
-            packager: deb
-            arch: amd64
-          - image: ubuntu:25.10
-            slug: ubuntu-25.10
-            packager: deb
-            arch: amd64
-          - image: ubuntu:26.04
-            slug: ubuntu-26.04
-            packager: deb
-            arch: amd64
-          - image: ubuntu:26.10
-            slug: ubuntu-26.10
-            packager: deb
-            arch: amd64
-          - image: fedora:45
-            slug: fedora-45
-            packager: rpm
-            arch: x86_64
-          - image: fedora:46
-            slug: fedora-46
-            packager: rpm
-            arch: x86_64
-          - image: fedora:rawhide
-            slug: fedora-rawhide
-            packager: rpm
-            arch: x86_64
-          - image: opensuse/leap:16.0
-            slug: opensuse-leap-16.0
-            packager: rpm
-            arch: x86_64
-          - image: opensuse/tumbleweed
-            slug: opensuse-tumbleweed
-            packager: rpm
-            arch: x86_64
-    # Build inside the target distribution so bundled wheels match its glibc
+          # deb-based, amd64 + arm64
+          - { image: debian:12,       slug: debian-12,        packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: debian:12,       slug: debian-12-arm64,  packager: deb, nfpm_arch: arm64,   ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: debian:13,       slug: debian-13,        packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: debian:13,       slug: debian-13-arm64,  packager: deb, nfpm_arch: arm64,   ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: debian:sid,      slug: debian-sid,       packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: debian:sid,      slug: debian-sid-arm64, packager: deb, nfpm_arch: arm64,   ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: ubuntu:24.04,    slug: ubuntu-24.04,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: ubuntu:24.04,    slug: ubuntu-24.04-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: ubuntu:24.10,    slug: ubuntu-24.10,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: ubuntu:24.10,    slug: ubuntu-24.10-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: ubuntu:25.04,    slug: ubuntu-25.04,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: ubuntu:25.04,    slug: ubuntu-25.04-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: ubuntu:25.10,    slug: ubuntu-25.10,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: ubuntu:25.10,    slug: ubuntu-25.10-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: ubuntu:26.04,    slug: ubuntu-26.04,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: ubuntu:26.04,    slug: ubuntu-26.04-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: ubuntu:26.10,    slug: ubuntu-26.10,     packager: deb, nfpm_arch: amd64,   ext: deb,         runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: ubuntu:26.10,    slug: ubuntu-26.10-arm64, packager: deb, nfpm_arch: arm64, ext: deb,         runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          # rpm-based, x86_64 + aarch64
+          - { image: fedora:45,            slug: fedora-45,             packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: fedora:45,            slug: fedora-45-aarch64,     packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: fedora:46,            slug: fedora-46,             packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: fedora:46,            slug: fedora-46-aarch64,     packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: fedora:rawhide,       slug: fedora-rawhide,        packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: fedora:rawhide,       slug: fedora-rawhide-aarch64, packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: rockylinux:9,        slug: rockylinux-9,          packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: rockylinux:9,        slug: rockylinux-9-aarch64,  packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: almalinux:9,         slug: almalinux-9,           packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: almalinux:9,         slug: almalinux-9-aarch64,   packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: redhat/ubi9,         slug: ubi9,                  packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: redhat/ubi9,         slug: ubi9-aarch64,          packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: amazonlinux:2023,    slug: amazonlinux-2023,      packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: amazonlinux:2023,    slug: amazonlinux-2023-aarch64, packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: opensuse/leap:16.0,   slug: opensuse-leap-16.0,        packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: opensuse/leap:16.0,   slug: opensuse-leap-16.0-aarch64, packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          - { image: opensuse/tumbleweed, slug: opensuse-tumbleweed,       packager: rpm, nfpm_arch: x86_64,  ext: rpm, runner: ubuntu-latest,    host_arch: x86_64 }
+          - { image: opensuse/tumbleweed, slug: opensuse-tumbleweed-aarch64, packager: rpm, nfpm_arch: aarch64, ext: rpm, runner: ubuntu-24.04-arm, host_arch: aarch64 }
+          # arch, x86_64 only (Arch Linux ARM is a separate project)
+          - { image: archlinux:latest, slug: archlinux, packager: archlinux, nfpm_arch: x86_64, ext: pkg.tar.zst, runner: ubuntu-latest, host_arch: x86_64 }
+    # Build inside the target distribution so bundled wheels match its libc
     container: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
@@ -84,11 +68,14 @@ jobs:
       - name: Install uv and curl
         run: |
           case "${{ matrix.image }}" in
-            fedora:*)
+            fedora:*|rockylinux:*|almalinux:*|redhat/*|amazonlinux:*)
               dnf install -y curl ca-certificates
               ;;
             opensuse/*)
               zypper install -y curl ca-certificates
+              ;;
+            archlinux:*)
+              pacman -Sy --noconfirm curl ca-certificates
               ;;
             ubuntu:24.10)
               # 24.10 is EOL and only served from old-releases; fix sources before apt-get update
@@ -101,7 +88,7 @@ jobs:
               apt-get install -y curl ca-certificates
               ;;
           esac
-          curl -LsSf https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
+          curl -LsSf "https://github.com/astral-sh/uv/releases/latest/download/uv-${{ matrix.host_arch }}-unknown-linux-gnu.tar.gz" \
             | tar -xz -C /tmp
           install -m 0755 /tmp/uv-*/uv /usr/local/bin/uv
 
@@ -124,13 +111,14 @@ jobs:
           # Resolve latest release via redirect; the API is unauthenticated and rate-limited on shared runners
           NFPM_VERSION=$(curl -sIL -o /dev/null -w '%{url_effective}' https://github.com/goreleaser/nfpm/releases/latest | grep -oP '/tag/v\K[0-9.]+' || true)
           test -n "$NFPM_VERSION" || { echo "could not resolve latest nfpm version" >&2; exit 1; }
-          curl -sL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" | tar -xz -C /tmp
+          NFPM_ASSET_ARCH=$([ "${{ matrix.host_arch }}" = aarch64 ] && echo arm64 || echo x86_64)
+          curl -sL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${NFPM_ASSET_ARCH}.tar.gz" | tar -xz -C /tmp
           install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           VERSION=${{ steps.version.outputs.version }}
           cat > nfpm.yaml <<EOF
           name: ask
           version: "$VERSION"
-          arch: ${{ matrix.arch }}
+          arch: ${{ matrix.nfpm_arch }}
           maintainer: Daniel Raniz Raneland <raniz@raneland.se>
           description: Persistent containers for projects
           license: MIT
@@ -142,17 +130,18 @@ jobs:
               dst: /usr/bin/ask
               type: symlink
           EOF
-          nfpm pkg --packager ${{ matrix.packager }} --target "ask_${VERSION}_${{ matrix.arch }}.${{ matrix.packager }}" --config nfpm.yaml
+          nfpm pkg --packager ${{ matrix.packager }} --target "ask_${VERSION}_${{ matrix.nfpm_arch }}.${{ matrix.ext }}" --config nfpm.yaml
 
       - name: Verify package
         run: |
           case "${{ matrix.packager }}" in
             deb) dpkg-deb --info ask_*.deb ;;
             rpm) rpm -qip ask_*.rpm ;;
+            archlinux) pacman -Qip ask_*.pkg.tar.zst ;;
           esac
 
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           name: ask-${{ steps.version.outputs.version }}-${{ matrix.slug }}
-          path: ask_*.${{ matrix.packager }}
+          path: ask_*.${{ matrix.ext }}
