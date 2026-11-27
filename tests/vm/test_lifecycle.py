@@ -121,7 +121,8 @@ def test_agent_runs_the_configured_agent(vm: Vm) -> None:
     result = vm.ask("agent", "opencode", "--", "--version", cwd=PROJECT_DIR)
 
     # then the agent prints it
-    assert (result.returncode, bool(VERSION.search(result.stdout))) == (0, True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert VERSION.search(result.stdout)
 
 
 def test_stop_stops_the_container(vm: Vm) -> None:
