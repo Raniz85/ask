@@ -13,59 +13,65 @@ permissions:
 
 jobs:
   package:
-    name: Build .${{ matrix.distro.packager }} for ${{ matrix.distro.image }} (${{ matrix.arch.name }})
+    name: Build ${{ matrix.distro }} (${{ matrix.arch.name }})
     runs-on: ${{ matrix.arch.runner }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         distro:
-          - { image: debian:12, packager: deb }
-          - { image: debian:13, packager: deb }
-          - { image: debian:sid, packager: deb }
-          - { image: ubuntu:24.04, packager: deb }
-          - { image: ubuntu:24.10, packager: deb }
-          - { image: ubuntu:25.04, packager: deb }
-          - { image: ubuntu:25.10, packager: deb }
-          - { image: ubuntu:26.04, packager: deb }
-          - { image: ubuntu:26.10, packager: deb }
-          - { image: fedora:45, packager: rpm }
-          - { image: fedora:46, packager: rpm }
-          - { image: fedora:rawhide, packager: rpm }
-          - { image: rockylinux:9, packager: rpm }
-          - { image: almalinux:9, packager: rpm }
-          - { image: opensuse/leap:16.0, packager: rpm }
-          - { image: opensuse/tumbleweed, packager: rpm }
-          - { image: archlinux:latest, packager: archlinux }
+          - debian:12
+          - debian:13
+          - debian:sid
+          - ubuntu:24.04
+          - ubuntu:24.10
+          - ubuntu:25.04
+          - ubuntu:25.10
+          - ubuntu:26.04
+          - ubuntu:26.10
+          - fedora:45
+          - fedora:46
+          - fedora:rawhide
+          - rockylinux:9
+          - almalinux:9
+          - opensuse/leap:16.0
+          - opensuse/tumbleweed
+          - archlinux:latest
         arch:
           - { name: x86_64, slug_suffix: "", runner: ubuntu-latest, host_arch: x86_64 }
           - { name: aarch64, slug_suffix: -aarch64, runner: ubuntu-24.04-arm, host_arch: aarch64 }
         exclude:
           # EOL 24.10 ports archive is not mirrored to old-releases
-          - distro: { image: ubuntu:24.10 }
+          - distro: ubuntu:24.10
             arch: { name: aarch64 }
           # Arch Linux ARM is a separate project
-          - distro: { image: archlinux:latest }
+          - distro: archlinux:latest
             arch: { name: aarch64 }
     # Build inside the target distribution so bundled wheels match its libc
-    container: ${{ matrix.distro.image }}
+    container: ${{ matrix.distro }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Derive slug and package extension
         id: pkg
         run: |
-          SLUG=$(echo "${{ matrix.distro.image }}" | tr '/:' '--' | sed 's/-latest$//')
-          case "${{ matrix.distro.packager }}" in
+          SLUG=$(echo "${{ matrix.distro }}" | tr '/:' '--' | sed 's/-latest$//')
+          case "${{ matrix.distro }}" in
+            debian:*|ubuntu:*) PACKAGER=deb ;;
+            archlinux:*) PACKAGER=archlinux ;;
+            *) PACKAGER=rpm ;;
+          esac
+          case "$PACKAGER" in
             archlinux) EXT=pkg.tar.zst ;;
-            *) EXT=${{ matrix.distro.packager }} ;;
+            *) EXT=$PACKAGER ;;
           esac
           echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "packager=$PACKAGER" >> "$GITHUB_OUTPUT"
           echo "ext=$EXT" >> "$GITHUB_OUTPUT"
 
       - name: Install uv and curl
         run: |
-          case "${{ matrix.distro.image }}" in
+          case "${{ matrix.distro }}" in
             fedora:*)
               dnf install -y curl ca-certificates
               ;;
@@ -116,7 +122,7 @@ jobs:
           curl -sL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${NFPM_ASSET_ARCH}.tar.gz" | tar -xz -C /tmp
           install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
           # deb names arm64 "arm64", rpm/archlinux call it "aarch64"
-          case "${{ matrix.distro.packager }}:${{ matrix.arch.name }}" in
+          case "${{ steps.pkg.outputs.packager }}:${{ matrix.arch.name }}" in
             deb:x86_64) NFPM_ARCH=amd64 ;;
             deb:aarch64) NFPM_ARCH=arm64 ;;
             *) NFPM_ARCH=${{ matrix.arch.name }} ;;
@@ -137,11 +143,11 @@ jobs:
               dst: /usr/bin/ask
               type: symlink
           EOF
-          nfpm pkg --packager ${{ matrix.distro.packager }} --target "ask_${VERSION}_${NFPM_ARCH}.${{ steps.pkg.outputs.ext }}" --config nfpm.yaml
+          nfpm pkg --packager ${{ steps.pkg.outputs.packager }} --target "ask_${VERSION}_${NFPM_ARCH}.${{ steps.pkg.outputs.ext }}" --config nfpm.yaml
 
       - name: Verify package
         run: |
-          case "${{ matrix.distro.packager }}" in
+          case "${{ steps.pkg.outputs.packager }}" in
             deb) dpkg-deb --info ask_*.${{ steps.pkg.outputs.ext }} ;;
             rpm) rpm -qip ask_*.${{ steps.pkg.outputs.ext }} ;;
             archlinux) pacman -Qip ask_*.${{ steps.pkg.outputs.ext }} ;;
