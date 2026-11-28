@@ -20,23 +20,23 @@ jobs:
       fail-fast: false
       matrix:
         distro:
-          - { image: debian:12, slug: debian-12, packager: deb, ext: deb }
-          - { image: debian:13, slug: debian-13, packager: deb, ext: deb }
-          - { image: debian:sid, slug: debian-sid, packager: deb, ext: deb }
-          - { image: ubuntu:24.04, slug: ubuntu-24.04, packager: deb, ext: deb }
-          - { image: ubuntu:24.10, slug: ubuntu-24.10, packager: deb, ext: deb }
-          - { image: ubuntu:25.04, slug: ubuntu-25.04, packager: deb, ext: deb }
-          - { image: ubuntu:25.10, slug: ubuntu-25.10, packager: deb, ext: deb }
-          - { image: ubuntu:26.04, slug: ubuntu-26.04, packager: deb, ext: deb }
-          - { image: ubuntu:26.10, slug: ubuntu-26.10, packager: deb, ext: deb }
-          - { image: fedora:45, slug: fedora-45, packager: rpm, ext: rpm }
-          - { image: fedora:46, slug: fedora-46, packager: rpm, ext: rpm }
-          - { image: fedora:rawhide, slug: fedora-rawhide, packager: rpm, ext: rpm }
-          - { image: rockylinux:9, slug: rockylinux-9, packager: rpm, ext: rpm }
-          - { image: almalinux:9, slug: almalinux-9, packager: rpm, ext: rpm }
-          - { image: opensuse/leap:16.0, slug: opensuse-leap-16.0, packager: rpm, ext: rpm }
-          - { image: opensuse/tumbleweed, slug: opensuse-tumbleweed, packager: rpm, ext: rpm }
-          - { image: archlinux:latest, slug: archlinux, packager: archlinux, ext: pkg.tar.zst }
+          - { image: debian:12, packager: deb }
+          - { image: debian:13, packager: deb }
+          - { image: debian:sid, packager: deb }
+          - { image: ubuntu:24.04, packager: deb }
+          - { image: ubuntu:24.10, packager: deb }
+          - { image: ubuntu:25.04, packager: deb }
+          - { image: ubuntu:25.10, packager: deb }
+          - { image: ubuntu:26.04, packager: deb }
+          - { image: ubuntu:26.10, packager: deb }
+          - { image: fedora:45, packager: rpm }
+          - { image: fedora:46, packager: rpm }
+          - { image: fedora:rawhide, packager: rpm }
+          - { image: rockylinux:9, packager: rpm }
+          - { image: almalinux:9, packager: rpm }
+          - { image: opensuse/leap:16.0, packager: rpm }
+          - { image: opensuse/tumbleweed, packager: rpm }
+          - { image: archlinux:latest, packager: archlinux }
         arch:
           - { name: x86_64, slug_suffix: "", runner: ubuntu-latest, host_arch: x86_64 }
           - { name: aarch64, slug_suffix: -aarch64, runner: ubuntu-24.04-arm, host_arch: aarch64 }
@@ -51,6 +51,17 @@ jobs:
     container: ${{ matrix.distro.image }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Derive slug and package extension
+        id: pkg
+        run: |
+          SLUG=$(echo "${{ matrix.distro.image }}" | tr '/:' '--' | sed 's/-latest$//')
+          case "${{ matrix.distro.packager }}" in
+            archlinux) EXT=pkg.tar.zst ;;
+            *) EXT=${{ matrix.distro.packager }} ;;
+          esac
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "ext=$EXT" >> "$GITHUB_OUTPUT"
 
       - name: Install uv and curl
         run: |
@@ -126,18 +137,18 @@ jobs:
               dst: /usr/bin/ask
               type: symlink
           EOF
-          nfpm pkg --packager ${{ matrix.distro.packager }} --target "ask_${VERSION}_${NFPM_ARCH}.${{ matrix.distro.ext }}" --config nfpm.yaml
+          nfpm pkg --packager ${{ matrix.distro.packager }} --target "ask_${VERSION}_${NFPM_ARCH}.${{ steps.pkg.outputs.ext }}" --config nfpm.yaml
 
       - name: Verify package
         run: |
           case "${{ matrix.distro.packager }}" in
-            deb) dpkg-deb --info ask_*.deb ;;
-            rpm) rpm -qip ask_*.rpm ;;
-            archlinux) pacman -Qip ask_*.pkg.tar.zst ;;
+            deb) dpkg-deb --info ask_*.${{ steps.pkg.outputs.ext }} ;;
+            rpm) rpm -qip ask_*.${{ steps.pkg.outputs.ext }} ;;
+            archlinux) pacman -Qip ask_*.${{ steps.pkg.outputs.ext }} ;;
           esac
 
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          name: ask-${{ steps.version.outputs.version }}-${{ matrix.distro.slug }}${{ matrix.arch.slug_suffix }}
-          path: ask_*.${{ matrix.distro.ext }}
+          name: ask-${{ steps.version.outputs.version }}-${{ steps.pkg.outputs.slug }}${{ matrix.arch.slug_suffix }}
+          path: ask_*.${{ steps.pkg.outputs.ext }}
